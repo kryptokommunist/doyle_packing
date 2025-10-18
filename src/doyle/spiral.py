@@ -1,9 +1,12 @@
 import numpy as np
 from scipy.optimize import root
-from typing import List, Tuple, Optional, Dict
+from typing import List, Tuple, Optional, Dict, TYPE_CHECKING
 import math
 import itertools
 from .geometry import CircleElement, ArcElement, ArcGroup
+
+if TYPE_CHECKING:
+    from .drawing import DrawingContext
 
 class DoyleSpiral:
     """Manages the generation, intersection, and rendering of a Doyle spiral."""
@@ -217,7 +220,7 @@ class DoyleSpiral:
     
     # ---- Rendering ----
 
-    def _render_arram_boyle(self, context: DrawingContext, debug_groups: bool = False, 
+    def _render_arram_boyle(self, context: "DrawingContext", debug_groups: bool = False, 
                            add_fill_pattern: bool = False, fill_pattern_spacing: float = 5.0, 
                            fill_pattern_angle: float = 0.0, red_outline: bool = False, 
                            draw_group_outline: bool = True, fill_pattern_offset: float = 0):
@@ -327,7 +330,7 @@ class DoyleSpiral:
         # ring_index has been assigned at creation time for inner groups and -1 for outer groups
 
 
-    def _render_doyle(self, context: DrawingContext):
+    def _render_doyle(self, context: "DrawingContext"):
         """Handles the standard Doyle rendering mode (full circles)."""
         # Set normalization scale based on visible circles
         context.set_normalization_scale(self.circles)
@@ -362,6 +365,7 @@ class DoyleSpiral:
             self.generate_circles()
 
         # Create a drawing context
+        from .drawing import DrawingContext
         context = DrawingContext(size)
 
         # Render based on the selected mode
