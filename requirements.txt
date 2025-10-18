@@ -6,3 +6,4 @@ shapely>=2.0.0
 jupyterlab>=4.0.0
 matplotlib>=3.5.0
 pythreejs>=2.4.0
+pytest
