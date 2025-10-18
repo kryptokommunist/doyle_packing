@@ -36,15 +36,19 @@ def create_3d_spiral_threejs(DoyleSpiral, ArcElement, ArcSelector):
         spiral.generate_outer_circles()
         spiral.compute_all_intersections()
         
+        print(f"DEBUG: Generated {len(spiral.circles)} circles")
+        
         # Compute ring indices
         radius_to_ring = spiral._compute_ring_indices()
         spiral.arc_groups.clear()
         
         # Create arc groups
         spiral_center = 0 + 0j
+        circles_with_6_intersections = 0
         for c in spiral.circles:
             if len(c.intersections) != 6:
                 continue
+            circles_with_6_intersections += 1
             
             arcs_to_draw = ArcSelector.select_arcs_for_gaps(
                 c, spiral_center, num_gaps=num_gaps.value, mode=arc_mode.value
@@ -61,15 +65,22 @@ def create_3d_spiral_threejs(DoyleSpiral, ArcElement, ArcSelector):
                 arc = ArcElement(c, start, end, visible=True)
                 group.add_arc(arc)
         
+        print(f"DEBUG: {circles_with_6_intersections} circles with 6 intersections")
+        print(f"DEBUG: Created {len(spiral.arc_groups)} arc groups")
+        
         # Convert arc groups to JSON-serializable format
         meshes_data = []
+        skipped_outer = 0
+        skipped_no_points = 0
         for key, group in spiral.arc_groups.items():
             if 'outer' in key:
+                skipped_outer += 1
                 continue
             
             # Get closed outline points
             points = group.get_closed_outline()
             if not points or len(points) < 3:
+                skipped_no_points += 1
                 continue
             
             ring_idx = group.ring_index if group.ring_index is not None else 0
@@ -83,6 +94,10 @@ def create_3d_spiral_threejs(DoyleSpiral, ArcElement, ArcSelector):
                 'points': points_2d,
                 'ringAngle': ring_angle
             })
+        
+        print(f"DEBUG: Skipped {skipped_outer} outer groups")
+        print(f"DEBUG: Skipped {skipped_no_points} groups with no points")
+        print(f"DEBUG: Final meshes_data count: {len(meshes_data)}")
         
         return meshes_data
     
