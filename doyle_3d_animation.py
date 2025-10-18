@@ -165,7 +165,7 @@ def create_3d_spiral_animation(DoyleSpiral, ArcElement, ArcSelector):
                 state['meshes'][key] = mesh
         
         # Create container for all meshes
-        disk_group = Group(children=meshes)
+        disk_group = Group(children=meshes, rotation=[0, 0, 0, 'XYZ'])
         
         # Set up lighting
         key_light = DirectionalLight(position=[5, 5, 5], intensity=1.0, color='white')
