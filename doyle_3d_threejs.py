@@ -165,27 +165,54 @@ def create_3d_spiral_threejs():
             // Mesh data from Python
             const meshesData = {meshes_json};
             const meshes = [];
+            const outlines = [];
             
             console.log('Creating', meshesData.length, 'meshes');
+            
+            // Compute bounds for camera positioning
+            let minX = Infinity, maxX = -Infinity;
+            let minY = Infinity, maxY = -Infinity;
+            meshesData.forEach(meshData => {{
+                meshData.points.forEach(p => {{
+                    minX = Math.min(minX, p[0]);
+                    maxX = Math.max(maxX, p[0]);
+                    minY = Math.min(minY, p[1]);
+                    maxY = Math.max(maxY, p[1]);
+                }});
+            }});
+            
+            const centerX = (minX + maxX) / 2;
+            const centerY = (minY + maxY) / 2;
+            const rangeX = maxX - minX;
+            const rangeY = maxY - minY;
+            const maxRange = Math.max(rangeX, rangeY);
+            
+            console.log('Bounds:', {{ minX, maxX, minY, maxY, centerX, centerY, maxRange }});
             
             // Create meshes
             meshesData.forEach(meshData => {{
                 const points = meshData.points;
                 if (points.length < 3) return;
                 
+                // Normalize points to center and scale
+                const normalizedPoints = points.map(p => [
+                    (p[0] - centerX),
+                    (p[1] - centerY)
+                ]);
+                
                 // Create triangles from center
                 const vertices = [];
-                const center = points.reduce((acc, p) => {{
+                const center = normalizedPoints.reduce((acc, p) => {{
                     acc[0] += p[0];
                     acc[1] += p[1];
                     return acc;
-                }}, [0, 0]).map(v => v / points.length);
+                }}, [0, 0]).map(v => v / normalizedPoints.length);
                 
-                for (let i = 0; i < points.length - 1; i++) {{
+                for (let i = 0; i < normalizedPoints.length - 1; i++) {{
                     // Triangle: center, point[i], point[i+1]
                     vertices.push(center[0], center[1], 0);
-                    vertices.push(points[i][0], points[i][1], 0);
-                    vertices.push(points[i+1][0], points[i+1][1], 0);
+                    vertices.push(normalizedPoints[i][0], normalizedPoints[i][1], 0);
+                    vertices.push(normalizedPoints[i+1][0], normalizedPoints[i+1][1], 0);
                 }}
                 
                 const geometry = new THREE.BufferGeometry();
@@ -211,9 +238,35 @@ def create_3d_spiral_threejs():
                 
                 diskGroup.add(mesh);
                 meshes.push(mesh);
+                
+                // Create outline
+                const outlineGeometry = new THREE.BufferGeometry();
+                const outlineVertices = [];
+                for (let i = 0; i < normalizedPoints.length; i++) {{
+                    const p1 = normalizedPoints[i];
+                    const p2 = normalizedPoints[(i + 1) % normalizedPoints.length];
+                    outlineVertices.push(p1[0], p1[1], 0.01); // Slightly above mesh
+                    outlineVertices.push(p2[0], p2[1], 0.01);
+                }}
+                outlineGeometry.setAttribute('position',
+                    new THREE.Float32BufferAttribute(outlineVertices, 3));
+                
+                const outlineMaterial = new THREE.LineBasicMaterial({{
+                    color: 0x000000,
+                    linewidth: 1
+                }});
+                
+                const outline = new THREE.LineSegments(outlineGeometry, outlineMaterial);
+                diskGroup.add(outline);
+                outlines.push(outline);
             }});
             
             console.log('Created', meshes.length, 'meshes successfully');
+            
+            // Position camera to fit spiral
+            const cameraDistance = maxRange * 1.2;
+            camera.position.set(0, cameraDistance * 0.5, cameraDistance);
+            camera.lookAt(0, 0, 0);
             
             // Animation
             let angle = 0;
