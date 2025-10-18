@@ -41,6 +41,13 @@ The project is configured to run in Replit with JupyterLab. All dependencies are
   - Per-ring rotation: angle increments across spiral rings for dynamic visual effects
   - Flexible outline control: toggle polygon outlines independently from line patterns
   - Red outline highlighting for specific arcs
+  - **NEW: 3D pythreejs spinning disk animation**:
+    - Interactive 3D visualization of Doyle spirals as rotating disks
+    - Camera panning with OrbitControls for full exploration
+    - Golden glow effects that trigger when rotation angles match line pattern angles
+    - Real-time animation with adjustable rotation speed
+    - Emissive material effects with 300ms glow duration
+    - Automatic angle detection and visual feedback system
 
 ## Code Architecture
 The Doyle circles notebook follows a modular, object-oriented design:
@@ -67,6 +74,13 @@ The Doyle circles notebook follows a modular, object-oriented design:
 5. Render to SVG with scaling
 
 ## Recent Changes
+- **2025-10-18**: Added 3D pythreejs spinning disk animation
+  - New interactive cell with 3D visualization of Doyle spirals
+  - Disk rotates continuously with adjustable speed control
+  - Golden glow effects trigger when rotation angle matches line pattern angles
+  - Camera panning and zoom with OrbitControls
+  - Real-time angle detection system with 300ms glow duration
+  - Emissive material system for realistic lighting effects
 - **2025-10-18**: Major code refactoring for maintainability
   - Extracted geometry utilities into separate helper functions
   - Simplified DrawingContext class by extracting pattern fill logic
