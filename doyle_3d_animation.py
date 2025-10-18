@@ -7,7 +7,7 @@ import numpy as np
 import ipywidgets as widgets
 from IPython.display import display
 import time
-import threading
+import asyncio
 
 
 def create_3d_spiral_animation(DoyleSpiral, ArcElement, ArcSelector):
@@ -36,9 +36,8 @@ def create_3d_spiral_animation(DoyleSpiral, ArcElement, ArcSelector):
         'scene': None,
         'renderer': None,
         'meshes': {},  # Map group keys to mesh objects
-        'glow_timers': {},  # Track glow effects
-        'animation_thread': None,
-        'stop_animation': False
+        'disk_group': None,
+        'anim_state': None
     }
     
     def create_arc_group_mesh(group, group_key, ring_angle):
@@ -89,13 +88,17 @@ def create_3d_spiral_animation(DoyleSpiral, ArcElement, ArcSelector):
         mesh.material.emissive = '#ffd700'  # Gold color
         mesh.material.emissiveIntensity = 2.0
         
-        # Schedule return to normal after 300ms
+        # Schedule return to normal after 300ms using asyncio
         def reset_glow():
-            time.sleep(0.3)
             mesh.material.emissive = '#000000'
             mesh.material.emissiveIntensity = 0.0
         
-        threading.Thread(target=reset_glow, daemon=True).start()
+        import asyncio
+        try:
+            loop = asyncio.get_event_loop()
+            loop.call_later(0.3, reset_glow)
+        except:
+            pass  # Fallback if no event loop
     
     def check_angle_match(rotation_angle, pattern_angle, tolerance=5.0):
         """Check if rotation angle matches pattern angle (in degrees)."""
@@ -201,53 +204,60 @@ def create_3d_spiral_animation(DoyleSpiral, ArcElement, ArcSelector):
         return renderer
     
     def start_rotation_animation():
-        """Animate disk rotation and check for angle matches."""
+        """Animate disk rotation using a timer callback (no threading)."""
         import math
-        
-        # Stop previous animation if running
-        state['stop_animation'] = True
-        if state['animation_thread'] and state['animation_thread'].is_alive():
-            time.sleep(0.1)
+        from IPython.display import display as ipy_display
         
         # Get disk group
         if 'disk_group' not in state or state['disk_group'] is None:
             return
         
         disk_group = state['disk_group']
-        state['stop_animation'] = False
         
-        # Animation loop
-        def animate():
-            angle = 0
-            last_matched = {}  # Track last match time per mesh
+        # Animation state
+        anim_state = {
+            'angle': 0,
+            'last_matched': {},
+            'running': True
+        }
+        state['anim_state'] = anim_state
+        
+        # Animation callback that runs in main thread
+        def animate_step():
+            if not anim_state['running']:
+                return
             
-            while not state['stop_animation']:
-                time.sleep(0.05)  # ~20 FPS
+            # Update rotation
+            anim_state['angle'] += rotation_speed.value * 2  # Degrees per frame
+            angle_rad = math.radians(anim_state['angle'])
+            
+            # Rotate around Z-axis using Euler angles [x, y, z, order]
+            disk_group.rotation = [0, 0, angle_rad, 'XYZ']
+            
+            # Check each mesh for angle matching
+            current_time = time.time()
+            for key, mesh in state['meshes'].items():
+                pattern_angle = mesh.userData.get('ring_angle', 0)
                 
-                # Update rotation
-                angle += rotation_speed.value * 2  # Degrees per frame
-                angle_rad = math.radians(angle)
-                
-                # Rotate around Z-axis using Euler angles [x, y, z, order]
-                disk_group.rotation = [0, 0, angle_rad, 'XYZ']
-                
-                # Check each mesh for angle matching
-                current_time = time.time()
-                for key, mesh in state['meshes'].items():
-                    pattern_angle = mesh.userData.get('ring_angle', 0)
-                    
-                    # Check if angles match
-                    if check_angle_match(angle, pattern_angle, tolerance=3.0):
-                        # Check if we haven't glowed recently (debounce)
-                        last_time = last_matched.get(key, 0)
-                        if current_time - last_time > 1.0:  # Min 1 second between glows
-                            trigger_golden_glow(mesh)
-                            last_matched[key] = current_time
+                # Check if angles match
+                if check_angle_match(anim_state['angle'], pattern_angle, tolerance=3.0):
+                    # Check if we haven't glowed recently (debounce)
+                    last_time = anim_state['last_matched'].get(key, 0)
+                    if current_time - last_time > 1.0:  # Min 1 second between glows
+                        trigger_golden_glow(mesh)
+                        anim_state['last_matched'][key] = current_time
+            
+            # Schedule next frame (50ms = ~20 FPS)
+            if anim_state['running']:
+                import asyncio
+                try:
+                    loop = asyncio.get_event_loop()
+                    loop.call_later(0.05, animate_step)
+                except:
+                    pass  # Fallback if no event loop
         
-        # Start animation in background thread
-        thread = threading.Thread(target=animate, daemon=True)
-        thread.start()
-        state['animation_thread'] = thread
+        # Start animation
+        animate_step()
     
     def render(_=None):
         """Render the 3D scene."""

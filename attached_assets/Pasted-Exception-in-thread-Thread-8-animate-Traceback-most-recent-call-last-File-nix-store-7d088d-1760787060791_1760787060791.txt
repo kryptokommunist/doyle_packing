@@ -1,0 +1,32 @@
+Exception in thread Thread-8 (animate):
+Traceback (most recent call last):
+  File "/nix/store/7d088dip86hlzri9sk0h78b63yfmx0a0-python3-3.11.13/lib/python3.11/threading.py", line 1045, in _bootstrap_inner
+    self.run()
+  File "/home/runner/workspace/.pythonlibs/lib/python3.11/site-packages/ipykernel/ipkernel.py", line 788, in run_closure
+    _threading_Thread_run(self)
+  File "/nix/store/7d088dip86hlzri9sk0h78b63yfmx0a0-python3-3.11.13/lib/python3.11/threading.py", line 982, in run
+    self._target(*self._args, **self._kwargs)
+  File "/home/runner/workspace/doyle_3d_animation.py", line 232, in animate
+    disk_group.rotation = [0, 0, angle_rad, 'XYZ']
+    ^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/workspace/.pythonlibs/lib/python3.11/site-packages/traitlets/traitlets.py", line 716, in __set__
+    self.set(obj, value)
+  File "/home/runner/workspace/.pythonlibs/lib/python3.11/site-packages/traitlets/traitlets.py", line 706, in set
+    obj._notify_trait(self.name, old_value, new_value)
+  File "/home/runner/workspace/.pythonlibs/lib/python3.11/site-packages/traitlets/traitlets.py", line 1513, in _notify_trait
+    self.notify_change(
+  File "/home/runner/workspace/.pythonlibs/lib/python3.11/site-packages/ipywidgets/widgets/widget.py", line 700, in notify_change
+    self.send_state(key=name)
+  File "/home/runner/workspace/.pythonlibs/lib/python3.11/site-packages/ipywidgets/widgets/widget.py", line 586, in send_state
+    self._send(msg, buffers=buffers)
+  File "/home/runner/workspace/.pythonlibs/lib/python3.11/site-packages/ipywidgets/widgets/widget.py", line 825, in _send
+    self.comm.send(data=msg, buffers=buffers)
+  File "/home/runner/workspace/.pythonlibs/lib/python3.11/site-packages/comm/base_comm.py", line 144, in send
+    self.publish_msg(
+  File "/home/runner/workspace/.pythonlibs/lib/python3.11/site-packages/ipykernel/comm/comm.py", line 42, in publish_msg
+    parent=self.kernel.get_parent(),
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/workspace/.pythonlibs/lib/python3.11/site-packages/ipykernel/kernelbase.py", line 797, in get_parent
+    return self._shell_parent.get()
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+LookupError: <ContextVar name='shell_parent' at 0x7f04202cac00>

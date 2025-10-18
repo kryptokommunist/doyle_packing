@@ -83,6 +83,8 @@ The Doyle circles notebook follows a modular, object-oriented design:
   - Real-time angle detection system with 300ms glow duration
   - Emissive material system for realistic lighting effects
   - Fixed pythreejs rotation format: uses [x, y, z, 'XYZ'] Euler angles
+  - Fixed threading issue: replaced background threads with asyncio event loop callbacks for proper Jupyter kernel context
+  - Animation runs in main thread to avoid ipywidgets context errors
   - Comprehensive testing validates all rotation and animation functionality
 - **2025-10-18**: Major code refactoring for maintainability
   - Extracted geometry utilities into separate helper functions
