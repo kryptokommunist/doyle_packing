@@ -8,8 +8,17 @@ This project contains interactive Jupyter notebooks that create beautiful mathem
 ## Project Structure
 ```
 .
+├── src/doyle/                   # Doyle spiral library modules
+│   ├── __init__.py             # Module exports
+│   ├── geometry.py             # Geometry classes (Shape, CircleElement, ArcElement, ArcGroup)
+│   ├── spiral.py               # Spiral generation (DoyleSpiral, DoyleMath, ArcSelector)
+│   └── drawing.py              # SVG drawing utilities (DrawingContext)
+├── tests/                       # Pytest test suite
+│   ├── __init__.py
+│   └── test_spiral_conversion.py  # Tests for spiral generation and 3D conversion
 ├── Doyle circles.ipynb          # Doyle circle spiral visualizations
 ├── golden_ratio_spiral.ipynb    # Golden ratio and Voronoi diagrams
+├── doyle_3d_threejs.py          # 3D visualization using three.js
 ├── requirements.txt             # Python dependencies
 └── .gitignore                  # Git ignore patterns
 ```
@@ -23,6 +32,28 @@ The project is configured to run in Replit with JupyterLab. All dependencies are
 - shapely: Geometric operations
 - jupyterlab: Jupyter notebook interface
 - matplotlib: Plotting library
+- pytest: Testing framework for verifying spiral generation
+
+### Using the Doyle Module
+The spiral generation code has been refactored into proper Python modules:
+
+```python
+# Import from the doyle module
+import sys
+sys.path.insert(0, '/home/runner/workspace/src')
+
+from doyle import DoyleSpiral, ArcElement, ArcSelector
+
+# Create and generate a spiral
+spiral = DoyleSpiral(p=16, q=16, t=5, arc_mode='closest', num_gaps=3)
+spiral.generate_circles()  # Generate main circles
+spiral.generate_outer_circles()  # Generate outer closure circles
+spiral.compute_all_intersections()  # Compute intersection points
+
+# Use for 3D visualization
+from doyle_3d_threejs import create_3d_spiral_threejs
+create_3d_spiral_threejs()  # No parameters needed - imports modules automatically
+```
 
 ## Usage
 1. The JupyterLab server starts automatically on port 5000
@@ -75,7 +106,30 @@ The Doyle circles notebook follows a modular, object-oriented design:
 4. Apply fill patterns or debug visualization
 5. Render to SVG with scaling
 
+## Testing
+Run the test suite to verify spiral generation and 3D conversion:
+
+```bash
+python3 -m pytest tests/test_spiral_conversion.py -v
+```
+
+Tests cover:
+- Spiral circle generation
+- Intersection computation
+- Ring index calculation
+- Arc group creation
+- Polygon conversion for 3D meshes
+- Complete 3D mesh data generation
+
 ## Recent Changes
+- **2025-10-18**: **MAJOR REFACTORING** - Extracted code into proper Python modules
+  - Created `src/doyle/` package with geometry, spiral, and drawing modules
+  - All spiral classes now importable as regular Python modules
+  - Added comprehensive pytest test suite in `tests/`
+  - **BUGFIX**: Fixed 3D visualization 0 meshes issue - must call BOTH `generate_circles()` and `generate_outer_circles()`
+  - Updated `doyle_3d_threejs.py` to import from modules instead of taking classes as parameters
+  - Tests verify spiral generation, arc groups, and 3D mesh conversion
+  - Much more maintainable and testable code structure!
 - **2025-10-18**: Switched to three.js direct implementation (ditched pythreejs!)
   - Created `doyle_3d_threejs.py` module using three.js directly via HTML widget
   - Completely eliminated pythreejs rotation bugs by using native three.js
