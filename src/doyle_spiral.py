@@ -1469,10 +1469,16 @@ def spiral_ui():
     fill_pattern_angle = widgets.FloatSlider(value=0.0, min=-90.0, max=90.0, step=1.0, description='Angle (deg)')
     fill_pattern_offset = widgets.FloatSlider(value=0.0, min=0.0, max=10.0, step=0.5, description='Line offset')
     draw_group_outline = widgets.Checkbox(value=True, description='Draw group outline')
+    
+    # Save controls
+    filename_input = widgets.Text(value='doyle_spiral.svg', description='Filename:', placeholder='Enter filename')
+    save_button = widgets.Button(description='Save SVG', button_style='success', icon='save')
+    save_output = widgets.Output()
+    
     out = widgets.Output() # Output widget to display the SVG and messages
 
-    # Hold a spiral instance so manual operations can be applied to the latest generated spiral
-    spiral_holder: Dict[str, Optional[DoyleSpiral]] = {"spiral": None}
+    # Hold a spiral instance and svg data so they can be accessed by save function
+    spiral_holder: Dict[str, Optional[DoyleSpiral]] = {"spiral": None, "svg_data": None}
 
     def render(_=None):
         """
@@ -1497,9 +1503,8 @@ def spiral_ui():
                     draw_group_outline=draw_group_outline.value,
                     fill_pattern_offset=fill_pattern_offset.value
                 )
+                spiral_holder["svg_data"] = svg_data  # Store SVG data for saving
                 display(SVG(svg_data)) # Display the generated SVG
-                with open("golden_spiral.svg", "w", encoding="utf-8") as f:
-                    f.write(svg_data)
                 # After rendering, print group info for debugging if debug is enabled
                 if debug.value:
                     print(f"ArcGroups created: {list(spiral.arc_groups.keys())}")
@@ -1507,6 +1512,38 @@ def spiral_ui():
                         print(f" - {k}: {len(g.arcs)} arcs")
             except Exception as e:
                 print(f"Error generating SVG: {e}") # Print error message if SVG generation fails
+
+    def save_svg(_=None):
+        """
+        Saves the current SVG to a file with the user-specified filename.
+        
+        This function is called when the save button is clicked.
+        """
+        with save_output:
+            clear_output(wait=True)
+            svg_data = spiral_holder.get("svg_data")
+            if svg_data is None:
+                print("⚠️ No SVG to save. Please render the spiral first.")
+                return
+            
+            filename = filename_input.value.strip()
+            if not filename:
+                print("⚠️ Please enter a filename.")
+                return
+            
+            # Add .svg extension if not present
+            if not filename.endswith('.svg'):
+                filename += '.svg'
+            
+            try:
+                with open(filename, "w", encoding="utf-8") as f:
+                    f.write(svg_data)
+                print(f"✅ SVG saved successfully as '{filename}'")
+            except Exception as e:
+                print(f"❌ Error saving SVG: {e}")
+    
+    # Wire up the save button
+    save_button.on_click(save_svg)
 
     # Wire up observers / callbacks: call the render function when widget values change
     for w in [p, q, t, mode, arc_mode, num_gaps, debug, add_fill_pattern, fill_pattern_spacing, fill_pattern_angle, fill_pattern_offset, red_outline, draw_group_outline]:
@@ -1519,5 +1556,6 @@ def spiral_ui():
     controls_top = widgets.HBox([p, q, t, mode])
     controls_arc = widgets.HBox([arc_mode, num_gaps, debug, red_outline])
     controls_fill = widgets.HBox([add_fill_pattern, fill_pattern_spacing, fill_pattern_angle, fill_pattern_offset, draw_group_outline])
-    display(widgets.VBox([controls_top, controls_arc, controls_fill, out]))
+    controls_save = widgets.HBox([filename_input, save_button])
+    display(widgets.VBox([controls_top, controls_arc, controls_fill, controls_save, save_output, out]))
 
