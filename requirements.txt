@@ -5,5 +5,10 @@ ipywidgets>=8.0.0
 shapely>=2.0.0
 jupyterlab>=4.0.0
 matplotlib>=3.5.0
-pythreejs>=2.4.0
-pytest
+ipywidgets
+jupyterlab
+matplotlib
+numpy
+scipy
+shapely
+svgwrite
