@@ -8,6 +8,8 @@ This project contains interactive Jupyter notebooks that create beautiful mathem
 ## Project Structure
 ```
 .
+├── src/
+│   └── doyle_spiral.py          # Doyle spiral module (all classes and utilities)
 ├── Doyle circles.ipynb          # Doyle circle spiral visualizations
 ├── golden_ratio_spiral.ipynb    # Golden ratio and Voronoi diagrams
 ├── requirements.txt             # Python dependencies
@@ -43,7 +45,7 @@ The project is configured to run in Replit with JupyterLab. All dependencies are
   - Red outline highlighting for specific arcs
 
 ## Code Architecture
-The Doyle circles notebook follows a modular, object-oriented design:
+The Doyle circles visualization is organized as a clean Python module (`src/doyle_spiral.py`) with object-oriented design. The notebook imports and uses this module, keeping the notebook file simple and focused on interaction.
 
 ### Geometry Utilities
 - **Line-polygon intersection**: Exact geometric intersection calculations (no sampling)
@@ -67,6 +69,11 @@ The Doyle circles notebook follows a modular, object-oriented design:
 5. Render to SVG with scaling
 
 ## Recent Changes
+- **2025-10-18**: Extracted code into reusable Python module
+  - Created `src/doyle_spiral.py` module (~1524 lines) containing all classes and utilities
+  - Simplified notebook to just import and call `spiral_ui()` function
+  - Clean separation: module contains implementation, notebook focuses on interaction
+  - All functionality preserved - fully backward compatible
 - **2025-10-18**: Major code refactoring for maintainability
   - Extracted geometry utilities into separate helper functions
   - Simplified DrawingContext class by extracting pattern fill logic
