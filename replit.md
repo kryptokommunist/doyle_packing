@@ -30,11 +30,12 @@ The project is configured to run in Replit with JupyterLab. All dependencies are
 1. The JupyterLab server starts automatically on port 5000
 2. Open either notebook file to explore the visualizations
 3. Use the interactive widgets to adjust parameters in real-time
-4. The notebooks generate SVG visualizations that can be exported
+4. Enter a filename and click "Save SVG" to export visualizations with custom names
 
 ## Features
 - Interactive parameter controls using ipywidgets
 - Real-time SVG rendering
+- Manual SVG export with custom filenames (no automatic saving)
 - Mathematical pattern generation (Doyle circles, golden spirals, Voronoi diagrams)
 - Object-oriented geometry classes for circles, arcs, and shapes
 - Complex number-based geometric calculations
@@ -69,6 +70,11 @@ The Doyle circles visualization is organized as a clean Python module (`src/doyl
 5. Render to SVG with scaling
 
 ## Recent Changes
+- **2025-10-18**: Added manual SVG export controls
+  - Replaced automatic saving with user-controlled save functionality
+  - Added filename text input field for custom SVG filenames
+  - Added "Save SVG" button to export only when user clicks
+  - SVG files now saved on-demand with user-specified names
 - **2025-10-18**: Extracted code into reusable Python module
   - Created `src/doyle_spiral.py` module (~1524 lines) containing all classes and utilities
   - Simplified notebook to just import and call `spiral_ui()` function
