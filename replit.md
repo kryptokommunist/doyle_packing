@@ -85,6 +85,7 @@ The Doyle circles notebook follows a modular, object-oriented design:
   - Fixed pythreejs rotation format: uses [x, y, z, 'XYZ'] Euler angles
   - Fixed threading issue: replaced background threads with asyncio event loop callbacks for proper Jupyter kernel context
   - Animation runs in main thread to avoid ipywidgets context errors
+  - **Workaround for pythreejs bug**: Explicitly initialize Group with `rotation=[0, 0, 0, 'XYZ']` to prevent lowercase conversion issue (upstream bug [#413](https://github.com/jupyter-widgets/pythreejs/issues/413), fix pending in [PR #415](https://github.com/jupyter-widgets/pythreejs/pull/415))
   - Comprehensive testing validates all rotation and animation functionality
 - **2025-10-18**: Major code refactoring for maintainability
   - Extracted geometry utilities into separate helper functions
