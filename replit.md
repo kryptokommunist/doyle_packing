@@ -75,12 +75,15 @@ The Doyle circles notebook follows a modular, object-oriented design:
 
 ## Recent Changes
 - **2025-10-18**: Added 3D pythreejs spinning disk animation
-  - New interactive cell with 3D visualization of Doyle spirals
-  - Disk rotates continuously with adjustable speed control
+  - Created separate `doyle_3d_animation.py` module for clean code organization
+  - Interactive 3D visualization of Doyle spirals as rotating disks
+  - Disk rotates continuously with adjustable rotation speed
   - Golden glow effects trigger when rotation angle matches line pattern angles
-  - Camera panning and zoom with OrbitControls
+  - Camera panning and zoom with OrbitControls for full exploration
   - Real-time angle detection system with 300ms glow duration
   - Emissive material system for realistic lighting effects
+  - Fixed pythreejs rotation format: uses [x, y, z, 'XYZ'] Euler angles
+  - Comprehensive testing validates all rotation and animation functionality
 - **2025-10-18**: Major code refactoring for maintainability
   - Extracted geometry utilities into separate helper functions
   - Simplified DrawingContext class by extracting pattern fill logic

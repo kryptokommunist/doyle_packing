@@ -228,10 +228,8 @@ def create_3d_spiral_animation(DoyleSpiral, ArcElement, ArcSelector):
                 angle += rotation_speed.value * 2  # Degrees per frame
                 angle_rad = math.radians(angle)
                 
-                # Rotate around Z-axis using quaternion (x, y, z, w)
-                # For Z-axis rotation: [0, 0, sin(angle/2), cos(angle/2)]
-                half_angle = angle_rad / 2
-                disk_group.rotation = [0, 0, math.sin(half_angle), math.cos(half_angle)]
+                # Rotate around Z-axis using Euler angles [x, y, z, order]
+                disk_group.rotation = [0, 0, angle_rad, 'XYZ']
                 
                 # Check each mesh for angle matching
                 current_time = time.time()
