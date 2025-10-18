@@ -42,7 +42,47 @@ The project is configured to run in Replit with JupyterLab. All dependencies are
   - Flexible outline control: toggle polygon outlines independently from line patterns
   - Red outline highlighting for specific arcs
 
+## Code Architecture
+The Doyle circles notebook follows a modular, object-oriented design:
+
+### Geometry Utilities
+- **Line-polygon intersection**: Exact geometric intersection calculations (no sampling)
+- **Polygon operations**: Inward buffering using Shapely for line offset control
+- **Clipping algorithm**: Precise line clipping to polygon boundaries
+
+### Core Classes
+- **Shape**: Abstract base class for geometric elements
+- **DrawingContext**: SVG rendering and coordinate normalization
+- **CircleElement**: Circle representation with intersection calculations
+- **ArcElement**: Arc segments with SVG path generation
+- **ArcGroup**: Groups of arcs with outline ordering and fill patterns
+- **DoyleSpiral**: Main spiral generator with multiple rendering modes
+- **ArcSelector**: Arc selection strategies (closest, farthest, alternating, etc.)
+
+### Rendering Pipeline
+1. Generate outer circles and compute intersections
+2. Create arc groups for each circle with ring indices
+3. Draw closure arcs from outer circles
+4. Apply fill patterns or debug visualization
+5. Render to SVG with scaling
+
 ## Recent Changes
+- **2025-10-18**: Major code refactoring for maintainability
+  - Extracted geometry utilities into separate helper functions
+  - Simplified DrawingContext class by extracting pattern fill logic
+  - Refactored ArcGroup.get_closed_outline into smaller focused methods
+  - Split DoyleSpiral._render_arram_boyle into modular helper methods
+  - Added clear section headers and improved code organization
+  - Improved docstrings and code comments throughout
+  - All functionality preserved - backward compatible refactoring
+- **2025-10-18**: Added line offset control UI
+  - New "Line offset" slider (0-10px) for inward polygon buffering
+  - Uses Shapely's buffer method for precise offset calculation
+  - Creates clean space between arc outlines and clipped lines
+- **2025-10-18**: Fixed line clipping antialiasing artifacts
+  - Replaced sampling-based approach with exact geometric intersections
+  - Eliminated visual artifacts at polygon edges
+  - More precise and mathematically correct line clipping
 - **2025-10-17**: Enhanced Doyle circles visualization
   - Replaced SVG pattern fills with actual clipped parallel lines for better visual quality
   - Implemented polygon clipping using matplotlib.path for precise line boundaries
