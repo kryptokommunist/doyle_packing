@@ -164,18 +164,19 @@ def create_3d_spiral_animation(DoyleSpiral, ArcElement, ArcSelector):
                 meshes.append(mesh)
                 state['meshes'][key] = mesh
         
-        # Create container for all meshes
-        disk_group = Group(children=meshes, rotation=[0, 0, 0, 'XYZ'])
+        # Create container for all meshes (using quaternion for rotation to bypass pythreejs bug)
+        disk_group = Group(children=meshes)
         
         # Set up lighting
         key_light = DirectionalLight(position=[5, 5, 5], intensity=1.0, color='white')
         ambient_light = AmbientLight(intensity=0.6, color='white')
         
-        # Set up camera
+        # Set up camera (explicitly set rotation to bypass pythreejs bug)
         camera = PerspectiveCamera(
             position=[0, camera_distance.value * 0.5, camera_distance.value],
             fov=50,
-            aspect=1.5
+            aspect=1.5,
+            rotation=[0, 0, 0, 'XYZ']  # Explicit initialization with uppercase
         )
         camera.lookAt([0, 0, 0])
         
@@ -231,8 +232,13 @@ def create_3d_spiral_animation(DoyleSpiral, ArcElement, ArcSelector):
             anim_state['angle'] += rotation_speed.value * 2  # Degrees per frame
             angle_rad = math.radians(anim_state['angle'])
             
-            # Rotate around Z-axis using Euler angles [x, y, z, order]
-            disk_group.rotation = [0, 0, angle_rad, 'XYZ']
+            # Rotate around Z-axis using Quaternion (bypasses pythreejs Euler bug)
+            # Quaternion for rotation around Z-axis: [x, y, z, w]
+            # Formula: quat = [sin(θ/2) * axis_x, sin(θ/2) * axis_y, sin(θ/2) * axis_z, cos(θ/2)]
+            half_angle = angle_rad / 2
+            quat_z = math.sin(half_angle)
+            quat_w = math.cos(half_angle)
+            disk_group.quaternion = [0, 0, quat_z, quat_w]
             
             # Check each mesh for angle matching
             current_time = time.time()

@@ -82,10 +82,15 @@ The Doyle circles notebook follows a modular, object-oriented design:
   - Camera panning and zoom with OrbitControls for full exploration
   - Real-time angle detection system with 300ms glow duration
   - Emissive material system for realistic lighting effects
-  - Fixed pythreejs rotation format: uses [x, y, z, 'XYZ'] Euler angles
+  - Uses Quaternion rotation for disk group (no 'XYZ' string - completely bypasses pythreejs bug)
+  - PerspectiveCamera explicitly initialized with `rotation=[0,0,0,'XYZ']` to prevent lowercase conversion
+  - Quaternion rotation provides smoother animation and avoids gimbal lock
   - Fixed threading issue: replaced background threads with asyncio event loop callbacks for proper Jupyter kernel context
   - Animation runs in main thread to avoid ipywidgets context errors
-  - **Workaround for pythreejs bug**: Explicitly initialize Group with `rotation=[0, 0, 0, 'XYZ']` to prevent lowercase conversion issue (upstream bug [#413](https://github.com/jupyter-widgets/pythreejs/issues/413), fix pending in [PR #415](https://github.com/jupyter-widgets/pythreejs/pull/415))
+  - **Complete fix for pythreejs bug #413**: Two-pronged approach prevents TraitError from lowercase 'xyz' conversion:
+    1. Disk group uses Quaternion `[x, y, z, w]` rotation (bypasses Euler angles entirely)
+    2. Camera uses explicit Euler `[0, 0, 0, 'XYZ']` initialization (forces uppercase before pythreejs processes it)
+  - Both methods prevent the upstream bug where pythreejs JavaScript lowercases 'XYZ' → 'xyz' (bug documented in [#413](https://github.com/jupyter-widgets/pythreejs/issues/413), fix pending in [PR #415](https://github.com/jupyter-widgets/pythreejs/pull/415))
   - Comprehensive testing validates all rotation and animation functionality
 - **2025-10-18**: Major code refactoring for maintainability
   - Extracted geometry utilities into separate helper functions
