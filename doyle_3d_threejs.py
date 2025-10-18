@@ -3,14 +3,18 @@
 Uses three.js directly via IFrame - no pythreejs!
 """
 
+import sys
+sys.path.insert(0, '/home/runner/workspace/src')
+
 import ipywidgets as widgets
 from IPython.display import display, IFrame
 import json
 import os
 import uuid
+from doyle import DoyleSpiral, ArcElement, ArcSelector
 
 
-def create_3d_spiral_threejs(DoyleSpiral, ArcElement, ArcSelector):
+def create_3d_spiral_threejs():
     """Create interactive 3D spinning disk visualization using three.js directly."""
     
     # UI Controls
@@ -33,7 +37,9 @@ def create_3d_spiral_threejs(DoyleSpiral, ArcElement, ArcSelector):
         # Generate spiral
         spiral = DoyleSpiral(p.value, q.value, t.value, 
                             arc_mode=arc_mode.value, num_gaps=num_gaps.value)
-        spiral.generate_outer_circles()
+        # BUGFIX: Must call BOTH methods to populate circles!
+        spiral.generate_circles()  # Creates main circles
+        spiral.generate_outer_circles()  # Creates outer closure circles
         spiral.compute_all_intersections()
         
         print(f"DEBUG: Generated {len(spiral.circles)} circles")

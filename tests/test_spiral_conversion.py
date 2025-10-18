@@ -12,8 +12,9 @@ class TestSpiralGeneration:
     """Test basic spiral generation."""
     
     def test_spiral_creates_circles(self):
-        """Test that spiral generates outer circles."""
+        """Test that spiral generates circles."""
         spiral = DoyleSpiral(p=16, q=16, t=5)
+        spiral.generate_circles()
         spiral.generate_outer_circles()
         
         assert len(spiral.circles) > 0, "Spiral should generate circles"
@@ -22,6 +23,7 @@ class TestSpiralGeneration:
     def test_spiral_computes_intersections(self):
         """Test that spiral computes intersection points."""
         spiral = DoyleSpiral(p=16, q=16, t=5)
+        spiral.generate_circles()
         spiral.generate_outer_circles()
         spiral.compute_all_intersections()
         
@@ -33,6 +35,7 @@ class TestSpiralGeneration:
     def test_ring_indices_computed(self):
         """Test that ring indices are computed correctly."""
         spiral = DoyleSpiral(p=16, q=16, t=5)
+        spiral.generate_circles()
         spiral.generate_outer_circles()
         spiral.compute_all_intersections()
         
@@ -47,6 +50,7 @@ class TestArcGroupGeneration:
     def test_arc_groups_created(self):
         """Test that arc groups are created for circles."""
         spiral = DoyleSpiral(p=16, q=16, t=5, arc_mode='closest', num_gaps=3)
+        spiral.generate_circles()
         spiral.generate_outer_circles()
         spiral.compute_all_intersections()
         
@@ -81,6 +85,7 @@ class TestArcGroupGeneration:
     def test_arc_group_polygon_conversion(self):
         """Test that arc groups can be converted to polygons."""
         spiral = DoyleSpiral(p=16, q=16, t=5, arc_mode='closest', num_gaps=3)
+        spiral.generate_circles()
         spiral.generate_outer_circles()
         spiral.compute_all_intersections()
         
@@ -136,6 +141,7 @@ class Test3DDataConversion:
     def test_mesh_data_generation(self):
         """Test that mesh data is generated correctly for 3D visualization."""
         spiral = DoyleSpiral(p=16, q=16, t=5, arc_mode='closest', num_gaps=3)
+        spiral.generate_circles()
         spiral.generate_outer_circles()
         spiral.compute_all_intersections()
         
