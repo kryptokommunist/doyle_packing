@@ -49,3 +49,6 @@ Thumbs.db
 # Temporary files
 *.tmp
 *.log
+
+# Generated 3D visualization HTML files
+doyle_3d_*.html

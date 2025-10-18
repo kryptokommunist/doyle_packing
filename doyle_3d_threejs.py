@@ -1,11 +1,13 @@
 """
 3D Three.js animation for Doyle spirals with golden glow effects.
-Uses three.js directly via HTML/JavaScript widget - no pythreejs!
+Uses three.js directly via IFrame - no pythreejs!
 """
 
 import ipywidgets as widgets
-from IPython.display import display, HTML
+from IPython.display import display, IFrame
 import json
+import os
+import uuid
 
 
 def create_3d_spiral_threejs(DoyleSpiral, ArcElement, ArcSelector):
@@ -84,35 +86,43 @@ def create_3d_spiral_threejs(DoyleSpiral, ArcElement, ArcSelector):
         
         return meshes_data
     
-    def create_threejs_widget():
-        """Create the three.js HTML widget."""
+    def create_html_file():
+        """Create standalone HTML file with three.js visualization."""
         meshes_data = generate_spiral_data()
         meshes_json = json.dumps(meshes_data)
         rotation_speed_val = rotation_speed.value
         
         html_content = f"""
-        <div id="threejs-container" style="width: 900px; height: 600px; border: 1px solid #ccc;"></div>
-        
-        <script src="https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js"></script>
-        <script src="https://cdn.jsdelivr.net/npm/three@0.158.0/examples/js/controls/OrbitControls.js"></script>
-        
-        <script>
-        (function() {{
-            const container = document.getElementById('threejs-container');
-            if (!container) return;
-            
-            // Clear previous content
-            container.innerHTML = '';
-            
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Doyle Spiral 3D</title>
+    <style>
+        body {{ margin: 0; overflow: hidden; }}
+        canvas {{ display: block; }}
+    </style>
+</head>
+<body>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.158.0/examples/js/controls/OrbitControls.js"></script>
+    
+    <script>
+        // Wait for THREE to load
+        if (typeof THREE === 'undefined') {{
+            document.write('<p style="color: red; padding: 20px;">Error loading Three.js. Please refresh.</p>');
+        }} else {{
             // Scene setup
             const scene = new THREE.Scene();
-            const camera = new THREE.PerspectiveCamera(50, 900/600, 0.1, 1000);
+            scene.background = new THREE.Color(0xf0f0f0);
+            
+            const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 1000);
             camera.position.set(0, 4, 8);
             camera.lookAt(0, 0, 0);
             
             const renderer = new THREE.WebGLRenderer({{ antialias: true }});
-            renderer.setSize(900, 600);
-            container.appendChild(renderer.domElement);
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.body.appendChild(renderer.domElement);
             
             // Lighting
             const keyLight = new THREE.DirectionalLight(0xffffff, 1.0);
@@ -134,6 +144,8 @@ def create_3d_spiral_threejs(DoyleSpiral, ArcElement, ArcSelector):
             // Mesh data from Python
             const meshesData = {meshes_json};
             const meshes = [];
+            
+            console.log('Creating', meshesData.length, 'meshes');
             
             // Create meshes
             meshesData.forEach(meshData => {{
@@ -179,6 +191,8 @@ def create_3d_spiral_threejs(DoyleSpiral, ArcElement, ArcSelector):
                 diskGroup.add(mesh);
                 meshes.push(mesh);
             }});
+            
+            console.log('Created', meshes.length, 'meshes successfully');
             
             // Animation
             let angle = 0;
@@ -227,19 +241,35 @@ def create_3d_spiral_threejs(DoyleSpiral, ArcElement, ArcSelector):
             }}
             
             animate();
-        }})();
-        </script>
+            
+            // Handle window resize
+            window.addEventListener('resize', () => {{
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            }});
+        }}
+    </script>
+</body>
+</html>
         """
         
-        return HTML(html_content)
+        # Save to file with unique name
+        filename = f'doyle_3d_{uuid.uuid4().hex[:8]}.html'
+        with open(filename, 'w') as f:
+            f.write(html_content)
+        
+        return filename
     
     def render(_=None):
         """Render the 3D scene."""
         with output:
             output.clear_output(wait=True)
             try:
-                widget = create_threejs_widget()
-                display(widget)
+                filename = create_html_file()
+                print(f"✓ Created {filename}")
+                print(f"✓ Rendering {len(generate_spiral_data())} mesh groups")
+                display(IFrame(src=filename, width=920, height=620))
             except Exception as e:
                 print(f"Error creating 3D scene: {e}")
                 import traceback
