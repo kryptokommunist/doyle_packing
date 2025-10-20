@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Doyle Spiral Studio</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      font-family: "Inter", "Segoe UI", system-ui, sans-serif;
+      --page-bg: radial-gradient(circle at 20% -10%, #bae6fd, #dbeafe 40%, #e2e8f0 85%);
+      --panel-bg: rgba(255, 255, 255, 0.86);
+      --panel-border: rgba(148, 163, 184, 0.24);
+      --text-strong: #0f172a;
+      --text-muted: #64748b;
+      --accent: #2563eb;
+      --accent-soft: rgba(37, 99, 235, 0.12);
+      background: var(--page-bg);
+      min-height: 100%;
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      padding: 2.5rem clamp(1rem, 3vw, 2.5rem);
+      color: var(--text-strong);
+    }
+
+    .app-shell {
+      width: min(1200px, 100%);
+      display: grid;
+      gap: 2rem;
+    }
+
+    header {
+      display: flex;
+      flex-direction: column;
+      gap: 0.65rem;
+    }
+
+    header h1 {
+      font-size: clamp(2rem, 4vw, 2.8rem);
+      letter-spacing: -0.03em;
+    }
+
+    header p {
+      color: var(--text-muted);
+      max-width: 65ch;
+      line-height: 1.6;
+    }
+
+    .layout {
+      display: grid;
+      gap: 2rem;
+      grid-template-columns: minmax(320px, 360px) 1fr;
+    }
+
+    .panel {
+      background: var(--panel-bg);
+      border-radius: 1.5rem;
+      padding: 1.8rem;
+      border: 1px solid var(--panel-border);
+      box-shadow: 0 25px 45px rgba(15, 23, 42, 0.12);
+      backdrop-filter: blur(18px);
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+    }
+
+    form {
+      display: grid;
+      gap: 1.25rem;
+    }
+
+    .field-group {
+      display: grid;
+      gap: 0.6rem;
+    }
+
+    label {
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-muted);
+      font-weight: 600;
+    }
+
+    input[type="number"],
+    select {
+      width: 100%;
+      padding: 0.75rem 0.9rem;
+      border-radius: 0.9rem;
+      border: 1px solid rgba(148, 163, 184, 0.3);
+      font-size: 0.95rem;
+      background: rgba(255, 255, 255, 0.9);
+      color: var(--text-strong);
+    }
+
+    input[type="range"] {
+      width: 100%;
+      accent-color: var(--accent);
+    }
+
+    .inline-fields {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+      gap: 1rem;
+    }
+
+    .checkbox-row {
+      display: flex;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+    }
+
+    .checkbox-row label {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.45rem 0.75rem;
+      border-radius: 0.75rem;
+      border: 1px solid rgba(148, 163, 184, 0.3);
+      text-transform: none;
+      letter-spacing: 0.01em;
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      font-weight: 500;
+      background: rgba(255, 255, 255, 0.6);
+    }
+
+    .checkbox-row input {
+      width: 1rem;
+      height: 1rem;
+    }
+
+    .fill-settings {
+      display: grid;
+      gap: 1rem;
+      grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+    }
+
+    button {
+      appearance: none;
+      border: none;
+      border-radius: 0.9rem;
+      padding: 0.9rem 1.3rem;
+      font-size: 0.95rem;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      cursor: pointer;
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+      background: var(--accent);
+      color: white;
+      box-shadow: 0 18px 30px rgba(37, 99, 235, 0.22);
+    }
+
+    button.secondary {
+      background: rgba(148, 163, 184, 0.16);
+      color: var(--text-strong);
+      box-shadow: none;
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      box-shadow: none;
+    }
+
+    button:hover:not(:disabled) {
+      transform: translateY(-1px);
+    }
+
+    .status {
+      padding: 0.75rem 1rem;
+      border-radius: 0.85rem;
+      font-size: 0.85rem;
+      background: rgba(148, 163, 184, 0.14);
+      color: var(--text-muted);
+    }
+
+    .status.loading {
+      background: rgba(37, 99, 235, 0.12);
+      color: var(--accent);
+    }
+
+    .status.error {
+      background: rgba(220, 38, 38, 0.16);
+      color: #b91c1c;
+    }
+
+    .preview {
+      position: relative;
+    }
+
+    .preview-card {
+      background: var(--panel-bg);
+      border-radius: 1.5rem;
+      border: 1px solid var(--panel-border);
+      min-height: 520px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 25px 45px rgba(15, 23, 42, 0.1);
+      overflow: hidden;
+      position: relative;
+    }
+
+    #svgPreview svg {
+      width: 100%;
+      height: 100%;
+    }
+
+    .empty-state {
+      text-align: center;
+      color: var(--text-muted);
+      padding: 3rem;
+    }
+
+    .stats {
+      margin-top: 1.5rem;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 1rem;
+    }
+
+    .stat-card {
+      background: rgba(255, 255, 255, 0.65);
+      border-radius: 1rem;
+      padding: 0.9rem 1.2rem;
+      border: 1px solid rgba(148, 163, 184, 0.2);
+      font-size: 0.9rem;
+      color: var(--text-muted);
+    }
+
+    .stat-card strong {
+      display: block;
+      color: var(--text-strong);
+      font-size: 1.1rem;
+      margin-bottom: 0.15rem;
+    }
+
+    @media (max-width: 980px) {
+      .layout {
+        grid-template-columns: 1fr;
+      }
+      .panel {
+        order: 2;
+      }
+      .preview {
+        order: 1;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <header>
+      <h1>Doyle Spiral Studio</h1>
+      <p>Generate Doyle spirals with the native Python geometry engine and preview the results instantly. When you are ready to explore the mesh in space, launch the dedicated 3D viewer in a new tab.</p>
+    </header>
+
+    <div class="layout">
+      <section class="panel">
+        <form id="controlsForm">
+          <div class="inline-fields">
+            <div class="field-group">
+              <label for="inputP">P (families)</label>
+              <input id="inputP" name="p" type="number" min="2" max="128" step="1" value="16" required />
+            </div>
+            <div class="field-group">
+              <label for="inputQ">Q (circles)</label>
+              <input id="inputQ" name="q" type="number" min="2" max="256" step="1" value="16" required />
+            </div>
+          </div>
+
+          <div class="field-group">
+            <label for="inputT">T (phase)</label>
+            <input id="inputT" name="t" type="range" min="0" max="1" step="0.02" value="0" />
+            <div class="status" id="tValue">0.00</div>
+          </div>
+
+          <div class="inline-fields">
+            <div class="field-group">
+              <label for="modeSelect">2D mode</label>
+              <select id="modeSelect" name="mode">
+                <option value="arram_boyle" selected>Arram-Boyle arcs</option>
+                <option value="doyle">Classic circles</option>
+              </select>
+            </div>
+            <div class="field-group">
+              <label for="arcModeSelect">Arc selection</label>
+              <select id="arcModeSelect" name="arc_mode">
+                <option value="closest">Closest</option>
+                <option value="farthest">Farthest</option>
+                <option value="alternating">Alternating</option>
+                <option value="all">All arcs</option>
+                <option value="random">Randomised</option>
+                <option value="symmetric">Symmetric</option>
+                <option value="angular">Angular</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="inline-fields">
+            <div class="field-group">
+              <label for="numGaps">Gaps</label>
+              <input id="numGaps" name="num_gaps" type="number" min="0" max="8" value="2" />
+            </div>
+            <div class="field-group">
+              <label for="svgSize">Canvas size</label>
+              <input id="svgSize" name="size" type="number" min="200" max="1600" step="50" value="800" />
+            </div>
+          </div>
+
+          <div class="checkbox-row">
+            <label><input type="checkbox" name="add_fill_pattern" id="togglePattern"> Pattern fill</label>
+            <label><input type="checkbox" name="draw_group_outline" id="toggleOutline" checked> Group outline</label>
+            <label><input type="checkbox" name="red_outline" id="toggleRed"> Highlight rim</label>
+          </div>
+
+          <div class="fill-settings" id="fillSettings" hidden>
+            <div class="field-group">
+              <label for="fillSpacing">Line spacing</label>
+              <input id="fillSpacing" name="fill_pattern_spacing" type="number" min="0.5" step="0.5" value="5" />
+            </div>
+            <div class="field-group">
+              <label for="fillAngle">Angle shift</label>
+              <input id="fillAngle" name="fill_pattern_angle" type="number" min="-180" max="180" step="1" value="0" />
+            </div>
+            <div class="field-group">
+              <label for="fillOffset">Inset</label>
+              <input id="fillOffset" name="fill_pattern_offset" type="number" min="0" step="0.5" value="0" />
+            </div>
+          </div>
+
+          <div class="status" id="statusMessage">Adjust parameters and the spiral will render automatically.</div>
+
+          <div class="actions">
+            <button type="submit" id="renderButton">Refresh preview</button>
+            <button type="button" id="open3d" class="secondary">Open 3D viewer</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="preview">
+        <div class="preview-card">
+          <div id="svgPreview" class="empty-state">Rendering spiral…</div>
+        </div>
+        <div class="stats" id="stats" hidden>
+          <div class="stat-card"><strong id="statArcGroups">0</strong>Arc groups</div>
+          <div class="stat-card"><strong id="statPolygons">0</strong>Polygons extruded</div>
+          <div class="stat-card"><strong id="statMode">Arram-Boyle</strong>Render mode</div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <script>
+    const form = document.getElementById('controlsForm');
+    const statusEl = document.getElementById('statusMessage');
+    const svgPreview = document.getElementById('svgPreview');
+    const statsBlock = document.getElementById('stats');
+    const statArcGroups = document.getElementById('statArcGroups');
+    const statPolygons = document.getElementById('statPolygons');
+    const statMode = document.getElementById('statMode');
+    const tRange = document.getElementById('inputT');
+    const tValue = document.getElementById('tValue');
+    const modeSelect = document.getElementById('modeSelect');
+    const open3dButton = document.getElementById('open3d');
+    const fillToggle = document.getElementById('togglePattern');
+    const fillSettings = document.getElementById('fillSettings');
+    const outlineToggle = document.getElementById('toggleOutline');
+    const redToggle = document.getElementById('toggleRed');
+
+    const DEFAULTS = {
+      p: 16,
+      q: 16,
+      t: 0,
+      mode: 'arram_boyle',
+      arc_mode: 'closest',
+      num_gaps: 2,
+      size: 800,
+      add_fill_pattern: false,
+      draw_group_outline: true,
+      red_outline: false,
+      fill_pattern_spacing: 5,
+      fill_pattern_angle: 0,
+      fill_pattern_offset: 0,
+    };
+
+    function updateTValue() {
+      tValue.textContent = parseFloat(tRange.value).toFixed(2);
+    }
+
+    function toggleFillSettings() {
+      fillSettings.hidden = !fillToggle.checked;
+    }
+
+    function setStatus(message, state = 'idle') {
+      statusEl.textContent = message;
+      statusEl.classList.remove('loading', 'error');
+      if (state !== 'idle') {
+        statusEl.classList.add(state);
+      }
+    }
+
+    function collectParams() {
+      const formData = new FormData(form);
+      const params = { ...DEFAULTS };
+      for (const [key, value] of formData.entries()) {
+        if (['add_fill_pattern', 'draw_group_outline', 'red_outline'].includes(key)) {
+          continue;
+        }
+        if (['p', 'q', 'num_gaps', 'size'].includes(key)) {
+          params[key] = Number(value);
+        } else if (['t', 'fill_pattern_spacing', 'fill_pattern_angle', 'fill_pattern_offset'].includes(key)) {
+          params[key] = Number(value);
+        } else {
+          params[key] = value;
+        }
+      }
+      params.add_fill_pattern = fillToggle.checked;
+      params.draw_group_outline = outlineToggle.checked;
+      params.red_outline = redToggle.checked;
+      return params;
+    }
+
+    function paramsToQuery(params) {
+      const query = new URLSearchParams();
+      Object.entries(params).forEach(([key, value]) => {
+        if (typeof value === 'boolean') {
+          query.set(key, value ? 'true' : 'false');
+        } else {
+          query.set(key, value);
+        }
+      });
+      return query.toString();
+    }
+
+    async function renderSpiral(showLoading = true) {
+      const params = collectParams();
+      if (showLoading) {
+        setStatus('Rendering spiral…', 'loading');
+      }
+
+      try {
+        const response = await fetch('/api/spiral', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(params),
+        });
+        if (!response.ok) {
+          throw new Error(`Server responded with ${response.status}`);
+        }
+        const payload = await response.json();
+        svgPreview.innerHTML = payload.svg;
+        svgPreview.classList.remove('empty-state');
+
+        const geometry = payload.geometry;
+        if (geometry && Array.isArray(geometry.arcgroups)) {
+          statArcGroups.textContent = geometry.arcgroups.length;
+          statPolygons.textContent = geometry.arcgroups.reduce((sum, g) => sum + (g.arc_count || 0), 0);
+          statsBlock.hidden = false;
+        } else {
+          statsBlock.hidden = true;
+        }
+
+        statMode.textContent = params.mode === 'arram_boyle' ? 'Arram-Boyle' : 'Classic Doyle';
+        setStatus('Spiral updated. Use the 3D viewer for an extruded view.');
+      } catch (error) {
+        console.error(error);
+        svgPreview.innerHTML = '<div class="empty-state">Unable to render spiral.</div>';
+        svgPreview.classList.add('empty-state');
+        setStatus(error.message || 'Unexpected error', 'error');
+      }
+    }
+
+    function debounce(fn, delay) {
+      let timer;
+      return (...args) => {
+        clearTimeout(timer);
+        timer = setTimeout(() => fn(...args), delay);
+      };
+    }
+
+    const debouncedRender = debounce(() => renderSpiral(false), 200);
+
+    form.addEventListener('input', event => {
+      if (event.target.name === 't') {
+        updateTValue();
+      }
+      if (event.target === fillToggle) {
+        toggleFillSettings();
+      }
+      if (event.target.name === 'mode') {
+        open3dButton.disabled = event.target.value !== 'arram_boyle';
+      }
+      debouncedRender();
+    });
+
+    form.addEventListener('submit', event => {
+      event.preventDefault();
+      renderSpiral(true);
+    });
+
+    open3dButton.addEventListener('click', () => {
+      const params = collectParams();
+      params.mode = 'arram_boyle';
+      const query = paramsToQuery(params);
+      window.open(`/viewer?${query}`, '_blank');
+    });
+
+    toggleFillSettings();
+    updateTValue();
+    open3dButton.disabled = modeSelect.value !== 'arram_boyle';
+    renderSpiral(true);
+  </script>
+</body>
+</html>
