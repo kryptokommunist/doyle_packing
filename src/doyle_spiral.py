@@ -1166,6 +1166,24 @@ class DoyleSpiral:
 
         mode = (line_angle_mode or "ring").lower()
 
+        if metadata:
+            radii = [data["radius"] for data in metadata.values() if data["radius"] > 1e-6]
+            if radii:
+                min_radius = min(radii)
+                max_radius = max(radii)
+            else:
+                min_radius = 1e-6
+                max_radius = 1.0
+        else:
+            min_radius = 1e-6
+            max_radius = 1.0
+        radius_span = max(max_radius - min_radius, 1e-6)
+        time_phase = math.radians(fill_pattern_angle)
+        radial_cycles = 3.5
+        radial_frequency = radial_cycles * 2.0 * math.pi
+        radial_wave_speed = radial_cycles
+        wave_amplitude = 28.0
+
         for group, data in metadata.items():
             ring_idx = data["ring"]
             angle_deg = data["angle"]
@@ -1178,7 +1196,20 @@ class DoyleSpiral:
                 group.line_angle = normalize(base + orbit_angle)
             elif mode == "spiral_arms":
                 base = angle_deg + spiral_slope * math.log(radius)
-                group.line_angle = normalize(base + fill_pattern_angle)
+                normalized_radius = (radius - min_radius) / radius_span
+                normalized_radius = max(0.0, min(normalized_radius, 1.0))
+                # Offset the tangent by a travelling radial wave so the
+                # highlights march from the centre outwards while the arm
+                # continues to rotate as a whole.
+                wave_phase = (
+                    radial_frequency * normalized_radius
+                    - radial_wave_speed * time_phase
+                )
+                wave_envelope = 0.6 + 0.4 * normalized_radius
+                wave_offset = math.cos(wave_phase) * wave_envelope
+                group.line_angle = normalize(
+                    base + fill_pattern_angle + wave_offset * wave_amplitude
+                )
             elif mode == "petal_wave":
                 petals = 3 + (ring_idx % 5)
                 amplitude = 32.0
