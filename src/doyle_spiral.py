@@ -891,6 +891,7 @@ class DoyleSpiral:
 
         # ArcGroups keyed by circle id or arbitrary name
         self.arc_groups: Dict[str, ArcGroup] = {}
+        self.fill_pattern_angle: float = 0.0
 
     def generate_circles(self):
         """Generates the main set of visible circles based on the spiral parameters."""
@@ -1238,58 +1239,71 @@ class DoyleSpiral:
         # Return the SVG as a string
         return context.to_string()
 
-    def export_to_json(self, filename: str = 'doyle_spiral.json'):
+    def to_json_dict(self) -> Dict[str, object]:
+        """Return a serialisable dictionary describing the current arc groups.
+
+        The dictionary mirrors the structure previously written by
+        :meth:`export_to_json`, exposing spiral parameters together with the
+        outlines and metadata for each visible arc group.
+
+        Returns:
+            Dict[str, object]: A JSON-ready dictionary describing the spiral.
+
+        Raises:
+            RuntimeError: If arc groups have not been generated yet. Render the
+                spiral in ``arram_boyle`` mode first to populate them.
         """
-        Exports the spiral's arc groups to a JSON file.
-        
-        Preserves arcgroup data including outlines, ring indices, and line angles.
-        
-        Args:
-            filename: Output filename for the JSON file.
-        """
-        # Ensure arc groups have been created
         if not self.arc_groups:
-            print("No arc groups to export. Run to_svg() with 'arram_boyle' mode first.")
-            return
-        
-        # Build the export data structure
-        export_data = {
+            raise RuntimeError("No arc groups to export. Run to_svg() with 'arram_boyle' mode first.")
+
+        export_data: Dict[str, object] = {
             "spiral_params": {
                 "p": self.p,
                 "q": self.q,
                 "t": self.t,
                 "max_d": self.max_d,
                 "arc_mode": self.arc_mode,
-                "num_gaps": self.num_gaps
+                "num_gaps": self.num_gaps,
             },
-            "arcgroups": []
+            "arcgroups": [],
         }
-        
+
         for group_key, group in self.arc_groups.items():
-            if "outer" in group_key: continue
-            # Get the closed outline as points
+            if "outer" in group_key:
+                continue
+
             outline = group.get_closed_outline()
-            
-            # Convert complex numbers to [x, y] pairs
             outline_points = [[p.real, p.imag] for p in outline]
-            
-            # Calculate the average line angle from all arcs in the group
-            # The line angle is inferred from the ring index
+
             ring_index = group.ring_index if group.ring_index is not None else 0
-            line_angle = ring_index * self.fill_pattern_angle  # Adjust multiplier as needed for your use case
-            
-            group_data = {
+            line_angle = ring_index * self.fill_pattern_angle
+
+            export_data["arcgroups"].append({
                 "id": group.id,
                 "name": group.name,
                 "ring_index": group.ring_index,
-                "line_angle": line_angle,  # Angle in degrees
+                "line_angle": line_angle,
                 "outline": outline_points,
-                "arc_count": len(group.arcs)
-            }
-            
-            export_data["arcgroups"].append(group_data)
-        
-        # Write to JSON file
+                "arc_count": len(group.arcs),
+            })
+
+        return export_data
+
+    def export_to_json(self, filename: str = 'doyle_spiral.json'):
+        """
+        Exports the spiral's arc groups to a JSON file.
+
+        Preserves arcgroup data including outlines, ring indices, and line angles.
+
+        Args:
+            filename: Output filename for the JSON file.
+        """
+        try:
+            export_data = self.to_json_dict()
+        except RuntimeError as exc:
+            print(str(exc))
+            return
+
         try:
             with open(filename, 'w', encoding='utf-8') as f:
                 json.dump(export_data, f, indent=2)
