@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Doyle Spiral Studio</title>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.152.2/build/three.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
   <style>
     :root {
       color-scheme: light dark;
@@ -15,6 +16,7 @@
       --text-muted: #64748b;
       --accent: #2563eb;
       --accent-soft: rgba(37, 99, 235, 0.12);
+      --danger: #b91c1c;
       background: var(--page-bg);
       min-height: 100%;
     }
@@ -161,7 +163,7 @@
       font-weight: 600;
       letter-spacing: -0.01em;
       cursor: pointer;
-      transition: transform 0.2s ease, box-shadow 0.2s ease;
+      transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
       background: var(--accent);
       color: white;
       box-shadow: 0 18px 30px rgba(37, 99, 235, 0.22);
@@ -198,11 +200,37 @@
 
     .status.error {
       background: rgba(220, 38, 38, 0.16);
-      color: #b91c1c;
+      color: var(--danger);
     }
 
     .preview {
       position: relative;
+      display: grid;
+      gap: 1.25rem;
+    }
+
+    .view-toggle {
+      display: inline-flex;
+      background: rgba(255, 255, 255, 0.78);
+      border-radius: 999px;
+      padding: 0.25rem;
+      border: 1px solid rgba(148, 163, 184, 0.3);
+      box-shadow: 0 18px 30px rgba(15, 23, 42, 0.1);
+      width: fit-content;
+    }
+
+    .view-toggle button {
+      background: transparent;
+      box-shadow: none;
+      color: var(--text-muted);
+      padding: 0.55rem 1.15rem;
+      font-size: 0.9rem;
+    }
+
+    .view-toggle button.active {
+      background: var(--accent);
+      color: white;
+      box-shadow: 0 12px 24px rgba(37, 99, 235, 0.3);
     }
 
     .preview-card {
@@ -211,7 +239,8 @@
       border: 1px solid var(--panel-border);
       min-height: 520px;
       display: flex;
-      align-items: center;
+      flex-direction: column;
+      align-items: stretch;
       justify-content: center;
       box-shadow: 0 25px 45px rgba(15, 23, 42, 0.1);
       overflow: hidden;
@@ -230,7 +259,6 @@
     }
 
     .stats {
-      margin-top: 1.5rem;
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
       gap: 1rem;
@@ -252,6 +280,116 @@
       margin-bottom: 0.15rem;
     }
 
+    .three-card {
+      padding: 1.5rem;
+      gap: 1.25rem;
+    }
+
+    .three-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+
+    .three-top button {
+      padding: 0.7rem 1.1rem;
+      font-size: 0.85rem;
+    }
+
+    .three-stage {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(240px, 280px);
+      gap: 1.5rem;
+      align-items: stretch;
+    }
+
+    .three-stage.collapsed {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .three-stage.collapsed .three-settings {
+      display: none;
+    }
+
+    #threeCanvas {
+      width: 100%;
+      height: clamp(420px, 60vh, 620px);
+      display: block;
+      background: linear-gradient(160deg, rgba(15, 23, 42, 0.94), rgba(30, 41, 59, 0.88));
+      border-radius: 1.25rem;
+      cursor: grab;
+    }
+
+    #threeCanvas:active {
+      cursor: grabbing;
+    }
+
+    .three-settings {
+      background: rgba(248, 250, 252, 0.88);
+      border-radius: 1.25rem;
+      border: 1px solid rgba(148, 163, 184, 0.25);
+      padding: 1.2rem 1.4rem;
+      display: grid;
+      gap: 1.1rem;
+    }
+
+    .three-settings h2 {
+      font-size: 0.9rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+    }
+
+    .three-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 1rem;
+    }
+
+    .three-settings label {
+      font-size: 0.72rem;
+      margin-bottom: 0.35rem;
+    }
+
+    .range-value {
+      margin-top: 0.3rem;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+    }
+
+    .three-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.6rem;
+    }
+
+    .three-actions button {
+      font-size: 0.85rem;
+      padding: 0.7rem 1rem;
+    }
+
+    .pulse {
+      animation: pulse 1.2s ease;
+    }
+
+    @keyframes pulse {
+      0% { box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.45); }
+      70% { box-shadow: 0 0 0 12px rgba(37, 99, 235, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(37, 99, 235, 0); }
+    }
+
+    .three-stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 1rem;
+    }
+
+    .three-stats .stat-card {
+      background: rgba(255, 255, 255, 0.7);
+    }
+
     @media (max-width: 980px) {
       .layout {
         grid-template-columns: 1fr;
@@ -262,6 +400,28 @@
       .preview {
         order: 1;
       }
+      .three-stage {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 720px) {
+      body {
+        padding: 1.6rem 1rem 2.4rem;
+      }
+      .panel {
+        padding: 1.4rem;
+      }
+      .preview-card {
+        padding: 1.2rem;
+      }
+      .three-top button {
+        width: 100%;
+      }
+      .three-top {
+        flex-direction: column;
+        align-items: stretch;
+      }
     }
   </style>
 </head>
@@ -269,7 +429,7 @@
   <div class="app-shell">
     <header>
       <h1>Doyle Spiral Studio</h1>
-      <p>Generate Doyle spirals with the native Python geometry engine and preview the results instantly. When you are ready to explore the mesh in space, launch the dedicated 3D viewer in a new tab.</p>
+      <p>Generate Doyle spirals with the native Python geometry engine and preview the results instantly. Switch between the SVG composition and the immersive 3D extrusion without leaving the page.</p>
     </header>
 
     <div class="layout">
@@ -350,23 +510,80 @@
 
           <div class="actions">
             <button type="submit" id="renderButton">Refresh preview</button>
-            <button type="button" id="open3d" class="secondary">Open 3D viewer</button>
           </div>
         </form>
       </section>
 
       <section class="preview">
-        <div class="preview-card">
+        <div class="view-toggle" role="group" aria-label="Preview mode">
+          <button type="button" class="active" data-view="2d" aria-pressed="true">2D SVG</button>
+          <button type="button" data-view="3d" aria-pressed="false">3D View</button>
+        </div>
+
+        <div class="preview-card" id="view2d">
           <div id="svgPreview" class="empty-state">Rendering spiral…</div>
         </div>
+
         <div class="stats" id="stats" hidden>
           <div class="stat-card"><strong id="statArcGroups">0</strong>Arc groups</div>
           <div class="stat-card"><strong id="statPolygons">0</strong>Polygons extruded</div>
           <div class="stat-card"><strong id="statMode">Arram-Boyle</strong>Render mode</div>
         </div>
+
+        <div class="preview-card three-card" id="view3d" hidden>
+          <div class="three-top">
+            <div class="status" id="threeStatus">Switch to the 3D view to load geometry.</div>
+            <button type="button" class="secondary" id="threeSettingsToggle" aria-expanded="true">Hide 3D settings</button>
+          </div>
+          <div class="three-stage" id="threeStage">
+            <canvas id="threeCanvas"></canvas>
+            <aside class="three-settings" id="threeSettings">
+              <h2>3D Settings</h2>
+              <div class="three-grid">
+                <div>
+                  <label for="threeRotationSpeed">Rotation Speed</label>
+                  <input type="range" id="threeRotationSpeed" min="0" max="2" step="0.05" value="0.4">
+                  <div class="range-value"><span id="threeRotationSpeedValue">0.40</span> revolutions / sec</div>
+                </div>
+                <div>
+                  <label for="threePulseSpeed">Pulse Speed</label>
+                  <input type="range" id="threePulseSpeed" min="0.5" max="5" step="0.1" value="2.0">
+                  <div class="range-value"><span id="threePulseSpeedValue">2.0</span> pulses / sec</div>
+                </div>
+                <div>
+                  <label for="threeMetalness">Metalness</label>
+                  <input type="range" id="threeMetalness" min="0" max="1" step="0.05" value="0.85">
+                  <div class="range-value"><span id="threeMetalnessValue">0.85</span></div>
+                </div>
+                <div>
+                  <label for="threeRoughness">Roughness</label>
+                  <input type="range" id="threeRoughness" min="0" max="1" step="0.05" value="0.25">
+                  <div class="range-value"><span id="threeRoughnessValue">0.25</span></div>
+                </div>
+              </div>
+              <div>
+                <label for="threeManualRotation">Manual Rotation</label>
+                <input type="range" id="threeManualRotation" min="0" max="360" step="1" value="0">
+                <div class="range-value"><span id="threeManualRotationValue">0</span>°</div>
+              </div>
+              <div class="three-actions">
+                <button type="button" id="threeReloadGeometry">Reload geometry</button>
+                <button type="button" class="secondary" id="threeLoadJson">Open local JSON</button>
+                <button type="button" class="secondary" id="threeResetCamera">Reset view</button>
+              </div>
+            </aside>
+          </div>
+          <div class="three-stats" id="threeStats" hidden>
+            <div class="stat-card"><strong id="threeStatArcGroups">0</strong>Arc groups</div>
+            <div class="stat-card"><strong id="threeStatPolygons">0</strong>Polygons extruded</div>
+            <div class="stat-card"><strong id="threeStatParameters">–</strong>Parameters</div>
+          </div>
+        </div>
       </section>
     </div>
   </div>
+
+  <input type="file" id="threeFileInput" accept="application/json" hidden />
 
   <script>
     const form = document.getElementById('controlsForm');
@@ -379,11 +596,18 @@
     const tRange = document.getElementById('inputT');
     const tValue = document.getElementById('tValue');
     const modeSelect = document.getElementById('modeSelect');
-    const open3dButton = document.getElementById('open3d');
     const fillToggle = document.getElementById('togglePattern');
     const fillSettings = document.getElementById('fillSettings');
     const outlineToggle = document.getElementById('toggleOutline');
     const redToggle = document.getElementById('toggleRed');
+    const viewButtons = Array.from(document.querySelectorAll('[data-view]'));
+    const view2d = document.getElementById('view2d');
+    const view3d = document.getElementById('view3d');
+    const threeStatus = document.getElementById('threeStatus');
+    const threeSettingsToggle = document.getElementById('threeSettingsToggle');
+    const threeStage = document.getElementById('threeStage');
+    const threeSettings = document.getElementById('threeSettings');
+    const threeStats = document.getElementById('threeStats');
 
     const DEFAULTS = {
       p: 16,
@@ -400,6 +624,13 @@
       fill_pattern_angle: 0,
       fill_pattern_offset: 0,
     };
+
+    let activeView = '2d';
+    let lastGeometry = null;
+
+    function hasGeometry(geometry) {
+      return Boolean(geometry && Array.isArray(geometry.arcgroups));
+    }
 
     function updateTValue() {
       tValue.textContent = parseFloat(tRange.value).toFixed(2);
@@ -450,6 +681,16 @@
       return query.toString();
     }
 
+    function pulseSettingsButton() {
+      if (!threeSettingsToggle) {
+        return;
+      }
+      threeSettingsToggle.classList.remove('pulse');
+      void threeSettingsToggle.offsetWidth;
+      threeSettingsToggle.classList.add('pulse');
+      setTimeout(() => threeSettingsToggle.classList.remove('pulse'), 1200);
+    }
+
     async function renderSpiral(showLoading = true) {
       const params = collectParams();
       if (showLoading) {
@@ -470,16 +711,20 @@
         svgPreview.classList.remove('empty-state');
 
         const geometry = payload.geometry;
-        if (geometry && Array.isArray(geometry.arcgroups)) {
-          statArcGroups.textContent = geometry.arcgroups.length;
-          statPolygons.textContent = geometry.arcgroups.reduce((sum, g) => sum + (g.arc_count || 0), 0);
+        lastGeometry = hasGeometry(geometry) ? geometry : null;
+        if (hasGeometry(lastGeometry)) {
+          statArcGroups.textContent = lastGeometry.arcgroups.length;
+          statPolygons.textContent = lastGeometry.arcgroups.reduce((sum, g) => sum + (g.arc_count || 0), 0);
           statsBlock.hidden = false;
         } else {
           statsBlock.hidden = true;
         }
 
         statMode.textContent = params.mode === 'arram_boyle' ? 'Arram-Boyle' : 'Classic Doyle';
-        setStatus('Spiral updated. Use the 3D viewer for an extruded view.');
+        setStatus('Spiral updated. Switch views to explore it in 3D.');
+        if (activeView === '3d' && threeApp) {
+          threeApp.useGeometryFromPayload(params, geometry);
+        }
       } catch (error) {
         console.error(error);
         svgPreview.innerHTML = '<div class="empty-state">Unable to render spiral.</div>';
@@ -505,27 +750,468 @@
       if (event.target === fillToggle) {
         toggleFillSettings();
       }
-      if (event.target.name === 'mode') {
-        open3dButton.disabled = event.target.value !== 'arram_boyle';
-      }
       debouncedRender();
+      if (activeView === '3d' && threeApp) {
+        threeApp.queueGeometryUpdate(collectParams());
+      }
     });
 
     form.addEventListener('submit', event => {
       event.preventDefault();
       renderSpiral(true);
+      if (activeView === '3d' && threeApp) {
+        threeApp.queueGeometryUpdate(collectParams(), true);
+      }
     });
 
-    open3dButton.addEventListener('click', () => {
-      const params = collectParams();
-      params.mode = 'arram_boyle';
-      const query = paramsToQuery(params);
-      window.open(`/viewer?${query}`, '_blank');
+    viewButtons.forEach(button => {
+      button.addEventListener('click', () => {
+        const view = button.dataset.view;
+        if (view === activeView) {
+          return;
+        }
+        activeView = view;
+        viewButtons.forEach(btn => {
+          const isActive = btn.dataset.view === view;
+          btn.classList.toggle('active', isActive);
+          btn.setAttribute('aria-pressed', String(isActive));
+        });
+
+        const show3d = view === '3d';
+        view2d.hidden = show3d;
+        view3d.hidden = !show3d;
+        statsBlock.hidden = show3d ? true : !hasGeometry(lastGeometry);
+
+        if (show3d) {
+          pulseSettingsButton();
+          ensureThreeApp();
+          if (threeApp) {
+            threeApp.queueGeometryUpdate(collectParams(), true);
+          }
+        }
+      });
     });
+
+    threeSettingsToggle.addEventListener('click', () => {
+      const collapsed = threeStage.classList.toggle('collapsed');
+      threeSettingsToggle.textContent = collapsed ? 'Show 3D settings' : 'Hide 3D settings';
+      threeSettingsToggle.setAttribute('aria-expanded', String(!collapsed));
+    });
+
+    const fileInput = document.getElementById('threeFileInput');
+
+    let threeApp = null;
+
+    function ensureThreeApp() {
+      if (threeApp) {
+        return threeApp;
+      }
+      if (typeof THREE === 'undefined') {
+        threeStatus.textContent = 'Unable to load the 3D engine. Check your network connection and try again.';
+        threeStatus.classList.add('error');
+        return null;
+      }
+      threeApp = createThreeApp();
+      return threeApp;
+    }
+    function createThreeApp() {
+      const canvas = document.getElementById('threeCanvas');
+      const statusMessage = document.getElementById('threeStatus');
+      const statsBlock3d = document.getElementById('threeStats');
+      const statArcGroups3d = document.getElementById('threeStatArcGroups');
+      const statPolygons3d = document.getElementById('threeStatPolygons');
+      const statParameters3d = document.getElementById('threeStatParameters');
+      const rotationSpeed = document.getElementById('threeRotationSpeed');
+      const rotationSpeedValue = document.getElementById('threeRotationSpeedValue');
+      const manualRotation = document.getElementById('threeManualRotation');
+      const manualRotationValue = document.getElementById('threeManualRotationValue');
+      const pulseSlider = document.getElementById('threePulseSpeed');
+      const pulseSpeedValue = document.getElementById('threePulseSpeedValue');
+      const metalnessSlider = document.getElementById('threeMetalness');
+      const metalnessValue = document.getElementById('threeMetalnessValue');
+      const roughnessSlider = document.getElementById('threeRoughness');
+      const roughnessValue = document.getElementById('threeRoughnessValue');
+      const reloadGeometryBtn = document.getElementById('threeReloadGeometry');
+      const loadJsonBtn = document.getElementById('threeLoadJson');
+      const resetCameraBtn = document.getElementById('threeResetCamera');
+
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x0a0e1a);
+      scene.fog = new THREE.Fog(0x0a0e1a, 5, 15);
+
+      const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 1000);
+      camera.position.set(0, 0, 4);
+
+      const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+      function resizeRendererToDisplaySize() {
+        const width = canvas.clientWidth;
+        const height = canvas.clientHeight;
+        if (canvas.width !== width || canvas.height !== height) {
+          renderer.setSize(width, height, false);
+          camera.aspect = width / height;
+          camera.updateProjectionMatrix();
+        }
+      }
+
+      const ambient = new THREE.AmbientLight(0x404060, 0.4);
+      scene.add(ambient);
+      const key = new THREE.DirectionalLight(0xffffff, 1.2);
+      key.position.set(5, 8, 7);
+      key.castShadow = true;
+      scene.add(key);
+      const fill = new THREE.DirectionalLight(0x7799ff, 0.5);
+      fill.position.set(-5, 3, -5);
+      scene.add(fill);
+      const rim = new THREE.DirectionalLight(0xffaa77, 0.6);
+      rim.position.set(0, -5, -5);
+      scene.add(rim);
+
+      const spiralContainer = new THREE.Group();
+      scene.add(spiralContainer);
+
+      let cameraRotation = { x: 0, y: 0 };
+      let cameraDistance = 4;
+      let autoRotationSpeed = parseFloat(rotationSpeed.value);
+      let pulseSpeed = parseFloat(pulseSlider.value);
+      let metalness = parseFloat(metalnessSlider.value);
+      let roughness = parseFloat(roughnessSlider.value);
+      let animationStart = performance.now();
+      let pendingParams = null;
+      let pendingTimer = null;
+
+      const palette = [
+        0xc0c0d0, 0xb0b0c0, 0xa8a8b8, 0x9898a8,
+        0xd0d0e0, 0xb8b8c8, 0xa0a0b0, 0xc8c8d8,
+        0x888898, 0xd8d8e8
+      ];
+
+      function getColorForRing(i) {
+        return palette[Math.abs(i) % palette.length];
+      }
+
+      function clearSpiral() {
+        spiralContainer.children.forEach(mesh => {
+          mesh.geometry.dispose();
+          mesh.material.dispose();
+        });
+        spiralContainer.clear();
+        spiralContainer.position.set(0, 0, 0);
+        spiralContainer.rotation.set(0, 0, 0);
+        spiralContainer.scale.set(1, 1, 1);
+      }
+
+      function createPolygonMesh(outline, ringIndex, lineAngle) {
+        if (!outline.length) {
+          return null;
+        }
+
+        const shape = new THREE.Shape();
+        shape.moveTo(outline[0][0], outline[0][1]);
+        for (let i = 1; i < outline.length; i += 1) {
+          shape.lineTo(outline[i][0], outline[i][1]);
+        }
+
+        const geometry = new THREE.ExtrudeGeometry(shape, {
+          depth: 0.05,
+          bevelEnabled: true,
+          bevelThickness: 0.01,
+          bevelSize: 0.01,
+          bevelSegments: 2,
+        });
+
+        const material = new THREE.MeshStandardMaterial({
+          color: getColorForRing(ringIndex || 0),
+          metalness,
+          roughness,
+          emissive: 0x000000,
+        });
+
+        const mesh = new THREE.Mesh(geometry, material);
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        mesh.userData = {
+          ringIndex,
+          lineAngle: lineAngle || 0,
+          isPulsing: false,
+          wasInRange: false,
+          pulseStart: 0,
+        };
+        return mesh;
+      }
+
+      function loadSpiralFromJSON(data) {
+        if (!data || !Array.isArray(data.arcgroups)) {
+          throw new Error('Invalid geometry payload');
+        }
+
+        clearSpiral();
+
+        data.arcgroups.forEach(group => {
+          const mesh = createPolygonMesh(group.outline || [], group.ring_index, group.line_angle);
+          if (mesh) {
+            spiralContainer.add(mesh);
+          }
+        });
+
+        if (spiralContainer.children.length) {
+          const box = new THREE.Box3().setFromObject(spiralContainer);
+          const center = box.getCenter(new THREE.Vector3());
+          const size = box.getSize(new THREE.Vector3());
+          const maxDimension = Math.max(size.x, size.y, size.z, 1e-6);
+          const scale = 2.5 / maxDimension;
+          spiralContainer.position.set(-center.x * scale, -center.y * scale, -center.z * scale);
+          spiralContainer.scale.setScalar(scale);
+          resetView();
+        }
+
+        statArcGroups3d.textContent = data.arcgroups.length;
+        statPolygons3d.textContent = spiralContainer.children.length;
+        statsBlock3d.hidden = false;
+      }
+
+      function updateMaterialsForRotation(rotationAngleDeg, timeSec) {
+        const threshold = 20;
+        const pulseDuration = 1 / Math.max(pulseSpeed, 0.0001);
+
+        spiralContainer.children.forEach(mesh => {
+          const lineAngle = mesh.userData.lineAngle || 0;
+          const diff = Math.abs(((rotationAngleDeg - lineAngle + 450) % 180) - 90);
+          const isInRange = diff < threshold;
+
+          if (isInRange && !mesh.userData.wasInRange) {
+            mesh.userData.isPulsing = true;
+            mesh.userData.pulseStart = timeSec;
+          }
+
+          if (mesh.userData.isPulsing) {
+            const elapsed = timeSec - mesh.userData.pulseStart;
+            if (elapsed < pulseDuration) {
+              const t = elapsed / pulseDuration;
+              const s = Math.sin(t * Math.PI);
+              mesh.material.emissive.setHex(0xffd700);
+              mesh.material.emissiveIntensity = s * 0.8;
+              mesh.material.metalness = metalness + 0.1 * s;
+            } else {
+              mesh.userData.isPulsing = false;
+              mesh.material.emissive.setHex(0x000000);
+              mesh.material.emissiveIntensity = 0;
+              mesh.material.metalness = metalness;
+            }
+          }
+
+          mesh.userData.wasInRange = isInRange;
+        });
+      }
+
+      function updateCamera() {
+        const { x, y } = cameraRotation;
+        camera.position.x = cameraDistance * Math.sin(x) * Math.cos(y);
+        camera.position.y = cameraDistance * Math.sin(y);
+        camera.position.z = cameraDistance * Math.cos(x) * Math.cos(y);
+        camera.lookAt(0, 0, 0);
+      }
+
+      function resetView() {
+        cameraRotation = { x: 0, y: 0 };
+        cameraDistance = 4;
+        spiralContainer.rotation.set(0, 0, 0);
+        manualRotation.value = '0';
+        manualRotationValue.textContent = '0';
+        animationStart = performance.now();
+        updateCamera();
+      }
+
+      async function fetchGeometry(params) {
+        if (!params) {
+          return;
+        }
+        const geometryParams = { ...params, mode: 'arram_boyle' };
+        const query = paramsToQuery(geometryParams);
+        statusMessage.textContent = 'Loading geometry…';
+        statusMessage.classList.remove('error');
+        try {
+          const response = await fetch(`/api/spiral/geometry?${query}`);
+          if (!response.ok) {
+            throw new Error(`Server responded with ${response.status}`);
+          }
+          const payload = await response.json();
+          if (!payload.geometry) {
+            throw new Error('No geometry returned by the server');
+          }
+          loadSpiralFromJSON(payload.geometry);
+          const p = payload.params || {};
+          statParameters3d.textContent = `p=${p.p}, q=${p.q}, t=${Number(p.t).toFixed(2)}`;
+          statusMessage.textContent = 'Geometry loaded from backend.';
+        } catch (error) {
+          console.error(error);
+          statusMessage.textContent = `Unable to load geometry: ${error.message}`;
+          statusMessage.classList.add('error');
+        }
+      }
+
+      reloadGeometryBtn.addEventListener('click', () => {
+        fetchGeometry(collectParams());
+      });
+
+      loadJsonBtn.addEventListener('click', () => fileInput.click());
+
+      fileInput.addEventListener('change', event => {
+        const [file] = event.target.files || [];
+        if (!file) {
+          return;
+        }
+        const reader = new FileReader();
+        reader.onload = e => {
+          try {
+            const data = JSON.parse(e.target.result);
+            loadSpiralFromJSON(data);
+            statParameters3d.textContent = file.name;
+            statusMessage.textContent = 'Geometry loaded from local file.';
+            statusMessage.classList.remove('error');
+          } catch (error) {
+            statusMessage.textContent = 'Invalid JSON file.';
+            statusMessage.classList.add('error');
+          }
+        };
+        reader.readAsText(file);
+      });
+
+      resetCameraBtn.addEventListener('click', resetView);
+
+      rotationSpeed.addEventListener('input', () => {
+        autoRotationSpeed = parseFloat(rotationSpeed.value);
+        rotationSpeedValue.textContent = autoRotationSpeed.toFixed(2);
+      });
+
+      manualRotation.addEventListener('input', () => {
+        const value = parseFloat(manualRotation.value);
+        manualRotationValue.textContent = value.toFixed(0);
+      });
+
+      pulseSlider.addEventListener('input', () => {
+        pulseSpeed = parseFloat(pulseSlider.value);
+        pulseSpeedValue.textContent = pulseSpeed.toFixed(1);
+      });
+
+      metalnessSlider.addEventListener('input', () => {
+        metalness = parseFloat(metalnessSlider.value);
+        metalnessValue.textContent = metalness.toFixed(2);
+        spiralContainer.children.forEach(mesh => mesh.material.metalness = metalness);
+      });
+
+      roughnessSlider.addEventListener('input', () => {
+        roughness = parseFloat(roughnessSlider.value);
+        roughnessValue.textContent = roughness.toFixed(2);
+        spiralContainer.children.forEach(mesh => mesh.material.roughness = roughness);
+      });
+
+      let isDragging = false;
+      let previousPointer = null;
+
+      canvas.addEventListener('pointerdown', event => {
+        isDragging = true;
+        previousPointer = { x: event.clientX, y: event.clientY };
+        canvas.setPointerCapture(event.pointerId);
+      });
+
+      canvas.addEventListener('pointermove', event => {
+        if (!isDragging || !previousPointer) {
+          return;
+        }
+
+        const dx = event.clientX - previousPointer.x;
+        const dy = event.clientY - previousPointer.y;
+        cameraRotation.x += dx * 0.01;
+        cameraRotation.y += dy * 0.01;
+        cameraRotation.y = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, cameraRotation.y));
+        previousPointer = { x: event.clientX, y: event.clientY };
+        updateCamera();
+      });
+
+      canvas.addEventListener('pointerup', event => {
+        isDragging = false;
+        previousPointer = null;
+        canvas.releasePointerCapture(event.pointerId);
+      });
+
+      canvas.addEventListener('pointerleave', () => {
+        isDragging = false;
+        previousPointer = null;
+      });
+
+      canvas.addEventListener('wheel', event => {
+        event.preventDefault();
+        cameraDistance += event.deltaY * 0.01;
+        cameraDistance = Math.max(1, Math.min(15, cameraDistance));
+        updateCamera();
+      }, { passive: false });
+
+      function animate(time) {
+        requestAnimationFrame(animate);
+        resizeRendererToDisplaySize();
+
+        const timeSec = (time - animationStart) / 1000;
+        const manualValue = parseFloat(manualRotation.value);
+        let rotationDeg;
+
+        if (autoRotationSpeed > 0 && Math.abs(manualValue) < 1e-6) {
+          rotationDeg = (timeSec * autoRotationSpeed * 360) % 360;
+        } else {
+          rotationDeg = manualValue % 360;
+        }
+
+        spiralContainer.rotation.z = THREE.MathUtils.degToRad(rotationDeg);
+        updateMaterialsForRotation(rotationDeg, timeSec);
+        updateCamera();
+        renderer.render(scene, camera);
+      }
+
+      updateCamera();
+      requestAnimationFrame(animate);
+
+      function scheduleGeometry(params, immediate = false) {
+        pendingParams = params;
+        if (pendingTimer) {
+          clearTimeout(pendingTimer);
+        }
+        if (immediate) {
+          fetchGeometry(pendingParams);
+        } else {
+          pendingTimer = setTimeout(() => {
+            fetchGeometry(pendingParams);
+            pendingTimer = null;
+          }, 250);
+        }
+      }
+
+      function useGeometryFromPayload(params, geometry) {
+        if (geometry && Array.isArray(geometry.arcgroups)) {
+          try {
+            loadSpiralFromJSON(geometry);
+            statParameters3d.textContent = `p=${params.p}, q=${params.q}, t=${Number(params.t).toFixed(2)}`;
+            statusMessage.textContent = 'Geometry loaded from 2D render payload.';
+            statusMessage.classList.remove('error');
+            return;
+          } catch (error) {
+            console.warn('Failed to use payload geometry, falling back to fetch', error);
+          }
+        }
+        scheduleGeometry(params, true);
+      }
+
+      return {
+        queueGeometryUpdate(params, immediate = false) {
+          scheduleGeometry(params, immediate);
+        },
+        useGeometryFromPayload,
+      };
+    }
 
     toggleFillSettings();
     updateTValue();
-    open3dButton.disabled = modeSelect.value !== 'arram_boyle';
     renderSpiral(true);
   </script>
 </body>
