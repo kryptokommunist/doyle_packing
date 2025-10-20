@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>3D Doyle Spiral Viewer</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r152/three.min.js" integrity="sha512-9pt7rKE+v5YidKUNNM41Qaj+od2OYkxC8E7YnLv4MoaiK74F6WgxlUSlk3EC11vkK3CVCyzZ+7ITZSnc3T2jFg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+      --bg: radial-gradient(circle at top, rgba(56,189,248,0.2), transparent 45%), linear-gradient(160deg, #020617 0%, #0b1120 70%, #020617 100%);
+      --panel: rgba(15, 23, 42, 0.75);
+      --panel-border: rgba(148, 163, 184, 0.3);
+      --accent: #38bdf8;
+      --text: rgba(255, 255, 255, 0.92);
+      --text-muted: rgba(255, 255, 255, 0.6);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 24px;
+      padding: clamp(16px, 4vw, 32px);
+    }
+
+    header {
+      width: min(1200px, 100%);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(26px, 4vw, 40px);
+      letter-spacing: -0.02em;
+    }
+
+    .back-link {
+      color: var(--accent);
+      text-decoration: none;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .viewer {
+      width: min(1200px, 100%);
+      display: grid;
+      gap: 18px;
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    canvas {
+      width: 100%;
+      aspect-ratio: 3 / 2;
+      border-radius: 22px;
+      border: 1px solid var(--panel-border);
+      background: rgba(2, 6, 23, 0.6);
+      box-shadow: 0 30px 80px rgba(2, 6, 23, 0.55);
+      cursor: grab;
+    }
+
+    canvas:active { cursor: grabbing; }
+
+    .panel {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 18px;
+      background: var(--panel);
+      border-radius: 20px;
+      border: 1px solid var(--panel-border);
+      padding: clamp(18px, 2vw, 24px);
+      backdrop-filter: blur(14px);
+    }
+
+    .control {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    label {
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-muted);
+    }
+
+    input[type="range"] {
+      width: 100%;
+      appearance: none;
+      height: 4px;
+      border-radius: 999px;
+      background: linear-gradient(90deg, rgba(56,189,248,0.9), rgba(14,165,233,0.6));
+      outline: none;
+    }
+
+    input[type="range"]::-webkit-slider-thumb {
+      appearance: none;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: #fff;
+      border: 2px solid rgba(56,189,248,0.9);
+      box-shadow: 0 6px 18px rgba(14,165,233,0.45);
+      cursor: pointer;
+    }
+
+    input[type="range"]::-moz-range-thumb {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: #fff;
+      border: 2px solid rgba(56,189,248,0.9);
+      box-shadow: 0 6px 18px rgba(14,165,233,0.45);
+      cursor: pointer;
+    }
+
+    .value {
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+
+    .stats {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 18px;
+      padding-top: 8px;
+      border-top: 1px solid rgba(148, 163, 184, 0.25);
+      margin-top: 8px;
+    }
+
+    .stat {
+      flex: 1 1 140px;
+      background: rgba(2,6,23,0.55);
+      border-radius: 14px;
+      border: 1px solid rgba(148,163,184,0.2);
+      padding: 12px 16px;
+    }
+
+    .stat dt {
+      margin: 0;
+      font-size: 11px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+    }
+
+    .stat dd {
+      margin: 6px 0 0;
+      font-size: 20px;
+      font-weight: 600;
+    }
+
+    .status {
+      font-size: 13px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+    }
+
+    .status strong {
+      color: var(--text);
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>3D Doyle Spiral Viewer</h1>
+    <a class="back-link" href="{{ url_for('index') }}">← back to studio</a>
+  </header>
+
+  <div class="viewer">
+    <canvas id="canvas"></canvas>
+    <section class="panel">
+      <div class="control">
+        <label for="rotation">Rotation speed</label>
+        <input type="range" id="rotation" min="0" max="2" step="0.05" value="0.4" />
+        <div class="value"><span id="rotationValue">0.40</span> revolutions/sec</div>
+      </div>
+      <div class="control">
+        <label for="pulse">Pulse speed</label>
+        <input type="range" id="pulse" min="0.2" max="4" step="0.1" value="1.4" />
+        <div class="value"><span id="pulseValue">1.4</span> Hz</div>
+      </div>
+      <div class="control">
+        <label for="metalness">Metalness</label>
+        <input type="range" id="metalness" min="0" max="1" step="0.05" value="0.85" />
+        <div class="value"><span id="metalnessValue">0.85</span></div>
+      </div>
+      <div class="control">
+        <label for="roughness">Roughness</label>
+        <input type="range" id="roughness" min="0" max="1" step="0.05" value="0.25" />
+        <div class="value"><span id="roughnessValue">0.25</span></div>
+      </div>
+      <div class="control">
+        <label for="manual">Manual rotation</label>
+        <input type="range" id="manual" min="0" max="360" step="1" value="0" />
+        <div class="value"><span id="manualValue">0°</span></div>
+      </div>
+      <div class="status" id="status">Loading spiral…</div>
+      <div class="stats">
+        <dl class="stat">
+          <dt>Arc groups</dt>
+          <dd id="statGroups">–</dd>
+        </dl>
+        <dl class="stat">
+          <dt>Polygons</dt>
+          <dd id="statPolygons">–</dd>
+        </dl>
+        <dl class="stat">
+          <dt>Ring span</dt>
+          <dd id="statRings">–</dd>
+        </dl>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const canvas = document.getElementById('canvas');
+    const statusEl = document.getElementById('status');
+    const statGroups = document.getElementById('statGroups');
+    const statPolygons = document.getElementById('statPolygons');
+    const statRings = document.getElementById('statRings');
+
+    const rotationRange = document.getElementById('rotation');
+    const pulseRange = document.getElementById('pulse');
+    const metalnessRange = document.getElementById('metalness');
+    const roughnessRange = document.getElementById('roughness');
+    const manualRange = document.getElementById('manual');
+
+    const rotationLabel = document.getElementById('rotationValue');
+    const pulseLabel = document.getElementById('pulseValue');
+    const metalnessLabel = document.getElementById('metalnessValue');
+    const roughnessLabel = document.getElementById('roughnessValue');
+    const manualLabel = document.getElementById('manualValue');
+
+    const spiralId = {{ spiral_id|tojson }};
+    const dataUrl = {{ url_for('get_spiral', spiral_id=spiral_id)|tojson }};
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x030712);
+
+    const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 100);
+    camera.position.set(0, 0, 5);
+
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+    renderer.shadowMap.enabled = true;
+
+    const spiralGroup = new THREE.Group();
+    scene.add(spiralGroup);
+
+    const ambient = new THREE.AmbientLight(0x335577, 0.6);
+    scene.add(ambient);
+    const keyLight = new THREE.DirectionalLight(0xffffff, 1.2);
+    keyLight.position.set(6, 8, 6);
+    keyLight.castShadow = true;
+    scene.add(keyLight);
+    const fillLight = new THREE.DirectionalLight(0x88aaff, 0.6);
+    fillLight.position.set(-4, 3, -4);
+    scene.add(fillLight);
+    const rimLight = new THREE.DirectionalLight(0xffb347, 0.4);
+    rimLight.position.set(0, -6, -4);
+    scene.add(rimLight);
+
+    const clock = new THREE.Clock();
+    let autoRotation = parseFloat(rotationRange.value);
+    let pulseSpeed = parseFloat(pulseRange.value);
+    let manualRotation = 0;
+    let metalness = parseFloat(metalnessRange.value);
+    let roughness = parseFloat(roughnessRange.value);
+
+    const palette = [0xcbd5f5, 0xbec7f0, 0xaeb8eb, 0x9da9e3, 0x8c9bda, 0x7b8cd0, 0x6d7ec6, 0x5f6fbd];
+
+    function updateLabels() {
+      rotationLabel.textContent = autoRotation.toFixed(2);
+      pulseLabel.textContent = pulseSpeed.toFixed(1);
+      metalnessLabel.textContent = metalness.toFixed(2);
+      roughnessLabel.textContent = roughness.toFixed(2);
+      manualLabel.textContent = `${manualRotation.toFixed(0)}°`;
+    }
+
+    function clearSpiral() {
+      spiralGroup.children.forEach((mesh) => {
+        mesh.geometry.dispose();
+        mesh.material.dispose();
+      });
+      spiralGroup.clear();
+    }
+
+    function createMeshFromOutline(outline, ringIndex, angle) {
+      const shape = new THREE.Shape();
+      outline.forEach(([x, y], index) => {
+        if (index === 0) {
+          shape.moveTo(x, y);
+        } else {
+          shape.lineTo(x, y);
+        }
+      });
+
+      const geometry = new THREE.ExtrudeGeometry(shape, {
+        depth: 0.05,
+        bevelEnabled: true,
+        bevelThickness: 0.02,
+        bevelSize: 0.015,
+        bevelSegments: 2,
+      });
+
+      const material = new THREE.MeshStandardMaterial({
+        color: palette[Math.abs(ringIndex) % palette.length],
+        metalness,
+        roughness,
+        emissive: 0x000000,
+      });
+
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      mesh.userData = { ringIndex, angle };
+      return mesh;
+    }
+
+    function loadSpiral(data) {
+      clearSpiral();
+      const arcgroups = data.arcgroups || [];
+      let maxRing = -Infinity;
+
+      arcgroups.forEach((group) => {
+        if (!group.outline || group.outline.length < 3) return;
+        const mesh = createMeshFromOutline(group.outline, group.ring_index ?? 0, group.line_angle || 0);
+        spiralGroup.add(mesh);
+        if (typeof group.ring_index === 'number') {
+          maxRing = Math.max(maxRing, group.ring_index);
+        }
+      });
+
+      statGroups.textContent = arcgroups.length;
+      const polygonCount = arcgroups.reduce((total, group) => total + (group.outline?.length || 0), 0);
+      statPolygons.textContent = polygonCount;
+      statRings.textContent = Number.isFinite(maxRing) ? `${maxRing + 1}` : '–';
+      statusEl.innerHTML = '<strong>Ready</strong> — use the sliders to tune the scene';
+    }
+
+    function resizeRenderer() {
+      const { clientWidth, clientHeight } = canvas;
+      if (canvas.width !== clientWidth || canvas.height !== clientHeight) {
+        renderer.setSize(clientWidth, clientHeight, false);
+        camera.aspect = clientWidth / clientHeight;
+        camera.updateProjectionMatrix();
+      }
+    }
+
+    function animate() {
+      requestAnimationFrame(animate);
+      resizeRenderer();
+      const elapsed = clock.getElapsedTime();
+      const baseRotation = elapsed * autoRotation * Math.PI * 2;
+      const manualRadians = THREE.MathUtils.degToRad(manualRotation);
+      spiralGroup.rotation.z = baseRotation + manualRadians;
+
+      const intensity = 0.45 + 0.25 * Math.sin(elapsed * pulseSpeed * Math.PI * 2);
+      spiralGroup.children.forEach((mesh) => {
+        mesh.material.emissiveIntensity = intensity;
+      });
+
+      renderer.render(scene, camera);
+    }
+
+    async function fetchSpiral() {
+      try {
+        const response = await fetch(dataUrl);
+        if (!response.ok) {
+          throw new Error('Failed to load spiral data');
+        }
+        const data = await response.json();
+        loadSpiral(data);
+      } catch (error) {
+        console.error(error);
+        statusEl.innerHTML = '<strong>Error</strong> — unable to load spiral';
+      }
+    }
+
+    rotationRange.addEventListener('input', () => {
+      autoRotation = parseFloat(rotationRange.value);
+      updateLabels();
+    });
+    pulseRange.addEventListener('input', () => {
+      pulseSpeed = parseFloat(pulseRange.value);
+      updateLabels();
+    });
+    metalnessRange.addEventListener('input', () => {
+      metalness = parseFloat(metalnessRange.value);
+      spiralGroup.children.forEach((mesh) => {
+        mesh.material.metalness = metalness;
+      });
+      updateLabels();
+    });
+    roughnessRange.addEventListener('input', () => {
+      roughness = parseFloat(roughnessRange.value);
+      spiralGroup.children.forEach((mesh) => {
+        mesh.material.roughness = roughness;
+      });
+      updateLabels();
+    });
+    manualRange.addEventListener('input', () => {
+      manualRotation = parseFloat(manualRange.value);
+      updateLabels();
+    });
+
+    updateLabels();
+    fetchSpiral();
+    animate();
+  </script>
+</body>
+</html>

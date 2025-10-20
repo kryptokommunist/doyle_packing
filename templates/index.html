@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Doyle Spiral Studio</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+</head>
+<body>
+  <main class="page">
+    <header class="page__header">
+      <div>
+        <h1 class="page__title">Doyle Spiral Studio</h1>
+        <p class="page__subtitle">Explore Arram–Boyle spirals, tweak their structure, then jump into an immersive 3D view.</p>
+      </div>
+      <a class="page__link" href="https://en.wikipedia.org/wiki/Doyle_spiral" target="_blank" rel="noopener">What is a Doyle spiral?</a>
+    </header>
+
+    <section class="workspace">
+      <form id="controls" class="panel panel--controls">
+        <h2 class="panel__title">Parameters</h2>
+        <div class="field">
+          <label for="p">p</label>
+          <div class="field__input">
+            <input type="range" id="p" name="p" min="2" max="64" step="1" value="16" />
+            <span class="field__value" data-for="p">16</span>
+          </div>
+        </div>
+        <div class="field">
+          <label for="q">q</label>
+          <div class="field__input">
+            <input type="range" id="q" name="q" min="4" max="128" step="1" value="16" />
+            <span class="field__value" data-for="q">16</span>
+          </div>
+        </div>
+        <div class="field">
+          <label for="t">t offset</label>
+          <div class="field__input">
+            <input type="range" id="t" name="t" min="0" max="1" step="0.05" value="0" />
+            <span class="field__value" data-for="t">0</span>
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="mode">2D mode</label>
+          <select id="mode" name="mode">
+            <option value="arram_boyle" selected>Arram–Boyle arcs</option>
+            <option value="doyle">Full Doyle circles</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label for="arc_mode">Arc selection</label>
+          <select id="arc_mode" name="arc_mode">
+            <option value="closest" selected>Closest to spine</option>
+            <option value="farthest">Farthest from spine</option>
+            <option value="alternating">Alternating</option>
+            <option value="all">Draw all arcs</option>
+            <option value="symmetric">Symmetric</option>
+            <option value="angular">Angular distance</option>
+            <option value="random">Random</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label for="num_gaps">Arc gaps</label>
+          <div class="field__input">
+            <input type="range" id="num_gaps" name="num_gaps" min="0" max="6" step="1" value="2" />
+            <span class="field__value" data-for="num_gaps">2</span>
+          </div>
+        </div>
+
+        <fieldset class="field field--switch">
+          <label for="add_fill_pattern">Pattern fill</label>
+          <input type="checkbox" id="add_fill_pattern" name="add_fill_pattern" />
+        </fieldset>
+
+        <div class="field field--inline" data-dependent="add_fill_pattern">
+          <label for="fill_pattern_spacing">Line spacing</label>
+          <div class="field__input">
+            <input type="range" id="fill_pattern_spacing" name="fill_pattern_spacing" min="0.5" max="20" step="0.5" value="5" />
+            <span class="field__value" data-for="fill_pattern_spacing">5</span>
+          </div>
+        </div>
+
+        <div class="field field--inline" data-dependent="add_fill_pattern">
+          <label for="fill_pattern_angle">Ring rotation</label>
+          <div class="field__input">
+            <input type="range" id="fill_pattern_angle" name="fill_pattern_angle" min="-90" max="90" step="1" value="0" />
+            <span class="field__value" data-for="fill_pattern_angle">0°</span>
+          </div>
+        </div>
+
+        <div class="field field--inline" data-dependent="add_fill_pattern">
+          <label for="fill_pattern_offset">Line inset</label>
+          <div class="field__input">
+            <input type="range" id="fill_pattern_offset" name="fill_pattern_offset" min="0" max="10" step="0.5" value="0" />
+            <span class="field__value" data-for="fill_pattern_offset">0</span>
+          </div>
+        </div>
+
+        <fieldset class="field field--switch">
+          <label for="draw_group_outline">Show outlines</label>
+          <input type="checkbox" id="draw_group_outline" name="draw_group_outline" checked />
+        </fieldset>
+      </form>
+
+      <section class="panel panel--preview">
+        <div class="panel__header">
+          <h2 class="panel__title">Spiral preview</h2>
+          <div id="status" class="status">Idle</div>
+        </div>
+        <div id="preview" class="preview">
+          <div class="preview__empty">Adjust a parameter to render the spiral.</div>
+        </div>
+        <div class="panel__footer">
+          <dl class="meta">
+            <div class="meta__item">
+              <dt>Arc groups</dt>
+              <dd id="meta-groups">–</dd>
+            </div>
+            <div class="meta__item">
+              <dt>Polygons</dt>
+              <dd id="meta-polygons">–</dd>
+            </div>
+            <div class="meta__item">
+              <dt>Last render</dt>
+              <dd id="meta-time">–</dd>
+            </div>
+          </dl>
+          <button id="open-3d" class="button" disabled>Open 3D viewer</button>
+        </div>
+      </section>
+    </section>
+  </main>
+  <script src="{{ url_for('static', filename='js/main.js') }}" type="module"></script>
+</body>
+</html>
