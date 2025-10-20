@@ -16,6 +16,7 @@ from typing import List, Tuple, Optional, Set, Dict
 import random
 import math
 import itertools
+from collections import deque
 from matplotlib.path import Path as MplPath
 import json
 
@@ -667,6 +668,11 @@ class ArcGroup:
         self.debug_stroke: Optional[str] = None
         # public: ring layer index within the Doyle spiral (0-based from smallest radius)
         self.ring_index: Optional[int] = None
+        # metadata for animation strategies
+        self.source_circle: Optional['CircleElement'] = None
+        self.family_index: Optional[int] = None
+        self.center: Optional[complex] = None
+        self.line_angle: float = 0.0
 
     def add_arc(self, arc: ArcElement):
         """
@@ -905,13 +911,15 @@ class DoyleSpiral:
 
         circles = []
         # Generate q families of circles
-        for _ in range(1, self.q + 1):
+        for family_idx in range(self.q):
             # Generate circles moving outward from the center
             qv = start
             mod_q = abs(qv)
             while mod_q < self.max_d:
                 center = scale * qv * w
-                circles.append(CircleElement(center, r * scale * mod_q))
+                circle = CircleElement(center, r * scale * mod_q)
+                circle.family_index = family_idx
+                circles.append(circle)
                 qv *= a
                 mod_q *= abs(a)
 
@@ -920,7 +928,9 @@ class DoyleSpiral:
             mod_q = abs(qv)
             while mod_q > min_d:
                 center = scale * qv * w
-                circles.append(CircleElement(center, r * scale * mod_q))
+                circle = CircleElement(center, r * scale * mod_q)
+                circle.family_index = family_idx
+                circles.append(circle)
                 qv /= a
                 mod_q /= abs(a)
 
@@ -941,7 +951,7 @@ class DoyleSpiral:
 
         outer_circles = []
         # Generate one outer circle for each of the q families
-        for _ in range(1, self.q + 1):
+        for family_idx in range(self.q):
             qv = start
             # Fast-forward to the last generated visible circle's 'qv'
             while abs(qv) * scale < self.max_d:
@@ -951,7 +961,9 @@ class DoyleSpiral:
             center = scale * qv * w
             # Use a generous multiplier for max_d check to ensure we get the next ring
             if abs(qv) * scale < self.max_d * abs(a) * 2:
-                outer_circles.append(CircleElement(center, r * scale * abs(qv), visible=False))
+                circle = CircleElement(center, r * scale * abs(qv), visible=False)
+                circle.family_index = family_idx
+                outer_circles.append(circle)
 
             start *= b
 
@@ -1018,7 +1030,10 @@ class DoyleSpiral:
             # Create group for this circle
             group = self.create_group_for_circle(c)
             group.ring_index = radius_to_ring.get(round(c.radius, 6), None)
-            
+            group.source_circle = c
+            group.family_index = getattr(c, "family_index", None)
+            group.center = c.center
+
             # Assign debug color if needed
             if debug_groups:
                 rng = random.Random(c.id)
@@ -1037,7 +1052,7 @@ class DoyleSpiral:
                 
                 group.add_arc(arc)
     
-    def _draw_outer_closure_arcs(self, spiral_center, debug_groups, red_outline, 
+    def _draw_outer_closure_arcs(self, spiral_center, debug_groups, red_outline,
                                  add_fill_pattern, draw_group_outline, context):
         """Draw closure arcs from outer invisible circles."""
         for c in self.outer_circles:
@@ -1069,19 +1084,215 @@ class DoyleSpiral:
                 if key not in self.arc_groups:
                     self.arc_groups[key] = ArcGroup(name=key)
                     self.arc_groups[key].ring_index = -1
+                    self.arc_groups[key].source_circle = c
+                    self.arc_groups[key].family_index = getattr(c, "family_index", None)
+                    self.arc_groups[key].center = c.center
                     if debug_groups:
                         rng = random.Random(c.id + 1000)
                         self.arc_groups[key].debug_fill = "#%06x" % rng.randint(0, 0xFFFFFF)
                         self.arc_groups[key].debug_stroke = "#000000"
                 
                 self.arc_groups[key].add_arc(arc)
-    
+
     # ---- Rendering ----
 
-    def _render_arram_boyle(self, context: DrawingContext, debug_groups: bool = False, 
-                           add_fill_pattern: bool = False, fill_pattern_spacing: float = 5.0, 
-                           fill_pattern_angle: float = 0.0, red_outline: bool = False, 
-                           draw_group_outline: bool = True, fill_pattern_offset: float = 0):
+    @staticmethod
+    def _wrap_half_turn(angle: float) -> float:
+        """Normalize an angle to the [0, 180) range respecting reflective symmetry."""
+        if math.isnan(angle):
+            return 0.0
+        wrapped = angle % 180.0
+        return wrapped if wrapped < 179.999 else 179.999
+
+    def _assign_line_angles(self, animation_mode: str, fill_pattern_angle: float, spiral_center: complex):
+        """Assign per-group line angles that drive animation timing."""
+        groups = list(self.arc_groups.values())
+        if not groups:
+            return
+
+        def default_angle(group: ArcGroup) -> float:
+            ring = group.ring_index if group.ring_index is not None else 0
+            return ring * fill_pattern_angle
+
+        def set_angle(group: ArcGroup, angle: float):
+            group.line_angle = self._wrap_half_turn(angle)
+
+        def assign_default():
+            for group in groups:
+                set_angle(group, default_angle(group))
+
+        if animation_mode == "ring_index":
+            assign_default()
+            return
+
+        if animation_mode == "spiral_phase":
+            phase_pairs = []
+            for group in groups:
+                circle = getattr(group, "source_circle", None)
+                if circle is None:
+                    phase = default_angle(group)
+                else:
+                    phase = math.degrees(np.angle(circle.center))
+                phase_pairs.append((phase, group))
+            phase_pairs.sort(key=lambda x: x[0])
+            for _, group in phase_pairs:
+                circle = getattr(group, "source_circle", None)
+                if circle is None:
+                    set_angle(group, default_angle(group))
+                else:
+                    phase = math.degrees(np.angle(circle.center))
+                    set_angle(group, phase)
+            return
+
+        if animation_mode == "family_ribbons":
+            family_map: Dict[Optional[int], List[ArcGroup]] = {}
+            for group in groups:
+                family_map.setdefault(group.family_index, []).append(group)
+
+            families = [f for f in sorted(family_map.keys()) if f is not None]
+            if not families:
+                assign_default()
+                return
+
+            span = 180.0 / max(1, len(families))
+            for family_idx, family in enumerate(families):
+                base = family_idx * span
+                family_groups = sorted(
+                    family_map[family],
+                    key=lambda g: (
+                        g.ring_index if g.ring_index is not None else math.inf,
+                        abs(g.center) if g.center is not None else math.inf,
+                    )
+                )
+                if not family_groups:
+                    continue
+                step = span / (len(family_groups) + 1)
+                for offset_idx, group in enumerate(family_groups, start=1):
+                    set_angle(group, base + offset_idx * step)
+
+            for group in family_map.get(None, []):
+                set_angle(group, default_angle(group))
+            return
+
+        if animation_mode == "neighbor_wave":
+            group_by_circle = {
+                group.source_circle: group
+                for group in groups
+                if getattr(group, "source_circle", None) is not None
+            }
+
+            if not group_by_circle:
+                assign_default()
+                return
+
+            def start_key(circle: 'CircleElement'):
+                group = group_by_circle[circle]
+                ring = group.ring_index if group.ring_index is not None else math.inf
+                return (ring, abs(circle.center))
+
+            start_circle = min(group_by_circle.keys(), key=start_key)
+            depths: Dict['CircleElement', int] = {start_circle: 0}
+            queue = deque([start_circle])
+
+            while queue:
+                current = queue.popleft()
+                current_depth = depths[current]
+                for neighbour in current.get_neighbour_circles():
+                    if neighbour not in group_by_circle or neighbour in depths:
+                        continue
+                    depths[neighbour] = current_depth + 1
+                    queue.append(neighbour)
+
+            if len(depths) < len(group_by_circle):
+                next_depth = max(depths.values()) + 1 if depths else 0
+                for circle in group_by_circle.keys():
+                    if circle not in depths:
+                        depths[circle] = next_depth
+                        next_depth += 1
+
+            max_depth = max(depths.values()) if depths else 1
+            max_depth = max(max_depth, 1)
+            for circle, depth in depths.items():
+                angle = (depth / max_depth) * 180.0
+                set_angle(group_by_circle[circle], angle)
+            return
+
+        if animation_mode == "heuristic_emphasis":
+            scored: List[Tuple[float, ArcGroup]] = []
+            for group in groups:
+                circle = getattr(group, "source_circle", None)
+                if circle is None or not group.arcs:
+                    score = float('inf')
+                else:
+                    line_vec = spiral_center - circle.center
+                    denom = abs(line_vec)
+                    best = float('inf')
+                    for arc in group.arcs:
+                        midpoint = (arc.start + arc.end) / 2
+                        if denom < 1e-9:
+                            distance = abs(midpoint - spiral_center)
+                        else:
+                            distance = abs(np.imag(np.conj(line_vec) * (midpoint - circle.center))) / denom
+                        radial_bias = abs(midpoint - spiral_center)
+                        best = min(best, distance + 0.1 * radial_bias)
+                    score = best if best != float('inf') else abs(circle.center - spiral_center)
+                scored.append((score, group))
+
+            scored.sort(key=lambda x: x[0])
+            total = len(scored)
+            if total == 1:
+                set_angle(scored[0][1], default_angle(scored[0][1]))
+            else:
+                for idx, (_, group) in enumerate(scored):
+                    angle = (idx / (total - 1)) * 180.0
+                    set_angle(group, angle)
+            return
+
+        if animation_mode == "closure_first":
+            valid_groups = [g for g in groups if g.ring_index is not None]
+            if not valid_groups:
+                assign_default()
+                return
+
+            max_ring = max(g.ring_index for g in valid_groups if g.ring_index is not None)
+            outer_groups = [g for g in valid_groups if g.ring_index == max_ring]
+            inner_groups = [g for g in valid_groups if g.ring_index != max_ring]
+
+            outer_groups.sort(key=lambda g: abs(g.center) if g.center is not None else math.inf)
+            inner_groups.sort(key=lambda g: (
+                g.ring_index if g.ring_index is not None else math.inf,
+                abs(g.center) if g.center is not None else math.inf,
+            ))
+
+            outer_span = 60.0 if inner_groups else 180.0
+            for idx, group in enumerate(outer_groups):
+                if len(outer_groups) == 1:
+                    angle = 0.0
+                else:
+                    angle = (idx / (len(outer_groups) - 1)) * outer_span
+                set_angle(group, angle)
+
+            if inner_groups:
+                remaining_span = 180.0 - outer_span
+                if len(inner_groups) == 1:
+                    set_angle(inner_groups[0], outer_span + remaining_span / 2)
+                else:
+                    for idx, group in enumerate(inner_groups):
+                        angle = outer_span + (idx / (len(inner_groups) - 1)) * remaining_span
+                        set_angle(group, angle)
+
+            for group in groups:
+                if group.ring_index is None:
+                    set_angle(group, default_angle(group))
+            return
+
+        assign_default()
+
+    def _render_arram_boyle(self, context: DrawingContext, debug_groups: bool = False,
+                           add_fill_pattern: bool = False, fill_pattern_spacing: float = 5.0,
+                           fill_pattern_angle: float = 0.0, red_outline: bool = False,
+                           draw_group_outline: bool = True, fill_pattern_offset: float = 0,
+                           animation_mode: str = "ring_index"):
         """Render spiral in Arram-Boyle mode with arc groups.
         
         Creates arc groups for each circle, draws closure arcs, and optionally
@@ -1093,6 +1304,7 @@ class DoyleSpiral:
         context.set_normalization_scale(self.circles + self.outer_circles)
 
         self.fill_pattern_angle = fill_pattern_angle
+        self.animation_mode = animation_mode
         
         spiral_center = 0 + 0j
         self.arc_groups.clear()
@@ -1165,17 +1377,26 @@ class DoyleSpiral:
                 group.to_svg_fill(context, debug=True, fill_opacity=0.25)
 
         #"""
-        # After drawing all arcs, render line fillings
+        # After drawing all arcs, assign animation angles and render line fillings
+        self._assign_line_angles(animation_mode, fill_pattern_angle, spiral_center)
         if add_fill_pattern:
             for key, group in self.arc_groups.items():
-                # Exclude outer circle groups from default debug rendering
-                if "outer" in key: continue
-                # render group fill/outline
-                #group.to_svg_fill(context, debug=True, fill_opacity=0.25)
-                # Interpret fill_pattern_angle as per-ring angle offset (degrees)
-                ring_idx = group.ring_index if group.ring_index is not None else 0
-                line_settings = (fill_pattern_spacing, ring_idx * fill_pattern_angle)
-                group.to_svg_fill(context, debug=False, fill_opacity=0.25, pattern_fill=True, line_settings=line_settings, draw_outline=draw_group_outline, line_offset=fill_pattern_offset)
+                if "outer" in key:
+                    continue
+                line_angle = getattr(group, "line_angle", None)
+                if line_angle is None:
+                    ring_idx = group.ring_index if group.ring_index is not None else 0
+                    line_angle = ring_idx * fill_pattern_angle
+                line_settings = (fill_pattern_spacing, line_angle)
+                group.to_svg_fill(
+                    context,
+                    debug=False,
+                    fill_opacity=0.25,
+                    pattern_fill=True,
+                    line_settings=line_settings,
+                    draw_outline=draw_group_outline,
+                    line_offset=fill_pattern_offset,
+                )
 
         #draw red outline if option is set
         for c in self.circles:
@@ -1199,7 +1420,7 @@ class DoyleSpiral:
             context.draw_scaled(c)  # Use default circle color
 
 
-    def to_svg(self, mode: str = "doyle", size: int = 800, debug_groups: bool = False, add_fill_pattern: bool = False, fill_pattern_spacing: float = 5.0, fill_pattern_angle: float = 0.0, red_outline: bool = False, draw_group_outline: bool = True, fill_pattern_offset: float = 0) -> str:
+    def to_svg(self, mode: str = "doyle", size: int = 800, debug_groups: bool = False, add_fill_pattern: bool = False, fill_pattern_spacing: float = 5.0, fill_pattern_angle: float = 0.0, red_outline: bool = False, draw_group_outline: bool = True, fill_pattern_offset: float = 0, animation_mode: str = "ring_index") -> str:
         """
         Generates the SVG representation of the spiral in the specified mode.
 
@@ -1210,6 +1431,7 @@ class DoyleSpiral:
             add_fill_pattern: If True, add line pattern fills to arc groups.
             fill_pattern_spacing: Spacing between lines in the pattern.
             fill_pattern_angle: Angle increment per ring for line patterns.
+            animation_mode: Strategy for assigning animation offsets to line fills.
             red_outline: If True, draw red outline on specific arcs.
             draw_group_outline: If True, draw the arc group polygon outlines (default: True).
             fill_pattern_offset: Inset distance from polygon edge for line clipping (positive = shrink inward).
@@ -1231,7 +1453,17 @@ class DoyleSpiral:
         if mode == "doyle":
             self._render_doyle(context)
         elif mode == "arram_boyle":
-            self._render_arram_boyle(context, debug_groups=debug_groups, add_fill_pattern=add_fill_pattern, fill_pattern_spacing=fill_pattern_spacing, fill_pattern_angle=fill_pattern_angle, red_outline=red_outline, draw_group_outline=draw_group_outline, fill_pattern_offset=fill_pattern_offset)
+            self._render_arram_boyle(
+                context,
+                debug_groups=debug_groups,
+                add_fill_pattern=add_fill_pattern,
+                fill_pattern_spacing=fill_pattern_spacing,
+                fill_pattern_angle=fill_pattern_angle,
+                red_outline=red_outline,
+                draw_group_outline=draw_group_outline,
+                fill_pattern_offset=fill_pattern_offset,
+                animation_mode=animation_mode,
+            )
         else:
             raise ValueError(f"Unknown rendering mode: {mode}")
 
@@ -1260,11 +1492,13 @@ class DoyleSpiral:
                 "t": self.t,
                 "max_d": self.max_d,
                 "arc_mode": self.arc_mode,
-                "num_gaps": self.num_gaps
+                "num_gaps": self.num_gaps,
+                "fill_pattern_angle": getattr(self, "fill_pattern_angle", 0.0),
+                "animation_mode": getattr(self, "animation_mode", "ring_index"),
             },
             "arcgroups": []
         }
-        
+
         for group_key, group in self.arc_groups.items():
             if "outer" in group_key: continue
             # Get the closed outline as points
@@ -1273,10 +1507,13 @@ class DoyleSpiral:
             # Convert complex numbers to [x, y] pairs
             outline_points = [[p.real, p.imag] for p in outline]
             
-            # Calculate the average line angle from all arcs in the group
-            # The line angle is inferred from the ring index
-            ring_index = group.ring_index if group.ring_index is not None else 0
-            line_angle = ring_index * self.fill_pattern_angle  # Adjust multiplier as needed for your use case
+            # Use the assigned animation line angle if available
+            line_angle = getattr(group, "line_angle", None)
+            if line_angle is None:
+                ring_index = group.ring_index if group.ring_index is not None else 0
+                line_angle = ring_index * getattr(self, "fill_pattern_angle", 0.0)
+            else:
+                line_angle = float(line_angle)
             
             group_data = {
                 "id": group.id,
@@ -1532,6 +1769,18 @@ def spiral_ui():
     fill_pattern_angle = widgets.FloatSlider(value=0.0, min=-90.0, max=90.0, step=1.0, description='Angle (deg)')
     fill_pattern_offset = widgets.FloatSlider(value=0.0, min=0.0, max=10.0, step=0.5, description='Line offset')
     draw_group_outline = widgets.Checkbox(value=True, description='Draw group outline')
+    animation_mode = widgets.Dropdown(
+        options=[
+            ("Ring index sweep", "ring_index"),
+            ("Spiral-phase sweep", "spiral_phase"),
+            ("Family-based ribbons", "family_ribbons"),
+            ("Neighbor propagation wave", "neighbor_wave"),
+            ("Heuristic arc emphasis", "heuristic_emphasis"),
+            ("Closure-first accents", "closure_first"),
+        ],
+        value="ring_index",
+        description='Animation',
+    )
     
     # Save controls
     filename_input = widgets.Text(value='doyle_spiral.svg', description='Filename:', placeholder='Enter filename')
@@ -1564,7 +1813,8 @@ def spiral_ui():
                     fill_pattern_angle=fill_pattern_angle.value,
                     red_outline=red_outline.value,
                     draw_group_outline=draw_group_outline.value,
-                    fill_pattern_offset=fill_pattern_offset.value
+                    fill_pattern_offset=fill_pattern_offset.value,
+                    animation_mode=animation_mode.value
                 )
                 spiral_holder["svg_data"] = svg_data  # Store SVG data for saving
                 display(SVG(svg_data)) # Display the generated SVG
@@ -1633,7 +1883,7 @@ def spiral_ui():
     save_json_button.on_click(save_json)
 
     # Wire up observers / callbacks: call the render function when widget values change
-    for w in [p, q, t, mode, arc_mode, num_gaps, debug, add_fill_pattern, fill_pattern_spacing, fill_pattern_angle, fill_pattern_offset, red_outline, draw_group_outline]:
+    for w in [p, q, t, mode, arc_mode, num_gaps, debug, add_fill_pattern, fill_pattern_spacing, fill_pattern_angle, fill_pattern_offset, red_outline, draw_group_outline, animation_mode]:
         w.observe(render, names="value")
 
     # Initial render when the UI is first displayed
@@ -1642,7 +1892,7 @@ def spiral_ui():
     # Arrange the widgets in a vertical box
     controls_top = widgets.HBox([p, q, t, mode])
     controls_arc = widgets.HBox([arc_mode, num_gaps, debug, red_outline])
-    controls_fill = widgets.HBox([add_fill_pattern, fill_pattern_spacing, fill_pattern_angle, fill_pattern_offset, draw_group_outline])
+    controls_fill = widgets.HBox([add_fill_pattern, fill_pattern_spacing, fill_pattern_angle, fill_pattern_offset, draw_group_outline, animation_mode])
     controls_save = widgets.HBox([filename_input, save_button, filename_json_input, save_json_button])
     display(widgets.VBox([controls_top, controls_arc, controls_fill, controls_save, save_output, out]))
 
