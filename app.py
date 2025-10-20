@@ -24,6 +24,7 @@ DEFAULT_PARAMS: Dict[str, Any] = {
     "add_fill_pattern": False,
     "fill_pattern_spacing": 5.0,
     "fill_pattern_angle": 0.0,
+    "line_angle_mode": "ring",
     "fill_pattern_offset": 0.0,
     "red_outline": False,
     "draw_group_outline": True,
@@ -38,6 +39,14 @@ ALLOWED_ARC_MODES = {
     "random",
     "symmetric",
     "angular",
+}
+
+ALLOWED_LINE_ANGLE_MODES = {
+    "ring",
+    "ring_sweep",
+    "spiral_arms",
+    "radial",
+    "petal_wave",
 }
 
 
@@ -90,6 +99,8 @@ def _parse_params(source: Mapping[str, Any]) -> Dict[str, Any]:
     params["add_fill_pattern"] = _parse_bool(source, "add_fill_pattern", DEFAULT_PARAMS["add_fill_pattern"])
     params["fill_pattern_spacing"] = max(0.1, as_float("fill_pattern_spacing", DEFAULT_PARAMS["fill_pattern_spacing"]))
     params["fill_pattern_angle"] = as_float("fill_pattern_angle", DEFAULT_PARAMS["fill_pattern_angle"])
+    mode_line_angle = str(_get_value(source, "line_angle_mode", DEFAULT_PARAMS["line_angle_mode"]))
+    params["line_angle_mode"] = mode_line_angle if mode_line_angle in ALLOWED_LINE_ANGLE_MODES else DEFAULT_PARAMS["line_angle_mode"]
     params["fill_pattern_offset"] = max(0.0, as_float("fill_pattern_offset", DEFAULT_PARAMS["fill_pattern_offset"]))
     params["red_outline"] = _parse_bool(source, "red_outline", DEFAULT_PARAMS["red_outline"])
     params["draw_group_outline"] = _parse_bool(source, "draw_group_outline", DEFAULT_PARAMS["draw_group_outline"])
@@ -106,6 +117,7 @@ def _render_spiral(spiral: DoyleSpiral, params: Mapping[str, Any], *, mode: str 
         add_fill_pattern=params["add_fill_pattern"],
         fill_pattern_spacing=params["fill_pattern_spacing"],
         fill_pattern_angle=params["fill_pattern_angle"],
+        line_angle_mode=params["line_angle_mode"],
         red_outline=params["red_outline"],
         draw_group_outline=params["draw_group_outline"],
         fill_pattern_offset=params["fill_pattern_offset"],

@@ -61,7 +61,7 @@ def apply_polygon_inset(polygon_array, offset):
     """Apply inward buffer to polygon using shapely."""
     if offset <= 0:
         return polygon_array
-    
+
     try:
         from shapely.geometry import Polygon
         poly_shapely = Polygon(polygon_array)
@@ -71,6 +71,34 @@ def apply_polygon_inset(polygon_array, offset):
         return np.array(buffered.exterior.coords)
     except:
         return polygon_array
+
+
+def polygon_centroid(points: List[complex]) -> complex:
+    """Compute the centroid of a polygon described by complex points."""
+    if not points:
+        return 0 + 0j
+
+    coords = [(p.real, p.imag) for p in points]
+    if len(coords) == 1:
+        return points[0]
+
+    if coords[0] != coords[-1]:
+        coords.append(coords[0])
+
+    area = 0.0
+    cx = 0.0
+    cy = 0.0
+    for (x0, y0), (x1, y1) in zip(coords, coords[1:]):
+        cross = x0 * y1 - x1 * y0
+        area += cross
+        cx += (x0 + x1) * cross
+        cy += (y0 + y1) * cross
+
+    area *= 0.5
+    if abs(area) < 1e-9:
+        return sum(points, 0 + 0j) / len(points)
+
+    return complex(cx / (6.0 * area), cy / (6.0 * area))
 
 def line_segment_intersection(p1, p2, p3, p4):
     """Calculate intersection point between two line segments.
@@ -667,6 +695,8 @@ class ArcGroup:
         self.debug_stroke: Optional[str] = None
         # public: ring layer index within the Doyle spiral (0-based from smallest radius)
         self.ring_index: Optional[int] = None
+        # orientation metadata used for animation / fills
+        self.line_angle: float = 0.0
 
     def add_arc(self, arc: ArcElement):
         """
@@ -691,6 +721,7 @@ class ArcGroup:
         Removes all arcs from the group.
         """
         self.arcs.clear()
+        self.line_angle = 0.0
 
     def is_empty(self) -> bool:
         """
@@ -892,6 +923,7 @@ class DoyleSpiral:
         # ArcGroups keyed by circle id or arbitrary name
         self.arc_groups: Dict[str, ArcGroup] = {}
         self.fill_pattern_angle: float = 0.0
+        self.line_angle_mode: str = "ring"
 
     def generate_circles(self):
         """Generates the main set of visible circles based on the spiral parameters."""
@@ -1038,7 +1070,7 @@ class DoyleSpiral:
                 
                 group.add_arc(arc)
     
-    def _draw_outer_closure_arcs(self, spiral_center, debug_groups, red_outline, 
+    def _draw_outer_closure_arcs(self, spiral_center, debug_groups, red_outline,
                                  add_fill_pattern, draw_group_outline, context):
         """Draw closure arcs from outer invisible circles."""
         for c in self.outer_circles:
@@ -1076,17 +1108,112 @@ class DoyleSpiral:
                         self.arc_groups[key].debug_stroke = "#000000"
                 
                 self.arc_groups[key].add_arc(arc)
-    
+
+    def _assign_line_angles(self, line_angle_mode: str, fill_pattern_angle: float,
+                             spiral_center: complex) -> None:
+        """Assign orientation metadata for each visible arc group."""
+
+        def normalize(angle: float) -> float:
+            return (angle % 360.0 + 360.0) % 360.0
+
+        root_a = self.root.get("a", 1 + 0j)
+        mod_a = abs(root_a)
+        arg_a = np.angle(root_a)
+        log_mod = math.log(mod_a) if mod_a > 0 else 0.0
+        if abs(log_mod) < 1e-9:
+            spiral_slope = 0.0
+        else:
+            spiral_slope = math.degrees(arg_a) / log_mod
+            spiral_slope = max(min(spiral_slope, 720.0), -720.0)
+
+        ring_groups: Dict[int, List[ArcGroup]] = {}
+        metadata: Dict[ArcGroup, Dict[str, float]] = {}
+
+        for group in self.arc_groups.values():
+            if group.ring_index is None or group.ring_index < 0:
+                group.line_angle = 0.0
+                continue
+
+            outline = group.get_closed_outline()
+            if not outline:
+                group.line_angle = 0.0
+                continue
+
+            centroid = polygon_centroid(outline)
+            vec = centroid - spiral_center
+            radius = abs(vec)
+            angle_deg = math.degrees(np.angle(vec)) if radius > 1e-9 else 0.0
+
+            metadata[group] = {
+                "ring": group.ring_index,
+                "angle": angle_deg,
+                "radius": radius,
+            }
+            ring_groups.setdefault(group.ring_index, []).append(group)
+
+        for ring, groups in ring_groups.items():
+            groups.sort(key=lambda g: metadata[g]["angle"])
+            count = len(groups)
+            if count == 0:
+                continue
+            for idx, group in enumerate(groups):
+                fraction = idx / count if count else 0.0
+                orbit_fraction = (idx + 0.5) / count
+                metadata[group]["order"] = idx
+                metadata[group]["count"] = count
+                metadata[group]["fraction"] = fraction
+                metadata[group]["orbit"] = orbit_fraction
+
+        mode = (line_angle_mode or "ring").lower()
+
+        for group, data in metadata.items():
+            ring_idx = data["ring"]
+            angle_deg = data["angle"]
+            radius = max(data["radius"], 1e-6)
+            orbit_fraction = data.get("orbit", 0.0)
+
+            if mode == "ring_sweep":
+                base = ring_idx * fill_pattern_angle
+                orbit_angle = orbit_fraction * 360.0
+                group.line_angle = normalize(base + orbit_angle)
+            elif mode == "spiral_arms":
+                base = angle_deg + spiral_slope * math.log(radius)
+                group.line_angle = normalize(base + fill_pattern_angle)
+            elif mode == "petal_wave":
+                petals = 3 + (ring_idx % 5)
+                amplitude = 32.0
+                wave = math.sin(math.radians(angle_deg * petals))
+                orbit_wave = math.sin(orbit_fraction * 2.0 * math.pi)
+                base = ring_idx * fill_pattern_angle
+                group.line_angle = normalize(base + wave * amplitude + orbit_wave * 12.0)
+            elif mode == "radial":
+                group.line_angle = normalize(angle_deg + fill_pattern_angle)
+            else:
+                base = ring_idx * fill_pattern_angle
+                group.line_angle = normalize(base)
+
     # ---- Rendering ----
 
-    def _render_arram_boyle(self, context: DrawingContext, debug_groups: bool = False, 
-                           add_fill_pattern: bool = False, fill_pattern_spacing: float = 5.0, 
-                           fill_pattern_angle: float = 0.0, red_outline: bool = False, 
-                           draw_group_outline: bool = True, fill_pattern_offset: float = 0):
+    def _render_arram_boyle(self, context: DrawingContext, debug_groups: bool = False,
+                           add_fill_pattern: bool = False, fill_pattern_spacing: float = 5.0,
+                           fill_pattern_angle: float = 0.0, line_angle_mode: str = "ring",
+                           red_outline: bool = False, draw_group_outline: bool = True,
+                           fill_pattern_offset: float = 0):
         """Render spiral in Arram-Boyle mode with arc groups.
-        
+
         Creates arc groups for each circle, draws closure arcs, and optionally
         adds pattern fills or debug visualization.
+
+        Args:
+            context: Drawing context used for SVG output.
+            debug_groups: When True, renders outlines with debug fills.
+            add_fill_pattern: Enables hatched fills for each group.
+            fill_pattern_spacing: Distance between hatch lines.
+            fill_pattern_angle: Angle control value shared across strategies.
+            line_angle_mode: Strategy used to derive per-group line angles.
+            red_outline: If True, highlights selected arcs in red.
+            draw_group_outline: Whether to render polygon outlines.
+            fill_pattern_offset: Inset distance for line clipping.
         """
         # Setup
         self.generate_outer_circles()
@@ -1094,7 +1221,8 @@ class DoyleSpiral:
         context.set_normalization_scale(self.circles + self.outer_circles)
 
         self.fill_pattern_angle = fill_pattern_angle
-        
+        self.line_angle_mode = line_angle_mode
+
         spiral_center = 0 + 0j
         self.arc_groups.clear()
         
@@ -1112,7 +1240,7 @@ class DoyleSpiral:
             spiral_center, debug_groups, red_outline,
             add_fill_pattern, draw_group_outline, context
         )
-        
+
         #"""
         # complete arc groups - This block appears to add additional arcs based on neighbor circles
         # and specific indices. This might require further review for its geometric purpose.
@@ -1155,7 +1283,10 @@ class DoyleSpiral:
                         end_a = neigh_a.intersections[j][0]
                         arc_a = ArcElement(neigh_a, start_a, end_a, visible=True)
                         group.add_arc(arc_a)
-        
+
+        # Compute orientation metadata for animation/fill modes
+        self._assign_line_angles(line_angle_mode, fill_pattern_angle, spiral_center)
+
         #"""
         # After drawing all arcs, render group outlines (debug fills) if debug is enabled
         if debug_groups:
@@ -1175,7 +1306,8 @@ class DoyleSpiral:
                 #group.to_svg_fill(context, debug=True, fill_opacity=0.25)
                 # Interpret fill_pattern_angle as per-ring angle offset (degrees)
                 ring_idx = group.ring_index if group.ring_index is not None else 0
-                line_settings = (fill_pattern_spacing, ring_idx * fill_pattern_angle)
+                angle = getattr(group, "line_angle", ring_idx * fill_pattern_angle)
+                line_settings = (fill_pattern_spacing, angle)
                 group.to_svg_fill(context, debug=False, fill_opacity=0.25, pattern_fill=True, line_settings=line_settings, draw_outline=draw_group_outline, line_offset=fill_pattern_offset)
 
         #draw red outline if option is set
@@ -1200,7 +1332,11 @@ class DoyleSpiral:
             context.draw_scaled(c)  # Use default circle color
 
 
-    def to_svg(self, mode: str = "doyle", size: int = 800, debug_groups: bool = False, add_fill_pattern: bool = False, fill_pattern_spacing: float = 5.0, fill_pattern_angle: float = 0.0, red_outline: bool = False, draw_group_outline: bool = True, fill_pattern_offset: float = 0) -> str:
+    def to_svg(self, mode: str = "doyle", size: int = 800, debug_groups: bool = False,
+               add_fill_pattern: bool = False, fill_pattern_spacing: float = 5.0,
+               fill_pattern_angle: float = 0.0, line_angle_mode: str = "ring",
+               red_outline: bool = False, draw_group_outline: bool = True,
+               fill_pattern_offset: float = 0) -> str:
         """
         Generates the SVG representation of the spiral in the specified mode.
 
@@ -1211,6 +1347,7 @@ class DoyleSpiral:
             add_fill_pattern: If True, add line pattern fills to arc groups.
             fill_pattern_spacing: Spacing between lines in the pattern.
             fill_pattern_angle: Angle increment per ring for line patterns.
+            line_angle_mode: Strategy used to encode per-group animation angles.
             red_outline: If True, draw red outline on specific arcs.
             draw_group_outline: If True, draw the arc group polygon outlines (default: True).
             fill_pattern_offset: Inset distance from polygon edge for line clipping (positive = shrink inward).
@@ -1232,7 +1369,17 @@ class DoyleSpiral:
         if mode == "doyle":
             self._render_doyle(context)
         elif mode == "arram_boyle":
-            self._render_arram_boyle(context, debug_groups=debug_groups, add_fill_pattern=add_fill_pattern, fill_pattern_spacing=fill_pattern_spacing, fill_pattern_angle=fill_pattern_angle, red_outline=red_outline, draw_group_outline=draw_group_outline, fill_pattern_offset=fill_pattern_offset)
+            self._render_arram_boyle(
+                context,
+                debug_groups=debug_groups,
+                add_fill_pattern=add_fill_pattern,
+                fill_pattern_spacing=fill_pattern_spacing,
+                fill_pattern_angle=fill_pattern_angle,
+                line_angle_mode=line_angle_mode,
+                red_outline=red_outline,
+                draw_group_outline=draw_group_outline,
+                fill_pattern_offset=fill_pattern_offset,
+            )
         else:
             raise ValueError(f"Unknown rendering mode: {mode}")
 
@@ -1264,6 +1411,8 @@ class DoyleSpiral:
                 "max_d": self.max_d,
                 "arc_mode": self.arc_mode,
                 "num_gaps": self.num_gaps,
+                "fill_pattern_angle": self.fill_pattern_angle,
+                "line_angle_mode": self.line_angle_mode,
             },
             "arcgroups": [],
         }
@@ -1276,7 +1425,7 @@ class DoyleSpiral:
             outline_points = [[p.real, p.imag] for p in outline]
 
             ring_index = group.ring_index if group.ring_index is not None else 0
-            line_angle = ring_index * self.fill_pattern_angle
+            line_angle = getattr(group, "line_angle", ring_index * self.fill_pattern_angle)
 
             export_data["arcgroups"].append({
                 "id": group.id,
@@ -1546,6 +1695,17 @@ def spiral_ui():
     fill_pattern_angle = widgets.FloatSlider(value=0.0, min=-90.0, max=90.0, step=1.0, description='Angle (deg)')
     fill_pattern_offset = widgets.FloatSlider(value=0.0, min=0.0, max=10.0, step=0.5, description='Line offset')
     draw_group_outline = widgets.Checkbox(value=True, description='Draw group outline')
+    line_angle_mode = widgets.Dropdown(
+        options=[
+            ('Ring offset', 'ring'),
+            ('Ring sweep orbit', 'ring_sweep'),
+            ('Log spiral arms', 'spiral_arms'),
+            ('Radial burst', 'radial'),
+            ('Petal bloom wave', 'petal_wave')
+        ],
+        value='ring',
+        description='Line mode'
+    )
     
     # Save controls
     filename_input = widgets.Text(value='doyle_spiral.svg', description='Filename:', placeholder='Enter filename')
@@ -1576,6 +1736,7 @@ def spiral_ui():
                     add_fill_pattern=add_fill_pattern.value,
                     fill_pattern_spacing=fill_pattern_spacing.value,
                     fill_pattern_angle=fill_pattern_angle.value,
+                    line_angle_mode=line_angle_mode.value,
                     red_outline=red_outline.value,
                     draw_group_outline=draw_group_outline.value,
                     fill_pattern_offset=fill_pattern_offset.value
@@ -1647,7 +1808,7 @@ def spiral_ui():
     save_json_button.on_click(save_json)
 
     # Wire up observers / callbacks: call the render function when widget values change
-    for w in [p, q, t, mode, arc_mode, num_gaps, debug, add_fill_pattern, fill_pattern_spacing, fill_pattern_angle, fill_pattern_offset, red_outline, draw_group_outline]:
+    for w in [p, q, t, mode, arc_mode, num_gaps, debug, add_fill_pattern, fill_pattern_spacing, fill_pattern_angle, fill_pattern_offset, line_angle_mode, red_outline, draw_group_outline]:
         w.observe(render, names="value")
 
     # Initial render when the UI is first displayed
@@ -1657,6 +1818,7 @@ def spiral_ui():
     controls_top = widgets.HBox([p, q, t, mode])
     controls_arc = widgets.HBox([arc_mode, num_gaps, debug, red_outline])
     controls_fill = widgets.HBox([add_fill_pattern, fill_pattern_spacing, fill_pattern_angle, fill_pattern_offset, draw_group_outline])
+    controls_line = widgets.HBox([line_angle_mode])
     controls_save = widgets.HBox([filename_input, save_button, filename_json_input, save_json_button])
-    display(widgets.VBox([controls_top, controls_arc, controls_fill, controls_save, save_output, out]))
+    display(widgets.VBox([controls_top, controls_arc, controls_fill, controls_line, controls_save, save_output, out]))
 

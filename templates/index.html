@@ -510,6 +510,17 @@
             </div>
           </div>
 
+          <div class="field-group">
+            <label for="lineAngleMode">Line animation</label>
+            <select id="lineAngleMode" name="line_angle_mode">
+              <option value="ring" selected>Ring offset</option>
+              <option value="ring_sweep">Ring sweep orbit</option>
+              <option value="spiral_arms">Log spiral arms</option>
+              <option value="radial">Radial burst</option>
+              <option value="petal_wave">Petal bloom wave</option>
+            </select>
+          </div>
+
           <div class="status" id="statusMessage">Adjust parameters and the spiral will render automatically.</div>
 
           <div class="actions">
@@ -626,6 +637,7 @@
       red_outline: false,
       fill_pattern_spacing: 5,
       fill_pattern_angle: 0,
+      line_angle_mode: 'ring',
       fill_pattern_offset: 0,
     };
 
@@ -1052,7 +1064,8 @@
           }
           loadSpiralFromJSON(payload.geometry);
           const p = payload.params || {};
-          statParameters3d.textContent = `p=${p.p}, q=${p.q}, t=${Number(p.t).toFixed(2)}`;
+          const lineMode = String(p.line_angle_mode || 'ring').replace(/_/g, ' ');
+          statParameters3d.textContent = `p=${p.p}, q=${p.q}, t=${Number(p.t).toFixed(2)}, line=${lineMode}`;
           statusMessage.textContent = 'Geometry loaded from backend.';
         } catch (error) {
           console.error(error);
@@ -1200,7 +1213,8 @@
         if (geometry && Array.isArray(geometry.arcgroups)) {
           try {
             loadSpiralFromJSON(geometry);
-            statParameters3d.textContent = `p=${params.p}, q=${params.q}, t=${Number(params.t).toFixed(2)}`;
+            const lineMode = String(params.line_angle_mode || 'ring').replace(/_/g, ' ');
+            statParameters3d.textContent = `p=${params.p}, q=${params.q}, t=${Number(params.t).toFixed(2)}, line=${lineMode}`;
             statusMessage.textContent = 'Geometry loaded from 2D render payload.';
             statusMessage.classList.remove('error');
             return;
