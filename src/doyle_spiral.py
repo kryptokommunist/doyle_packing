@@ -19,6 +19,20 @@ import itertools
 from matplotlib.path import Path as MplPath
 import json
 
+try:
+    from shapely.geometry import Polygon as ShapelyPolygon
+    from shapely.geometry import LineString, MultiLineString, GeometryCollection, MultiPolygon
+    from shapely.prepared import prep as shapely_prep
+    HAS_SHAPELY = True
+except ImportError:  # pragma: no cover - shapely is optional
+    ShapelyPolygon = None  # type: ignore
+    LineString = None  # type: ignore
+    MultiLineString = None  # type: ignore
+    GeometryCollection = None  # type: ignore
+    MultiPolygon = None  # type: ignore
+    shapely_prep = None  # type: ignore
+    HAS_SHAPELY = False
+
 # ============================================
 # Base Geometry and Drawing Classes
 # ============================================
@@ -61,16 +75,41 @@ def apply_polygon_inset(polygon_array, offset):
     """Apply inward buffer to polygon using shapely."""
     if offset <= 0:
         return polygon_array
-    
-    try:
-        from shapely.geometry import Polygon
-        poly_shapely = Polygon(polygon_array)
-        buffered = poly_shapely.buffer(-offset, join_style=2)
-        if buffered.is_empty:
-            return None
-        return np.array(buffered.exterior.coords)
-    except:
+
+    if not HAS_SHAPELY or ShapelyPolygon is None:
         return polygon_array
+
+    try:
+        poly_shapely = ShapelyPolygon(polygon_array)
+    except Exception:
+        return polygon_array
+
+    try:
+        buffered = poly_shapely.buffer(-offset, join_style=2)
+    except Exception:
+        return polygon_array
+
+    if buffered.is_empty:
+        return None
+
+    if hasattr(buffered, "geoms") and isinstance(buffered, MultiPolygon):
+        buffered = max((geom for geom in buffered.geoms if not geom.is_empty),
+                       key=lambda g: g.area,
+                       default=None)
+        if buffered is None:
+            return None
+    elif hasattr(buffered, "geoms") and GeometryCollection is not None and isinstance(buffered, GeometryCollection):
+        polygons = [geom for geom in buffered.geoms if getattr(geom, "geom_type", "") == "Polygon" and not geom.is_empty]
+        if not polygons:
+            return None
+        buffered = max(polygons, key=lambda g: g.area)
+
+    try:
+        exterior = buffered.exterior
+    except AttributeError:
+        return None
+
+    return np.array(exterior.coords)
 
 def line_segment_intersection(p1, p2, p3, p4):
     """Calculate intersection point between two line segments.
@@ -114,9 +153,47 @@ def find_line_polygon_intersections(line_start, line_end, polygon_edges):
     
     return sorted(intersections, key=lambda x: x[0])
 
-def lines_in_polygon(polygon, line_spacing=5, angle=0, color="#000000", stroke_width=0.5, offset=0):
+
+def _shapely_geometry_to_segments(geometry):
+    """Convert shapely geometry result into a list of line segments."""
+    segments = []
+    if geometry is None or getattr(geometry, "is_empty", True):
+        return segments
+
+    geom_type = getattr(geometry, "geom_type", None)
+    if geom_type == "LineString":
+        coords = list(geometry.coords)
+        if len(coords) >= 2:
+            start = tuple(map(float, coords[0]))
+            end = tuple(map(float, coords[-1]))
+            segments.append((start, end))
+    elif geom_type == "MultiLineString":
+        for line in geometry.geoms:  # type: ignore[attr-defined]
+            segments.extend(_shapely_geometry_to_segments(line))
+    elif geom_type == "GeometryCollection":
+        for geom in geometry.geoms:  # type: ignore[attr-defined]
+            segments.extend(_shapely_geometry_to_segments(geom))
+
+    return segments
+
+
+def lines_in_polygon(
+    polygon,
+    line_spacing=5,
+    angle=0,
+    color="#000000",
+    stroke_width=0.5,
+    offset=0,
+    *,
+    polygon_array: Optional[np.ndarray] = None,
+    polygon_path: Optional[MplPath] = None,
+    shapely_polygon=None,
+    prepared_polygon=None,
+    bbox_diag: Optional[float] = None,
+    centroid: Optional[np.ndarray] = None,
+):
     """Generate parallel lines clipped to polygon bounds.
-    
+
     Args:
         polygon: List of complex numbers or Nx2 array of polygon vertices
         line_spacing: Distance between parallel lines
@@ -124,56 +201,97 @@ def lines_in_polygon(polygon, line_spacing=5, angle=0, color="#000000", stroke_w
         color: Line color (unused, kept for compatibility)
         stroke_width: Line width (unused, kept for compatibility)
         offset: Inward offset from polygon edge in pixels
-    
+
+    Keyword Args:
+        polygon_array: Precomputed Nx2 array of polygon vertices (after inset)
+        polygon_path: Precomputed matplotlib path for point-in-polygon checks
+        shapely_polygon: Cached shapely polygon for clipping
+        prepared_polygon: Prepared shapely polygon for quick intersection tests
+        bbox_diag: Precomputed bounding box diagonal length
+        centroid: Precomputed polygon centroid
+
     Returns:
         List of line segment tuples ((x1, y1), (x2, y2))
     """
-    polygon_array = convert_polygon_to_array(polygon)
-    if polygon_array.shape[0] < 3:
-        return []
-    
-    # Apply inward offset if specified
-    polygon_array = apply_polygon_inset(polygon_array, offset)
     if polygon_array is None:
+        polygon_array = convert_polygon_to_array(polygon)
+    if polygon_array is None or polygon_array.shape[0] < 3:
         return []
-    
-    # Calculate bounding box
-    min_x, min_y = polygon_array[:, 0].min(), polygon_array[:, 1].min()
-    max_x, max_y = polygon_array[:, 0].max(), polygon_array[:, 1].max()
-    bbox_diag = math.hypot(max_x - min_x, max_y - min_y)
-    if bbox_diag == 0:
+
+    # Apply inward offset if specified (used when no cached array provided)
+    if offset:
+        polygon_array = apply_polygon_inset(polygon_array, offset)
+        if polygon_array is None or len(polygon_array) < 3:
+            return []
+        polygon_path = None
+        shapely_polygon = None
+        prepared_polygon = None
+
+    if polygon_path is None:
+        polygon_path = MplPath(polygon_array)
+
+    if centroid is None:
+        centroid = polygon_array.mean(axis=0)
+
+    if bbox_diag is None:
+        min_x, min_y = polygon_array[:, 0].min(), polygon_array[:, 1].min()
+        max_x, max_y = polygon_array[:, 0].max(), polygon_array[:, 1].max()
+        bbox_diag = math.hypot(max_x - min_x, max_y - min_y)
+    if not bbox_diag:
         return []
-    
+
     # Calculate line direction and perpendicular offset direction
-    centroid = polygon_array.mean(axis=0)
     theta = math.radians(angle)
     line_dir = np.array([math.cos(theta), math.sin(theta)])
     perp_dir = np.array([-line_dir[1], line_dir[0]])
-    
+
     # Generate parallel lines
     num_lines = int(bbox_diag / max(1e-6, line_spacing)) + 3
-    path = MplPath(polygon_array)
+    offsets = np.arange(-num_lines, num_lines + 1, dtype=float)[:, None] * line_spacing
+    offset_vectors = offsets * perp_dir
+    span = line_dir * bbox_diag * 2
+    start_base = centroid - span
+    end_base = centroid + span
+    line_starts = start_base + offset_vectors
+    line_ends = end_base + offset_vectors
+
     line_segments = []
-    
-    for i in range(-num_lines, num_lines + 1):
-        # Calculate line offset from centroid
-        offset_vec = perp_dir * i * line_spacing
-        line_start = centroid - line_dir * bbox_diag * 2 + offset_vec
-        line_end = centroid + line_dir * bbox_diag * 2 + offset_vec
-        
-        # Find intersections with polygon
-        intersections = find_line_polygon_intersections(line_start, line_end, polygon_array)
-        
-        # Create segments from intersection pairs
+
+    # Use shapely when available for robust clipping
+    if HAS_SHAPELY and shapely_polygon is not None and LineString is not None and MultiLineString is not None:
+        lines_to_clip = []
+        for start, end in zip(line_starts, line_ends):
+            line = LineString([tuple(start), tuple(end)])
+            if prepared_polygon is None or prepared_polygon.intersects(line):
+                lines_to_clip.append(line)
+
+        if lines_to_clip:
+            if len(lines_to_clip) == 1:
+                clipped = shapely_polygon.intersection(lines_to_clip[0])
+            else:
+                multi = MultiLineString(lines_to_clip)
+                clipped = shapely_polygon.intersection(multi)
+
+            line_segments.extend(
+                ((float(x1), float(y1)), (float(x2), float(y2)))
+                for (x1, y1), (x2, y2) in _shapely_geometry_to_segments(clipped)
+                if (x1, y1) != (x2, y2)
+            )
+
+        return line_segments
+
+    # Fallback: manual clipping using polygon intersections
+    for start, end in zip(line_starts, line_ends):
+        intersections = find_line_polygon_intersections(start, end, polygon_array)
+
         for j in range(0, len(intersections) - 1, 2):
             _, x1, y1 = intersections[j]
             _, x2, y2 = intersections[j + 1]
-            
-            # Verify segment is inside polygon
+
             mid_x, mid_y = (x1 + x2) / 2, (y1 + y2) / 2
-            if path.contains_point((mid_x, mid_y)):
+            if polygon_path.contains_point((mid_x, mid_y)):
                 line_segments.append(((x1, y1), (x2, y2)))
-    
+
     return line_segments
 
 # ============================================
@@ -197,6 +315,7 @@ class DrawingContext:
         self.size = size
         self.dwg = svgwrite.Drawing(size=(size, size))
         self.scale_factor = 1.0
+        self._line_clip_cache: Dict[Tuple[Tuple[float, float], float], Dict[str, object]] = {}
 
     def set_normalization_scale(self, elements: List['CircleElement']):
         """
@@ -299,19 +418,81 @@ class DrawingContext:
     def _draw_clipped_line_fill(self, coords, points, stroke, stroke_width, line_pattern_settings, draw_outline, line_offset):
         """Draw polygon with clipped parallel line fill."""
         line_spacing, line_angle = line_pattern_settings
-        
+
+        base_array = convert_polygon_to_array(points)
+        if base_array is None or len(base_array) < 3:
+            polygon_entry = {"polygon_array": None}
+        else:
+            key_points = tuple((round(float(x), 9), round(float(y), 9)) for x, y in base_array)
+            cache_key = (key_points, round(float(line_offset), 9))
+            polygon_entry = self._line_clip_cache.get(cache_key)
+
+            if polygon_entry is None:
+                clipped_array = apply_polygon_inset(base_array, line_offset)
+                if clipped_array is None or len(clipped_array) < 3:
+                    polygon_entry = {"polygon_array": None}
+                else:
+                    polygon_path = MplPath(clipped_array)
+                    shapely_polygon = None
+                    prepared_polygon = None
+                    if HAS_SHAPELY and ShapelyPolygon is not None:
+                        try:
+                            shapely_polygon = ShapelyPolygon(clipped_array)
+                            if shapely_polygon.is_empty:
+                                shapely_polygon = None
+                            elif not shapely_polygon.is_valid:
+                                shapely_polygon = shapely_polygon.buffer(0)
+                                if shapely_polygon.is_empty:
+                                    shapely_polygon = None
+                        except Exception:
+                            shapely_polygon = None
+
+                        if shapely_polygon is not None and shapely_prep is not None:
+                            try:
+                                prepared_polygon = shapely_prep(shapely_polygon)
+                            except Exception:
+                                prepared_polygon = None
+
+                    min_x, min_y = clipped_array[:, 0].min(), clipped_array[:, 1].min()
+                    max_x, max_y = clipped_array[:, 0].max(), clipped_array[:, 1].max()
+                    bbox_diag = math.hypot(max_x - min_x, max_y - min_y)
+                    centroid = clipped_array.mean(axis=0)
+
+                    polygon_entry = {
+                        "polygon_array": clipped_array,
+                        "polygon_path": polygon_path,
+                        "shapely_polygon": shapely_polygon,
+                        "prepared_polygon": prepared_polygon,
+                        "bbox_diag": bbox_diag,
+                        "centroid": centroid,
+                    }
+
+                self._line_clip_cache[cache_key] = polygon_entry
+
+        entry_dict = polygon_entry if isinstance(polygon_entry, dict) else {}
+        polygon_array = entry_dict.get("polygon_array")
+
         # Generate clipped line segments
-        line_segments = lines_in_polygon(
-            points, 
-            line_spacing=line_spacing, 
-            angle=line_angle,
-            offset=line_offset
-        )
-        
+        if polygon_array is not None:
+            line_segments = lines_in_polygon(
+                points,
+                line_spacing=line_spacing,
+                angle=line_angle,
+                offset=0,
+                polygon_array=polygon_array,
+                polygon_path=entry_dict.get("polygon_path"),
+                shapely_polygon=entry_dict.get("shapely_polygon"),
+                prepared_polygon=entry_dict.get("prepared_polygon"),
+                bbox_diag=entry_dict.get("bbox_diag"),
+                centroid=entry_dict.get("centroid"),
+            )
+        else:
+            line_segments = []
+
         # Optionally draw polygon outline
         if draw_outline:
             self.dwg.add(self.dwg.polygon(
-                points=coords, 
+                points=coords,
                 fill="none", 
                 stroke=stroke, 
                 stroke_width=stroke_width
