@@ -4,7 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Doyle Spiral 3D Viewer</title>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js" integrity="sha512-bWFbYKT1eZq9VHtVHCnRvWmvMRGsiE9zraFMvx6bMpiKFFitvolG/G5hgbf+168Q5e0siJmq9hw3rroWAt4E6w==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <!-- three.js from jsDelivr. The previous CDN asset started failing the integrity check which kept the viewer from booting. -->
+  <script src="https://cdn.jsdelivr.net/npm/three@0.152.2/build/three.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
   <style>
     :root {
       color-scheme: light dark;
@@ -243,6 +244,13 @@
 
   <script>
     const canvas = document.getElementById('canvas');
+    const statusMessage = document.getElementById('statusMessage');
+
+    if (typeof THREE === 'undefined') {
+      statusMessage.textContent = 'Unable to load the 3D engine. Check your network connection and try again.';
+      throw new Error('three.js failed to load');
+    }
+
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x0a0e1a);
     scene.fog = new THREE.Fog(0x0a0e1a, 5, 15);
@@ -286,6 +294,7 @@
     let pulseSpeed = parseFloat(document.getElementById('pulseSpeed').value);
     let metalness = parseFloat(document.getElementById('metalness').value);
     let roughness = parseFloat(document.getElementById('roughness').value);
+    let animationStart = performance.now();
 
     const palette = [
       0xc0c0d0, 0xb0b0c0, 0xa8a8b8, 0x9898a8,
@@ -293,11 +302,15 @@
       0x888898, 0xd8d8e8
     ];
 
-    const statusMessage = document.getElementById('statusMessage');
     const statsBlock = document.getElementById('stats');
     const statArcGroups = document.getElementById('statArcGroups');
     const statPolygons = document.getElementById('statPolygons');
     const statParameters = document.getElementById('statParameters');
+    const rotationSpeed = document.getElementById('rotationSpeed');
+    const manualRotation = document.getElementById('manualRotation');
+    const pulseSlider = document.getElementById('pulseSpeed');
+    const metalnessSlider = document.getElementById('metalness');
+    const roughnessSlider = document.getElementById('roughness');
 
     function getColorForRing(i) {
       return palette[Math.abs(i) % palette.length];
@@ -309,6 +322,9 @@
         mesh.material.dispose();
       });
       spiralContainer.clear();
+      spiralContainer.position.set(0, 0, 0);
+      spiralContainer.rotation.set(0, 0, 0);
+      spiralContainer.scale.set(1, 1, 1);
     }
 
     function createPolygonMesh(outline, ringIndex, lineAngle) {
@@ -345,6 +361,7 @@
         lineAngle: lineAngle || 0,
         isPulsing: false,
         wasInRange: false,
+        pulseStart: 0,
       };
       return mesh;
     }
@@ -363,9 +380,72 @@
         }
       });
 
+      if (spiralContainer.children.length) {
+        const box = new THREE.Box3().setFromObject(spiralContainer);
+        const center = box.getCenter(new THREE.Vector3());
+        const size = box.getSize(new THREE.Vector3());
+        const maxDimension = Math.max(size.x, size.y, size.z, 1e-6);
+        const scale = 2.5 / maxDimension;
+        spiralContainer.position.set(-center.x * scale, -center.y * scale, -center.z * scale);
+        spiralContainer.scale.setScalar(scale);
+        resetView();
+      }
+
       statArcGroups.textContent = data.arcgroups.length;
       statPolygons.textContent = spiralContainer.children.length;
       statsBlock.hidden = false;
+    }
+
+    function updateMaterialsForRotation(rotationAngleDeg, timeSec) {
+      const threshold = 20;
+      const pulseDuration = 1 / Math.max(pulseSpeed, 0.0001);
+
+      spiralContainer.children.forEach(mesh => {
+        const lineAngle = mesh.userData.lineAngle || 0;
+        const diff = Math.abs(((rotationAngleDeg - lineAngle + 450) % 180) - 90);
+        const isInRange = diff < threshold;
+
+        if (isInRange && !mesh.userData.wasInRange) {
+          mesh.userData.isPulsing = true;
+          mesh.userData.pulseStart = timeSec;
+        }
+
+        if (mesh.userData.isPulsing) {
+          const elapsed = timeSec - mesh.userData.pulseStart;
+          if (elapsed < pulseDuration) {
+            const t = elapsed / pulseDuration;
+            const s = Math.sin(t * Math.PI);
+            mesh.material.emissive.setHex(0xffd700);
+            mesh.material.emissiveIntensity = s * 0.8;
+            mesh.material.metalness = metalness + 0.1 * s;
+          } else {
+            mesh.userData.isPulsing = false;
+            mesh.material.emissive.setHex(0x000000);
+            mesh.material.emissiveIntensity = 0;
+            mesh.material.metalness = metalness;
+          }
+        }
+
+        mesh.userData.wasInRange = isInRange;
+      });
+    }
+
+    function updateCamera() {
+      const { x, y } = cameraRotation;
+      camera.position.x = cameraDistance * Math.sin(x) * Math.cos(y);
+      camera.position.y = cameraDistance * Math.sin(y);
+      camera.position.z = cameraDistance * Math.cos(x) * Math.cos(y);
+      camera.lookAt(0, 0, 0);
+    }
+
+    function resetView() {
+      cameraRotation = { x: 0, y: 0 };
+      cameraDistance = 4;
+      spiralContainer.rotation.set(0, 0, 0);
+      manualRotation.value = '0';
+      document.getElementById('manualRotationValue').textContent = '0';
+      animationStart = performance.now();
+      updateCamera();
     }
 
     async function fetchGeometryFromBackend() {
@@ -418,100 +498,97 @@
       reader.readAsText(file);
     });
 
-    document.getElementById('resetCamera').addEventListener('click', () => {
-      cameraRotation = { x: 0, y: 0 };
-      cameraDistance = 4;
-      camera.position.set(0, 0, cameraDistance);
-    });
+    document.getElementById('resetCamera').addEventListener('click', resetView);
 
-    const rotationSpeed = document.getElementById('rotationSpeed');
     rotationSpeed.addEventListener('input', () => {
       autoRotationSpeed = parseFloat(rotationSpeed.value);
       document.getElementById('rotationSpeedValue').textContent = autoRotationSpeed.toFixed(2);
     });
 
-    const manualRotation = document.getElementById('manualRotation');
     manualRotation.addEventListener('input', () => {
       const value = parseFloat(manualRotation.value);
       document.getElementById('manualRotationValue').textContent = value.toFixed(0);
-      spiralContainer.rotation.y = THREE.MathUtils.degToRad(value);
     });
 
-    const pulseSlider = document.getElementById('pulseSpeed');
     pulseSlider.addEventListener('input', () => {
       pulseSpeed = parseFloat(pulseSlider.value);
       document.getElementById('pulseSpeedValue').textContent = pulseSpeed.toFixed(1);
     });
 
-    const metalnessSlider = document.getElementById('metalness');
     metalnessSlider.addEventListener('input', () => {
       metalness = parseFloat(metalnessSlider.value);
       document.getElementById('metalnessValue').textContent = metalness.toFixed(2);
       spiralContainer.children.forEach(mesh => mesh.material.metalness = metalness);
     });
 
-    const roughnessSlider = document.getElementById('roughness');
     roughnessSlider.addEventListener('input', () => {
       roughness = parseFloat(roughnessSlider.value);
       document.getElementById('roughnessValue').textContent = roughness.toFixed(2);
       spiralContainer.children.forEach(mesh => mesh.material.roughness = roughness);
     });
 
-    let isPointerDown = false;
-    let lastPointerPosition = null;
+    let isDragging = false;
+    let previousPointer = null;
 
     canvas.addEventListener('pointerdown', event => {
-      isPointerDown = true;
-      lastPointerPosition = { x: event.clientX, y: event.clientY };
+      isDragging = true;
+      previousPointer = { x: event.clientX, y: event.clientY };
       canvas.setPointerCapture(event.pointerId);
     });
 
     canvas.addEventListener('pointermove', event => {
-      if (!isPointerDown || !lastPointerPosition) return;
-      const dx = event.clientX - lastPointerPosition.x;
-      const dy = event.clientY - lastPointerPosition.y;
-      cameraRotation.y -= dx * 0.0025;
-      cameraRotation.x -= dy * 0.0025;
-      lastPointerPosition = { x: event.clientX, y: event.clientY };
+      if (!isDragging || !previousPointer) {
+        return;
+      }
+
+      const dx = event.clientX - previousPointer.x;
+      const dy = event.clientY - previousPointer.y;
+      cameraRotation.x += dx * 0.01;
+      cameraRotation.y += dy * 0.01;
+      cameraRotation.y = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, cameraRotation.y));
+      previousPointer = { x: event.clientX, y: event.clientY };
+      updateCamera();
     });
 
     canvas.addEventListener('pointerup', event => {
-      isPointerDown = false;
-      lastPointerPosition = null;
+      isDragging = false;
+      previousPointer = null;
       canvas.releasePointerCapture(event.pointerId);
+    });
+
+    canvas.addEventListener('pointerleave', () => {
+      isDragging = false;
+      previousPointer = null;
     });
 
     canvas.addEventListener('wheel', event => {
       event.preventDefault();
-      cameraDistance += event.deltaY * 0.0025;
-      cameraDistance = Math.min(Math.max(cameraDistance, 2.5), 8);
+      cameraDistance += event.deltaY * 0.01;
+      cameraDistance = Math.max(1, Math.min(15, cameraDistance));
+      updateCamera();
     }, { passive: false });
 
-    let lastTime = 0;
     function animate(time) {
       requestAnimationFrame(animate);
       resizeRendererToDisplaySize();
-      const delta = (time - lastTime) / 1000;
-      lastTime = time;
 
-      if (!isPointerDown) {
-        spiralContainer.rotation.y += autoRotationSpeed * delta * Math.PI * 2;
+      const timeSec = (time - animationStart) / 1000;
+      const manualValue = parseFloat(manualRotation.value);
+      let rotationDeg;
+
+      if (autoRotationSpeed > 0 && Math.abs(manualValue) < 1e-6) {
+        rotationDeg = (timeSec * autoRotationSpeed * 360) % 360;
+      } else {
+        rotationDeg = manualValue % 360;
       }
 
-      camera.position.x = cameraDistance * Math.sin(cameraRotation.y) * Math.cos(cameraRotation.x);
-      camera.position.y = cameraDistance * Math.sin(cameraRotation.x);
-      camera.position.z = cameraDistance * Math.cos(cameraRotation.y) * Math.cos(cameraRotation.x);
-      camera.lookAt(0, 0, 0);
-
-      const pulse = (Math.sin(time * 0.001 * pulseSpeed * Math.PI * 2) + 1) * 0.5;
-      spiralContainer.children.forEach(mesh => {
-        const emissiveStrength = mesh.userData.ringIndex === 0 ? 0.3 : 0.1;
-        mesh.material.emissiveIntensity = emissiveStrength * pulse;
-      });
-
+      spiralContainer.rotation.z = THREE.MathUtils.degToRad(rotationDeg);
+      updateMaterialsForRotation(rotationDeg, timeSec);
+      updateCamera();
       renderer.render(scene, camera);
     }
 
+    updateCamera();
     requestAnimationFrame(animate);
     fetchGeometryFromBackend();
   </script>
