@@ -13,7 +13,7 @@ from scipy.spatial import cKDTree
 import svgwrite
 from IPython.display import display, SVG, clear_output
 import ipywidgets as widgets
-from typing import List, Tuple, Optional, Set, Dict
+from typing import Any, Dict, List, Optional, Set, Tuple
 import random
 import math
 import itertools
@@ -178,6 +178,175 @@ def _shapely_geometry_to_segments(geometry):
     return segments
 
 
+class LineFillCache:
+    """Cache for polygon line fills keyed by geometry and line settings."""
+
+    def __init__(self):
+        self._entries: Dict[
+            Tuple[Any, float, float, float],
+            Dict[str, Any]
+        ] = {}
+        self._polygon_cache: Dict[Tuple[Any, float], Optional[Dict[str, Any]]] = {}
+
+    @staticmethod
+    def _normalize(value: float) -> float:
+        return round(float(value), 9)
+
+    @staticmethod
+    def polygon_signature_from_array(array: np.ndarray) -> Tuple[Tuple[float, float], ...]:
+        return tuple((round(float(x), 9), round(float(y), 9)) for x, y in array)
+
+    def _make_key(self, polygon_signature: Any, offset: float, spacing: float, angle: float) -> Tuple[Any, float, float, float]:
+        return (
+            polygon_signature,
+            self._normalize(offset),
+            self._normalize(spacing),
+            self._normalize(angle),
+        )
+
+    def ensure_entry(
+        self,
+        polygon_signature: Any,
+        offset: float,
+        spacing: float,
+        angle: float,
+    ) -> Dict[str, Any]:
+        key = self._make_key(polygon_signature, offset, spacing, angle)
+        entry = self._entries.get(key)
+        if entry is None:
+            polygon_data = None
+            if polygon_signature is not None:
+                polygon_data = self._polygon_cache.get(
+                    (polygon_signature, self._normalize(offset))
+                )
+            entry = {
+                "polygon_data": polygon_data,
+                "line_starts": None,
+                "line_ends": None,
+                "segments": None,
+            }
+            self._entries[key] = entry
+        return entry
+
+    def store_polygon_data(
+        self,
+        polygon_signature: Any,
+        offset: float,
+        polygon_data: Optional[Dict[str, Any]],
+    ) -> None:
+        normalized_offset = self._normalize(offset)
+        if polygon_signature is not None:
+            self._polygon_cache[(polygon_signature, normalized_offset)] = polygon_data
+
+        for (sig, off, _, _), entry in self._entries.items():
+            if sig == polygon_signature and off == normalized_offset:
+                entry["polygon_data"] = polygon_data
+
+    def store_line_endpoints(
+        self,
+        polygon_signature: Any,
+        offset: float,
+        spacing: float,
+        angle: float,
+        line_starts: Optional[np.ndarray],
+        line_ends: Optional[np.ndarray],
+    ) -> None:
+        entry = self.ensure_entry(polygon_signature, offset, spacing, angle)
+        entry["line_starts"] = line_starts
+        entry["line_ends"] = line_ends
+
+    def store_segments(
+        self,
+        polygon_signature: Any,
+        offset: float,
+        spacing: float,
+        angle: float,
+        segments: List[Tuple[Tuple[float, float], Tuple[float, float]]],
+    ) -> None:
+        entry = self.ensure_entry(polygon_signature, offset, spacing, angle)
+        entry["segments"] = segments
+
+    def prepare_polygon_data(
+        self,
+        base_array: np.ndarray,
+        offset: float,
+    ) -> Optional[Dict[str, Any]]:
+        if base_array is None or len(base_array) < 3:
+            return None
+
+        clipped_array: Optional[np.ndarray]
+        if offset:
+            clipped_array = apply_polygon_inset(base_array, offset)
+        else:
+            clipped_array = np.array(base_array, dtype=float, copy=False)
+
+        if clipped_array is None or len(clipped_array) < 3:
+            return None
+
+        polygon_path = MplPath(clipped_array)
+        shapely_polygon = None
+        prepared_polygon = None
+
+        if HAS_SHAPELY and ShapelyPolygon is not None:
+            try:
+                shapely_polygon = ShapelyPolygon(clipped_array)
+                if shapely_polygon.is_empty:
+                    shapely_polygon = None
+                elif not shapely_polygon.is_valid:
+                    shapely_polygon = shapely_polygon.buffer(0)
+                    if shapely_polygon.is_empty:
+                        shapely_polygon = None
+            except Exception:
+                shapely_polygon = None
+
+            if shapely_polygon is not None and shapely_prep is not None:
+                try:
+                    prepared_polygon = shapely_prep(shapely_polygon)
+                except Exception:
+                    prepared_polygon = None
+
+        min_x, min_y = clipped_array[:, 0].min(), clipped_array[:, 1].min()
+        max_x, max_y = clipped_array[:, 0].max(), clipped_array[:, 1].max()
+        bbox_diag = math.hypot(max_x - min_x, max_y - min_y)
+        centroid = clipped_array.mean(axis=0)
+
+        return {
+            "polygon_array": clipped_array,
+            "polygon_path": polygon_path,
+            "shapely_polygon": shapely_polygon,
+            "prepared_polygon": prepared_polygon,
+            "bbox_diag": bbox_diag,
+            "centroid": centroid,
+        }
+
+    def compute_line_endpoints(
+        self,
+        polygon_data: Dict[str, Any],
+        spacing: float,
+        angle: float,
+    ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
+        bbox_diag = polygon_data.get("bbox_diag")
+        centroid = polygon_data.get("centroid")
+
+        if not bbox_diag or centroid is None:
+            return None, None
+
+        theta = math.radians(angle)
+        line_dir = np.array([math.cos(theta), math.sin(theta)])
+        perp_dir = np.array([-line_dir[1], line_dir[0]])
+
+        num_lines = int(bbox_diag / max(1e-6, spacing)) + 3
+        offsets = np.arange(-num_lines, num_lines + 1, dtype=float)[:, None] * spacing
+        offset_vectors = offsets * perp_dir
+        span = line_dir * bbox_diag * 2
+        start_base = centroid - span
+        end_base = centroid + span
+        line_starts = start_base + offset_vectors
+        line_ends = end_base + offset_vectors
+
+        return line_starts, line_ends
+
+
 def lines_in_polygon(
     polygon,
     line_spacing=5,
@@ -192,6 +361,8 @@ def lines_in_polygon(
     prepared_polygon=None,
     bbox_diag: Optional[float] = None,
     centroid: Optional[np.ndarray] = None,
+    line_starts: Optional[np.ndarray] = None,
+    line_ends: Optional[np.ndarray] = None,
 ):
     """Generate parallel lines clipped to polygon bounds.
 
@@ -210,6 +381,8 @@ def lines_in_polygon(
         prepared_polygon: Prepared shapely polygon for quick intersection tests
         bbox_diag: Precomputed bounding box diagonal length
         centroid: Precomputed polygon centroid
+        line_starts: Prebuilt start points for candidate lines
+        line_ends: Prebuilt end points for candidate lines
 
     Returns:
         List of line segment tuples ((x1, y1), (x2, y2))
@@ -227,34 +400,42 @@ def lines_in_polygon(
         polygon_path = None
         shapely_polygon = None
         prepared_polygon = None
+        line_starts = None
+        line_ends = None
 
     if polygon_path is None:
         polygon_path = MplPath(polygon_array)
 
-    if centroid is None:
-        centroid = polygon_array.mean(axis=0)
+    if line_starts is None or line_ends is None:
+        if centroid is None:
+            centroid = polygon_array.mean(axis=0)
 
-    if bbox_diag is None:
-        min_x, min_y = polygon_array[:, 0].min(), polygon_array[:, 1].min()
-        max_x, max_y = polygon_array[:, 0].max(), polygon_array[:, 1].max()
-        bbox_diag = math.hypot(max_x - min_x, max_y - min_y)
-    if not bbox_diag:
-        return []
+        if bbox_diag is None:
+            min_x, min_y = polygon_array[:, 0].min(), polygon_array[:, 1].min()
+            max_x, max_y = polygon_array[:, 0].max(), polygon_array[:, 1].max()
+            bbox_diag = math.hypot(max_x - min_x, max_y - min_y)
+        if not bbox_diag:
+            return []
 
-    # Calculate line direction and perpendicular offset direction
-    theta = math.radians(angle)
-    line_dir = np.array([math.cos(theta), math.sin(theta)])
-    perp_dir = np.array([-line_dir[1], line_dir[0]])
+        # Calculate line direction and perpendicular offset direction
+        theta = math.radians(angle)
+        line_dir = np.array([math.cos(theta), math.sin(theta)])
+        perp_dir = np.array([-line_dir[1], line_dir[0]])
 
-    # Generate parallel lines
-    num_lines = int(bbox_diag / max(1e-6, line_spacing)) + 3
-    offsets = np.arange(-num_lines, num_lines + 1, dtype=float)[:, None] * line_spacing
-    offset_vectors = offsets * perp_dir
-    span = line_dir * bbox_diag * 2
-    start_base = centroid - span
-    end_base = centroid + span
-    line_starts = start_base + offset_vectors
-    line_ends = end_base + offset_vectors
+        # Generate parallel lines
+        num_lines = int(bbox_diag / max(1e-6, line_spacing)) + 3
+        offsets = np.arange(-num_lines, num_lines + 1, dtype=float)[:, None] * line_spacing
+        offset_vectors = offsets * perp_dir
+        span = line_dir * bbox_diag * 2
+        start_base = centroid - span
+        end_base = centroid + span
+        line_starts = start_base + offset_vectors
+        line_ends = end_base + offset_vectors
+    else:
+        line_starts = np.asarray(line_starts, dtype=float)
+        line_ends = np.asarray(line_ends, dtype=float)
+        if line_starts.shape[0] == 0 or line_ends.shape[0] == 0:
+            return []
 
     line_segments = []
 
@@ -316,7 +497,7 @@ class DrawingContext:
         self.size = size
         self.dwg = svgwrite.Drawing(size=(size, size))
         self.scale_factor = 1.0
-        self._line_clip_cache: Dict[Tuple[Tuple[float, float], float], Dict[str, object]] = {}
+        self._line_fill_cache = LineFillCache()
 
     def set_normalization_scale(self, elements: List['CircleElement']):
         """
@@ -425,74 +606,79 @@ class DrawingContext:
         line_spacing, line_angle = line_pattern_settings
 
         base_array = convert_polygon_to_array(points)
-        if base_array is None or len(base_array) < 3:
-            polygon_entry = {"polygon_array": None}
-        else:
-            key_points = tuple((round(float(x), 9), round(float(y), 9)) for x, y in base_array)
-            cache_key = (key_points, round(float(line_offset), 9))
-            polygon_entry = self._line_clip_cache.get(cache_key)
+        polygon_signature = None
+        if base_array is not None and len(base_array) >= 3:
+            polygon_signature = LineFillCache.polygon_signature_from_array(base_array)
 
-            if polygon_entry is None:
-                clipped_array = apply_polygon_inset(base_array, line_offset)
-                if clipped_array is None or len(clipped_array) < 3:
-                    polygon_entry = {"polygon_array": None}
+        cache_entry = self._line_fill_cache.ensure_entry(
+            polygon_signature,
+            line_offset,
+            line_spacing,
+            line_angle,
+        )
+
+        polygon_data = cache_entry.get("polygon_data")
+        if polygon_signature is not None and polygon_data is None:
+            polygon_data = self._line_fill_cache.prepare_polygon_data(base_array, line_offset)
+            self._line_fill_cache.store_polygon_data(polygon_signature, line_offset, polygon_data)
+            polygon_data = cache_entry.get("polygon_data")
+
+        if polygon_data is None:
+            line_segments = cache_entry.get("segments")
+            if line_segments is None:
+                line_segments = []
+                self._line_fill_cache.store_segments(
+                    polygon_signature,
+                    line_offset,
+                    line_spacing,
+                    line_angle,
+                    line_segments,
+                )
+        else:
+            line_starts = cache_entry.get("line_starts")
+            line_ends = cache_entry.get("line_ends")
+            if line_starts is None or line_ends is None:
+                line_starts, line_ends = self._line_fill_cache.compute_line_endpoints(
+                    polygon_data,
+                    line_spacing,
+                    line_angle,
+                )
+                self._line_fill_cache.store_line_endpoints(
+                    polygon_signature,
+                    line_offset,
+                    line_spacing,
+                    line_angle,
+                    line_starts,
+                    line_ends,
+                )
+
+            line_segments = cache_entry.get("segments")
+            if line_segments is None:
+                if line_starts is None or line_ends is None:
+                    line_segments = []
                 else:
-                    polygon_path = MplPath(clipped_array)
-                    shapely_polygon = None
-                    prepared_polygon = None
-                    if HAS_SHAPELY and ShapelyPolygon is not None:
-                        try:
-                            shapely_polygon = ShapelyPolygon(clipped_array)
-                            if shapely_polygon.is_empty:
-                                shapely_polygon = None
-                            elif not shapely_polygon.is_valid:
-                                shapely_polygon = shapely_polygon.buffer(0)
-                                if shapely_polygon.is_empty:
-                                    shapely_polygon = None
-                        except Exception:
-                            shapely_polygon = None
+                    line_segments = lines_in_polygon(
+                        points,
+                        line_spacing=line_spacing,
+                        angle=line_angle,
+                        offset=0,
+                        polygon_array=polygon_data.get("polygon_array"),
+                        polygon_path=polygon_data.get("polygon_path"),
+                        shapely_polygon=polygon_data.get("shapely_polygon"),
+                        prepared_polygon=polygon_data.get("prepared_polygon"),
+                        bbox_diag=polygon_data.get("bbox_diag"),
+                        centroid=polygon_data.get("centroid"),
+                        line_starts=line_starts,
+                        line_ends=line_ends,
+                    )
 
-                        if shapely_polygon is not None and shapely_prep is not None:
-                            try:
-                                prepared_polygon = shapely_prep(shapely_polygon)
-                            except Exception:
-                                prepared_polygon = None
-
-                    min_x, min_y = clipped_array[:, 0].min(), clipped_array[:, 1].min()
-                    max_x, max_y = clipped_array[:, 0].max(), clipped_array[:, 1].max()
-                    bbox_diag = math.hypot(max_x - min_x, max_y - min_y)
-                    centroid = clipped_array.mean(axis=0)
-
-                    polygon_entry = {
-                        "polygon_array": clipped_array,
-                        "polygon_path": polygon_path,
-                        "shapely_polygon": shapely_polygon,
-                        "prepared_polygon": prepared_polygon,
-                        "bbox_diag": bbox_diag,
-                        "centroid": centroid,
-                    }
-
-                self._line_clip_cache[cache_key] = polygon_entry
-
-        entry_dict = polygon_entry if isinstance(polygon_entry, dict) else {}
-        polygon_array = entry_dict.get("polygon_array")
-
-        # Generate clipped line segments
-        if polygon_array is not None:
-            line_segments = lines_in_polygon(
-                points,
-                line_spacing=line_spacing,
-                angle=line_angle,
-                offset=0,
-                polygon_array=polygon_array,
-                polygon_path=entry_dict.get("polygon_path"),
-                shapely_polygon=entry_dict.get("shapely_polygon"),
-                prepared_polygon=entry_dict.get("prepared_polygon"),
-                bbox_diag=entry_dict.get("bbox_diag"),
-                centroid=entry_dict.get("centroid"),
-            )
-        else:
-            line_segments = []
+                self._line_fill_cache.store_segments(
+                    polygon_signature,
+                    line_offset,
+                    line_spacing,
+                    line_angle,
+                    line_segments,
+                )
 
         # Optionally draw polygon outline
         if draw_outline:
