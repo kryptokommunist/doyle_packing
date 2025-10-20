@@ -361,23 +361,27 @@ class DrawingContext:
             svg_element = scaled_element.to_svg(self.dwg, **kwargs)
 
         elif isinstance(element, ArcElement):
-            # Scale the underlying circle and points for the arc
-            scaled_circle = CircleElement(
-                element.circle.center * self.scale_factor,
-                element.circle.radius * self.scale_factor
-            )
-            # Scale start and end points
-            scaled_start = element.start * self.scale_factor
-            scaled_end = element.end * self.scale_factor
-            # Create a temporary scaled element for drawing purposes
-            scaled_element = ArcElement(
-                scaled_circle,
-                scaled_start,
-                scaled_end,
-                element.steps,
-                element.visible
-            )
-            svg_element = scaled_element.to_svg(self.dwg, **kwargs)
+            if not element.visible:
+                svg_element = None
+            else:
+                points = element.get_cached_points()
+                if points is None:
+                    points = element.get_points()
+
+                if not points:
+                    svg_element = None
+                else:
+                    scaled_points = [p * self.scale_factor for p in points]
+                    color = kwargs.get("color", "#000000")
+                    width = kwargs.get("width", 1.2)
+                    path_data = ["M", f"{scaled_points[0].real},{scaled_points[0].imag}"]
+                    path_data.extend(f"L{p.real},{p.imag}" for p in scaled_points[1:])
+                    svg_element = self.dwg.path(
+                        d=" ".join(path_data),
+                        fill="none",
+                        stroke=color,
+                        stroke_width=width
+                    )
 
         else:
             # Unknown element type; skip drawing
@@ -767,9 +771,56 @@ class ArcElement(Shape):
         """
         super().__init__(visible)
         self.circle = circle
-        self.start = complex(start)
-        self.end = complex(end)
+        self._points_cache: Optional[List[complex]] = None
+        self._start: complex = 0j
+        self._end: complex = 0j
+        self._steps: int = 0
+        self.start = start
+        self.end = end
         self.steps = steps
+
+    def _invalidate_points_cache(self):
+        """Invalidate the cached arc sample points."""
+        self._points_cache = None
+
+    @property
+    def start(self) -> complex:
+        return self._start
+
+    @start.setter
+    def start(self, value: complex):
+        new_value = complex(value)
+        if getattr(self, "_start", None) != new_value:
+            self._start = new_value
+            self._invalidate_points_cache()
+
+    @property
+    def end(self) -> complex:
+        return self._end
+
+    @end.setter
+    def end(self, value: complex):
+        new_value = complex(value)
+        if getattr(self, "_end", None) != new_value:
+            self._end = new_value
+            self._invalidate_points_cache()
+
+    @property
+    def steps(self) -> int:
+        return self._steps
+
+    @steps.setter
+    def steps(self, value: int):
+        new_value = int(value)
+        if new_value < 1:
+            new_value = 1
+        if getattr(self, "_steps", None) != new_value:
+            self._steps = new_value
+            self._invalidate_points_cache()
+
+    def get_cached_points(self) -> Optional[List[complex]]:
+        """Return the cached arc sample points if available."""
+        return self._points_cache
 
     def get_points(self) -> List[complex]:
         """
@@ -781,6 +832,9 @@ class ArcElement(Shape):
         Returns:
             A list of complex numbers representing the points along the arc.
         """
+        if self._points_cache is not None:
+            return self._points_cache
+
         c = self.circle.center
         r = self.circle.radius
         a1 = np.angle(self.start - c)
@@ -795,7 +849,8 @@ class ArcElement(Shape):
 
         # Generate points along the arc using linspace for angles
         angles = np.linspace(a1, a1 + delta, self.steps)
-        return [c + r * np.exp(1j * a) for a in angles]
+        self._points_cache = [c + r * np.exp(1j * a) for a in angles]
+        return self._points_cache
 
     def to_svg(self, dwg: svgwrite.Drawing, color="#000000", width=1.2):
         """
@@ -844,6 +899,8 @@ class ArcGroup:
         self.id = ArcGroup._id_counter
         self.name = name or f"arcgroup_{self.id}"
         self.arcs: List[ArcElement] = []
+        self._arc_points_cache: Dict[ArcElement, List[complex]] = {}
+        self._outline_cache: Optional[List[complex]] = None
         # color for debug visualization
         self.debug_fill: Optional[str] = None
         self.debug_stroke: Optional[str] = None
@@ -858,6 +915,8 @@ class ArcGroup:
             arc: The ArcElement to add.
         """
         self.arcs.append(arc)
+        self._cache_arc_points(arc)
+        self._invalidate_outline_cache()
 
     def extend(self, arcs: List[ArcElement]):
         """
@@ -866,13 +925,16 @@ class ArcGroup:
         Args:
             arcs: A list of ArcElement objects to add.
         """
-        self.arcs.extend(arcs)
+        for arc in arcs:
+            self.add_arc(arc)
 
     def clear(self):
         """
         Removes all arcs from the group.
         """
         self.arcs.clear()
+        self._arc_points_cache.clear()
+        self._outline_cache = None
 
     def is_empty(self) -> bool:
         """
@@ -892,8 +954,37 @@ class ArcGroup:
         """
         pts = []
         for arc in self.arcs:
-            pts.extend(arc.get_points())
+            pts.extend(self._ensure_arc_points(arc))
         return pts
+
+    def _cache_arc_points(self, arc: ArcElement) -> List[complex]:
+        """Ensure that the group's cache stores the sampled points for ``arc``."""
+        points = arc.get_cached_points()
+        if points is None:
+            points = arc.get_points()
+        self._arc_points_cache[arc] = points
+        return points
+
+    def _ensure_arc_points(self, arc: ArcElement) -> List[complex]:
+        """Retrieve cached points for ``arc``, populating the cache when necessary."""
+        cached_points = self._arc_points_cache.get(arc)
+        current_points = arc.get_cached_points()
+        if current_points is None:
+            current_points = arc.get_points()
+
+        if cached_points is not current_points:
+            self._arc_points_cache[arc] = current_points
+            self._invalidate_outline_cache()
+
+        return self._arc_points_cache[arc]
+
+    def _invalidate_outline_cache(self):
+        """Invalidate the cached outline for the group."""
+        self._outline_cache = None
+
+    def get_cached_outline(self) -> Optional[List[complex]]:
+        """Return the cached outline if it has been computed."""
+        return self._outline_cache
 
     def _match_points(self, a: complex, b: complex, tol: float = 1e-6) -> bool:
         """
@@ -967,13 +1058,16 @@ class ArcGroup:
         Returns:
             List of points forming the outline (closed if endpoints match).
         """
+        if self._outline_cache is not None:
+            return list(self._outline_cache)
+
         if not self.arcs:
             return []
-        
+
         # Prepare arc entries sorted by point count (longest first)
-        entries = [(arc, arc.get_points()) for arc in self.arcs]
+        entries = [(arc, self._ensure_arc_points(arc)) for arc in self.arcs]
         entries.sort(key=lambda e: -len(e[1]))
-        
+
         # Start with longest arc
         ordered_pts = entries[0][1].copy()
         used = {0}
@@ -1004,6 +1098,7 @@ class ArcGroup:
         if ordered_pts and abs(ordered_pts[0] - ordered_pts[-1]) <= tol:
             ordered_pts[-1] = ordered_pts[0]
         
+        self._outline_cache = ordered_pts.copy()
         return ordered_pts
 
     def to_svg_fill(self, context: DrawingContext, debug: bool = False, fill_opacity: float = 0.25, pattern_fill: bool = False, line_settings = (2,0), use_clipped_lines: bool = True, draw_outline: bool = True, line_offset: float = 0):
@@ -1473,8 +1568,14 @@ class DoyleSpiral:
             if "outer" in group_key:
                 continue
 
-            outline = group.get_closed_outline()
-            outline_points = [[p.real, p.imag] for p in outline]
+            outline = group.get_cached_outline()
+            if outline is None:
+                computed_outline = group.get_closed_outline()
+                outline = group.get_cached_outline()
+                if outline is None:
+                    outline = computed_outline
+
+            outline_points = [[p.real, p.imag] for p in outline] if outline else []
 
             ring_index = group.ring_index if group.ring_index is not None else 0
             line_angle = ring_index * self.fill_pattern_angle
