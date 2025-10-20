@@ -4,7 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Doyle Spiral 3D Viewer</title>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js" integrity="sha512-bWFbYKT1eZq9VHtVHCnRvWmvMRGsiE9zraFMvx6bMpiKFFitvolG/G5hgbf+168Q5e0siJmq9hw3rroWAt4E6w==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <!-- three.js from jsDelivr. The previous CDN asset started failing the integrity check which kept the viewer from booting. -->
+  <script src="https://cdn.jsdelivr.net/npm/three@0.152.2/build/three.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
   <style>
     :root {
       color-scheme: light dark;
@@ -243,6 +244,13 @@
 
   <script>
     const canvas = document.getElementById('canvas');
+    const statusMessage = document.getElementById('statusMessage');
+
+    if (typeof THREE === 'undefined') {
+      statusMessage.textContent = 'Unable to load the 3D engine. Check your network connection and try again.';
+      throw new Error('three.js failed to load');
+    }
+
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x0a0e1a);
     scene.fog = new THREE.Fog(0x0a0e1a, 5, 15);
@@ -293,7 +301,6 @@
       0x888898, 0xd8d8e8
     ];
 
-    const statusMessage = document.getElementById('statusMessage');
     const statsBlock = document.getElementById('stats');
     const statArcGroups = document.getElementById('statArcGroups');
     const statPolygons = document.getElementById('statPolygons');
