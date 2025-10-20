@@ -16,7 +16,6 @@ from typing import List, Tuple, Optional, Set, Dict
 import random
 import math
 import itertools
-from matplotlib.path import Path as MplPath
 import json
 
 # ============================================
@@ -152,9 +151,8 @@ def lines_in_polygon(polygon, line_spacing=5, angle=0, color="#000000", stroke_w
     
     # Generate parallel lines
     num_lines = int(bbox_diag / max(1e-6, line_spacing)) + 3
-    path = MplPath(polygon_array)
     line_segments = []
-    
+
     for i in range(-num_lines, num_lines + 1):
         # Calculate line offset from centroid
         offset_vec = perp_dir * i * line_spacing
@@ -164,16 +162,28 @@ def lines_in_polygon(polygon, line_spacing=5, angle=0, color="#000000", stroke_w
         # Find intersections with polygon
         intersections = find_line_polygon_intersections(line_start, line_end, polygon_array)
         
-        # Create segments from intersection pairs
-        for j in range(0, len(intersections) - 1, 2):
-            _, x1, y1 = intersections[j]
-            _, x2, y2 = intersections[j + 1]
-            
-            # Verify segment is inside polygon
-            mid_x, mid_y = (x1 + x2) / 2, (y1 + y2) / 2
-            if path.contains_point((mid_x, mid_y)):
-                line_segments.append(((x1, y1), (x2, y2)))
-    
+        # Deduplicate nearly identical intersections (e.g., touching vertices)
+        deduped = []
+        for t, x, y in intersections:
+            if deduped:
+                last_t, last_x, last_y = deduped[-1]
+                if abs(t - last_t) < 1e-9 and math.hypot(x - last_x, y - last_y) < 1e-9:
+                    continue
+            deduped.append((t, x, y))
+
+        # Create segments using parity to track inside/outside spans
+        inside = False
+        start_point = None
+        for _, x, y in deduped:
+            inside = not inside
+            if inside:
+                start_point = (x, y)
+            elif start_point is not None:
+                x1, y1 = start_point
+                if math.hypot(x - x1, y - y1) > 1e-9:
+                    line_segments.append(((x1, y1), (x, y)))
+                start_point = None
+
     return line_segments
 
 # ============================================
