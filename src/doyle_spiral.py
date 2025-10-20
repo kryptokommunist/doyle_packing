@@ -9,6 +9,7 @@ Original file is located at
 
 import numpy as np
 from scipy.optimize import root
+from scipy.spatial import cKDTree
 import svgwrite
 from IPython.display import display, SVG, clear_output
 import ipywidgets as widgets
@@ -1142,9 +1143,28 @@ class DoyleSpiral:
     def compute_all_intersections(self):
         """Computes all intersections for visible and outer circles."""
         all_circles = self.circles + self.outer_circles
-        for c in all_circles:
+        if not all_circles:
+            return
+
+        centers = np.array([[c.center.real, c.center.imag] for c in all_circles], dtype=float)
+        radii = np.array([c.radius for c in all_circles], dtype=float)
+        tree = cKDTree(centers)
+        max_radius = float(radii.max())
+        tol = 1e-3
+
+        for idx, circle in enumerate(all_circles):
+            query_radius = circle.radius + max_radius + tol
+            candidate_indices = tree.query_ball_point(centers[idx], query_radius)
+            candidates = []
+            for j in candidate_indices:
+                if j == idx:
+                    continue
+                other = all_circles[j]
+                if abs(circle.center - other.center) <= circle.radius + other.radius + tol:
+                    candidates.append(other)
+
             # All circles need the spiral center (0+0j) as the reference for sorting
-            c.compute_intersections(all_circles, start_reference=0+0j)
+            circle.compute_intersections(candidates, start_reference=0+0j, tol=tol)
 
     # ---- ArcGroup management APIs ----
     def create_group_for_circle(self, circle: CircleElement, name: Optional[str] = None) -> ArcGroup:
