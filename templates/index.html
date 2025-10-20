@@ -233,6 +233,10 @@
       box-shadow: 0 12px 24px rgba(37, 99, 235, 0.3);
     }
 
+    [hidden] {
+      display: none !important;
+    }
+
     .preview-card {
       background: var(--panel-bg);
       border-radius: 1.5rem;
@@ -722,7 +726,7 @@
 
         statMode.textContent = params.mode === 'arram_boyle' ? 'Arram-Boyle' : 'Classic Doyle';
         setStatus('Spiral updated. Switch views to explore it in 3D.');
-        if (activeView === '3d' && threeApp) {
+        if (threeApp) {
           threeApp.useGeometryFromPayload(params, geometry);
         }
       } catch (error) {
@@ -751,7 +755,7 @@
         toggleFillSettings();
       }
       debouncedRender();
-      if (activeView === '3d' && threeApp) {
+      if (threeApp) {
         threeApp.queueGeometryUpdate(collectParams());
       }
     });
@@ -759,7 +763,7 @@
     form.addEventListener('submit', event => {
       event.preventDefault();
       renderSpiral(true);
-      if (activeView === '3d' && threeApp) {
+      if (threeApp) {
         threeApp.queueGeometryUpdate(collectParams(), true);
       }
     });
@@ -786,7 +790,12 @@
           pulseSettingsButton();
           ensureThreeApp();
           if (threeApp) {
-            threeApp.queueGeometryUpdate(collectParams(), true);
+            const params = collectParams();
+            if (hasGeometry(lastGeometry)) {
+              threeApp.useGeometryFromPayload(params, lastGeometry);
+            } else {
+              threeApp.queueGeometryUpdate(params, true);
+            }
           }
         }
       });
