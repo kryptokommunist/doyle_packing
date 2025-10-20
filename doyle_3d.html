@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>✨ 3D Doyle Spiral Viewer (Refined)</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      background: linear-gradient(135deg, #1e3a8a 0%, #0f172a 100%);
+      min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 20px;
+    }
+    #canvas {
+      width: 100%; height: 600px; border-radius: 12px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+      margin-bottom: 20px; cursor: grab;
+    }
+    #canvas:active { cursor: grabbing; }
+    h1 {
+      color: white; margin-bottom: 24px; font-size: 28px;
+      text-align: center; text-shadow: 0 2px 10px rgba(0,0,0,0.3);
+    }
+    .controls-panel {
+      background: rgba(255,255,255,0.95); border-radius: 12px;
+      padding: 24px; width: 100%; max-width: 800px;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.3); backdrop-filter: blur(10px);
+    }
+    label { display: block; font-weight: 600; color: #1e3a8a; margin-bottom: 8px; font-size: 14px; text-transform: uppercase; letter-spacing: 0.5px; }
+    input[type="range"] {
+      width: 100%; height: 6px; border-radius: 3px;
+      background: linear-gradient(90deg, #3b82f6, #8b5cf6);
+      outline: none; appearance: none;
+    }
+    input[type="range"]::-webkit-slider-thumb,
+    input[type="range"]::-moz-range-thumb {
+      width: 18px; height: 18px; border-radius: 50%;
+      background: white; border: 2px solid #3b82f6;
+      cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    }
+    .value-display { font-size: 12px; color: #64748b; margin-top: 4px; }
+    .button-group { display: flex; gap: 12px; flex-wrap: wrap; }
+    button {
+      flex: 1; min-width: 120px; padding: 12px 24px; border: none; border-radius: 8px;
+      font-weight: 600; font-size: 14px; cursor: pointer;
+      transition: all 0.3s ease; text-transform: uppercase; letter-spacing: 0.5px;
+    }
+    #loadButton { background: linear-gradient(135deg,#3b82f6,#2563eb); color: white; }
+    #loadButton:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(59,130,246,0.3); }
+    #resetButton { background: linear-gradient(135deg,#8b5cf6,#7c3aed); color: white; }
+    #resetButton:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(139,92,246,0.3); }
+    .info-box {
+      background: #f0f9ff; border-left: 4px solid #3b82f6; padding: 12px 16px;
+      border-radius: 4px; font-size: 13px; color: #1e40af; margin-bottom: 20px;
+    }
+    .controls-row { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    @media (max-width: 768px){ .controls-row { grid-template-columns: 1fr; } }
+    .stats {
+      display: grid; grid-template-columns: repeat(auto-fit,minmax(150px,1fr));
+      gap: 12px; margin-top: 12px; padding-top: 12px; border-top: 1px solid #e2e8f0;
+    }
+    .stat-item { font-size: 12px; color: #64748b; }
+    .stat-value { font-weight: 700; color: #1e3a8a; }
+  </style>
+</head>
+<body>
+  <h1>✨ 3D Doyle Spiral Viewer</h1>
+  <canvas id="canvas"></canvas>
+
+  <div class="controls-panel">
+    <div class="info-box">
+      Load a JSON file to view in 3D. The spiral pulses once in gold when its reflective angle (0° ↔ 180°) aligns with the rotation.
+    </div>
+
+    <div class="controls-row">
+      <div class="control-group">
+        <label for="rotationSpeed">Rotation Speed</label>
+        <input type="range" id="rotationSpeed" min="0" max="2" step="0.1" value="0.5">
+        <div class="value-display"><span id="speedValue">0.5</span> rotations/sec</div>
+      </div>
+      <div class="control-group">
+        <label for="pulseSpeed">Pulse Speed</label>
+        <input type="range" id="pulseSpeed" min="0.5" max="5" step="0.1" value="2">
+        <div class="value-display"><span id="pulseValue">2.0</span> pulses/sec</div>
+      </div>
+    </div>
+
+    <div class="controls-row">
+      <div class="control-group">
+        <label for="manualRotation">Manual Rotation</label>
+        <input type="range" id="manualRotation" min="0" max="360" step="1" value="0">
+        <div class="value-display"><span id="rotationValue">0</span>°</div>
+      </div>
+      <div class="control-group">
+        <label for="metalness">Metalness</label>
+        <input type="range" id="metalness" min="0" max="1" step="0.05" value="0.9">
+        <div class="value-display"><span id="metalnessValue">0.9</span></div>
+      </div>
+    </div>
+
+    <div class="control-group">
+      <label for="roughness">Roughness</label>
+      <input type="range" id="roughness" min="0" max="1" step="0.05" value="0.2">
+      <div class="value-display"><span id="roughnessValue">0.2</span></div>
+    </div>
+
+    <div class="control-group">
+      <div class="button-group">
+        <button id="loadButton">📁 Load JSON</button>
+        <button id="resetButton">🔄 Reset View</button>
+      </div>
+    </div>
+
+    <div id="stats" class="stats" style="display:none;">
+      <div class="stat-item">Arc Groups: <span class="stat-value" id="statGroups">0</span></div>
+      <div class="stat-item">Total Polygons: <span class="stat-value" id="statPolygons">0</span></div>
+      <div class="stat-item">Status: <span class="stat-value" id="statStatus">Ready</span></div>
+    </div>
+  </div>
+
+  <input type="file" id="fileInput" accept=".json">
+
+  <script>
+    // --- Scene Setup ---
+    const canvas = document.getElementById('canvas');
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0a0e1a);
+    scene.fog = new THREE.Fog(0x0a0e1a, 5, 15);
+
+    const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 1000);
+    camera.position.set(0, 0, 4);
+
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+    function resizeRendererToDisplaySize() {
+      const width = canvas.clientWidth, height = canvas.clientHeight;
+      if (canvas.width !== width || canvas.height !== height) {
+        renderer.setSize(width, height, false);
+        camera.aspect = width / height;
+        camera.updateProjectionMatrix();
+      }
+    }
+
+    // Lights
+    const ambient = new THREE.AmbientLight(0x404060, 0.4);
+    scene.add(ambient);
+    const key = new THREE.DirectionalLight(0xffffff, 1.2);
+    key.position.set(5, 8, 7);
+    key.castShadow = true;
+    scene.add(key);
+    const fill = new THREE.DirectionalLight(0x7799ff, 0.5);
+    fill.position.set(-5, 3, -5);
+    scene.add(fill);
+    const rim = new THREE.DirectionalLight(0xffaa77, 0.6);
+    rim.position.set(0, -5, -5);
+    scene.add(rim);
+
+    // Spiral group
+    const spiralContainer = new THREE.Group();
+    scene.add(spiralContainer);
+
+    let cameraRotation = { x: 0, y: 0 }, cameraDistance = 4;
+    let autoRotationSpeed = 0.5, pulseSpeed = 2.0, metalness = 0.9, roughness = 0.2;
+
+    const palette = [0xc0c0d0,0xb0b0c0,0xa8a8b8,0x9898a8,0xd0d0e0,0xb8b8c8,0xa0a0b0,0xc8c8d8,0x888898,0xd8d8e8];
+
+    function getColorForRing(i){ return palette[Math.abs(i) % palette.length]; }
+
+    // Create mesh
+    function createPolygonMesh(outline, ringIndex, lineAngle){
+      const shape = new THREE.Shape();
+      if(outline.length){ shape.moveTo(outline[0][0],outline[0][1]); outline.slice(1).forEach(p=>shape.lineTo(p[0],p[1])); }
+      const geo = new THREE.ExtrudeGeometry(shape,{depth:0.05,bevelEnabled:true,bevelThickness:0.01,bevelSize:0.01,bevelSegments:2});
+      const mat = new THREE.MeshStandardMaterial({color:getColorForRing(ringIndex),metalness,roughness,emissive:0x000000});
+      const mesh = new THREE.Mesh(geo,mat);
+      mesh.castShadow=true; mesh.receiveShadow=true;
+      mesh.userData={ringIndex,lineAngle,isPulsing:false,wasInRange:false};
+      return mesh;
+    }
+
+    // Properly clear container and dispose memory
+    function clearSpiral(){
+      spiralContainer.children.forEach(mesh=>{
+        mesh.geometry.dispose();
+        mesh.material.dispose();
+      });
+      spiralContainer.clear();
+    }
+
+    // Load JSON data
+    function loadSpiralFromJSON(data){
+      clearSpiral();
+      const arcgroups = data.arcgroups || [];
+      arcgroups.forEach(g=>{
+        if(g.outline?.length){
+          const m = createPolygonMesh(g.outline,g.ring_index,g.line_angle||0);
+          spiralContainer.add(m);
+        }
+      });
+      // Normalize
+      const box=new THREE.Box3().setFromObject(spiralContainer);
+      const center=box.getCenter(new THREE.Vector3());
+      const size=box.getSize(new THREE.Vector3());
+      const scale=2.5/Math.max(size.x,size.y,size.z);
+      spiralContainer.position.set(-center.x*scale,-center.y*scale,-center.z*scale);
+      spiralContainer.scale.setScalar(scale);
+      document.getElementById('statGroups').textContent=arcgroups.length;
+      document.getElementById('statPolygons').textContent=spiralContainer.children.length;
+      document.getElementById('statStatus').textContent='Loaded';
+      document.getElementById('stats').style.display='grid';
+    }
+
+    // --- Refined pulse logic (0–180° symmetry) ---
+    function updateMaterialsForRotation(rotationAngleDeg,time){
+      const threshold=20, pulseDuration=1/pulseSpeed;
+      spiralContainer.children.forEach(mesh=>{
+        const lineAngle=mesh.userData.lineAngle||0;
+        // Reflective periodicity (180° symmetry)
+        const diff=Math.abs(((rotationAngleDeg-lineAngle+450)%180)-90);
+        const isInRange=diff<threshold;
+        if(isInRange && !mesh.userData.wasInRange){
+          mesh.userData.isPulsing=true;
+          mesh.userData.pulseStart=time;
+        }
+        if(mesh.userData.isPulsing){
+          const elapsed=time-mesh.userData.pulseStart;
+          if(elapsed<pulseDuration){
+            const t=elapsed/pulseDuration;
+            const s=Math.sin(t*Math.PI);
+            mesh.material.emissive.setHex(0xffd700);
+            mesh.material.emissiveIntensity=s*0.8;
+            mesh.material.metalness=metalness+0.1*s;
+          }else{
+            mesh.userData.isPulsing=false;
+            mesh.material.emissive.setHex(0x000000);
+            mesh.material.emissiveIntensity=0;
+            mesh.material.metalness=metalness;
+          }
+        }
+        mesh.userData.wasInRange=isInRange;
+      });
+    }
+
+    // Camera positioning
+    function updateCamera(){
+      const {x,y}=cameraRotation;
+      camera.position.x=cameraDistance*Math.sin(x)*Math.cos(y);
+      camera.position.y=cameraDistance*Math.sin(y);
+      camera.position.z=cameraDistance*Math.cos(x)*Math.cos(y);
+      camera.lookAt(0,0,0);
+    }
+
+    function resetView(){
+      spiralContainer.rotation.set(0,0,0);
+      cameraRotation={x:0,y:0}; cameraDistance=4; updateCamera();
+      document.getElementById('manualRotation').value=0;
+      document.getElementById('rotationValue').textContent='0';
+    }
+
+    // Mouse + touch
+    let isDragging=false, prev={x:0,y:0}, touchDist=0;
+    canvas.addEventListener('mousedown',e=>{isDragging=true;prev={x:e.clientX,y:e.clientY};});
+    canvas.addEventListener('mousemove',e=>{
+      if(!isDragging)return;
+      const dx=e.clientX-prev.x,dy=e.clientY-prev.y;
+      cameraRotation.x+=dx*0.01; cameraRotation.y+=dy*0.01;
+      cameraRotation.y=Math.max(-Math.PI/2,Math.min(Math.PI/2,cameraRotation.y));
+      updateCamera(); prev={x:e.clientX,y:e.clientY};
+    });
+    ['mouseup','mouseleave'].forEach(ev=>canvas.addEventListener(ev,()=>isDragging=false));
+    canvas.addEventListener('wheel',e=>{
+      e.preventDefault();
+      cameraDistance+=e.deltaY*0.01;
+      cameraDistance=Math.max(1,Math.min(15,cameraDistance)); updateCamera();
+    });
+    canvas.addEventListener('touchstart',e=>{
+      if(e.touches.length===1){isDragging=true;prev={x:e.touches[0].clientX,y:e.touches[0].clientY};}
+      else if(e.touches.length===2){const dx=e.touches[0].clientX-e.touches[1].clientX;const dy=e.touches[0].clientY-e.touches[1].clientY;touchDist=Math.hypot(dx,dy);}
+    });
+    canvas.addEventListener('touchmove',e=>{
+      e.preventDefault();
+      if(e.touches.length===1&&isDragging){const dx=e.touches[0].clientX-prev.x,dy=e.touches[0].clientY-prev.y;cameraRotation.x+=dx*0.01;cameraRotation.y+=dy*0.01;cameraRotation.y=Math.max(-Math.PI/2,Math.min(Math.PI/2,cameraRotation.y));updateCamera();prev={x:e.touches[0].clientX,y:e.touches[0].clientY};}
+      else if(e.touches.length===2){const dx=e.touches[0].clientX-e.touches[1].clientX;const dy=e.touches[0].clientY-e.touches[1].clientY;const dist=Math.hypot(dx,dy);cameraDistance+= (touchDist-dist)*0.01;cameraDistance=Math.max(1,Math.min(15,cameraDistance));updateCamera();touchDist=dist;}
+    });
+    canvas.addEventListener('touchend',()=>{isDragging=false;});
+
+    // UI Controls
+    document.getElementById('rotationSpeed').addEventListener('input',e=>{autoRotationSpeed=parseFloat(e.target.value);document.getElementById('speedValue').textContent=autoRotationSpeed.toFixed(1);});
+    document.getElementById('pulseSpeed').addEventListener('input',e=>{pulseSpeed=parseFloat(e.target.value);document.getElementById('pulseValue').textContent=pulseSpeed.toFixed(1);});
+    document.getElementById('manualRotation').addEventListener('input',e=>{const a=parseFloat(e.target.value);document.getElementById('rotationValue').textContent=a;spiralContainer.rotation.z=THREE.MathUtils.degToRad(a);});
+    document.getElementById('metalness').addEventListener('input',e=>{metalness=parseFloat(e.target.value);document.getElementById('metalnessValue').textContent=metalness.toFixed(2);spiralContainer.children.forEach(m=>m.material.metalness=metalness);});
+    document.getElementById('roughness').addEventListener('input',e=>{roughness=parseFloat(e.target.value);document.getElementById('roughnessValue').textContent=roughness.toFixed(2);spiralContainer.children.forEach(m=>m.material.roughness=roughness);});
+    document.getElementById('resetButton').addEventListener('click',resetView);
+
+    // File loading
+    document.getElementById('loadButton').addEventListener('click',()=>document.getElementById('fileInput').click());
+    document.getElementById('fileInput').addEventListener('change',e=>{
+      const f=e.target.files[0]; if(!f)return;
+      const r=new FileReader();
+      r.onload=ev=>{try{const d=JSON.parse(ev.target.result);loadSpiralFromJSON(d);}catch(err){alert("Invalid JSON: "+err.message);}};
+      r.readAsText(f);
+    });
+
+    // --- Animation Loop ---
+    let start=performance.now();
+    function animate(t){
+      requestAnimationFrame(animate);
+      resizeRendererToDisplaySize();
+      const timeSec=(t-start)/1000;
+      const manual=parseFloat(document.getElementById('manualRotation').value);
+      if(autoRotationSpeed>0 && manual===0){
+        const deg=(timeSec*autoRotationSpeed*360)%360;
+        spiralContainer.rotation.z=THREE.MathUtils.degToRad(deg);
+        updateMaterialsForRotation(deg,timeSec);
+      } else updateMaterialsForRotation(manual,timeSec);
+      renderer.render(scene,camera);
+    }
+
+    updateCamera();
+    animate();
+  </script>
+</body>
+</html>
