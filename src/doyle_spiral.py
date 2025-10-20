@@ -17,6 +17,7 @@ from typing import List, Tuple, Optional, Set, Dict
 import random
 import math
 import itertools
+from dataclasses import dataclass
 from matplotlib.path import Path as MplPath
 import json
 
@@ -887,6 +888,14 @@ class ArcGroup:
     - We can attempt to produce a closed outline from the group's arcs.
     """
     _id_counter = 0
+    _POINT_ROUND_DIGITS = 6
+    _POINT_SCALE = 10 ** _POINT_ROUND_DIGITS
+
+    @dataclass(frozen=True)
+    class _Edge:
+        arc: 'ArcElement'
+        other_key: Tuple[int, int]
+        forward: bool
 
     def __init__(self, name: Optional[str] = None):
         """
@@ -901,6 +910,10 @@ class ArcGroup:
         self.arcs: List[ArcElement] = []
         self._arc_points_cache: Dict[ArcElement, List[complex]] = {}
         self._outline_cache: Optional[List[complex]] = None
+        self._outline_dirty: bool = True
+        self._endpoint_graph: Dict[Tuple[int, int], List[ArcGroup._Edge]] = {}
+        self._arc_endpoint_keys: Dict[ArcElement, Tuple[Tuple[int, int], Tuple[int, int]]] = {}
+        self._graph_dirty: bool = False
         # color for debug visualization
         self.debug_fill: Optional[str] = None
         self.debug_stroke: Optional[str] = None
@@ -916,6 +929,7 @@ class ArcGroup:
         """
         self.arcs.append(arc)
         self._cache_arc_points(arc)
+        self._register_arc_in_graph(arc)
         self._invalidate_outline_cache()
 
     def extend(self, arcs: List[ArcElement]):
@@ -934,7 +948,11 @@ class ArcGroup:
         """
         self.arcs.clear()
         self._arc_points_cache.clear()
+        self._endpoint_graph.clear()
+        self._arc_endpoint_keys.clear()
         self._outline_cache = None
+        self._outline_dirty = True
+        self._graph_dirty = False
 
     def is_empty(self) -> bool:
         """
@@ -974,17 +992,174 @@ class ArcGroup:
 
         if cached_points is not current_points:
             self._arc_points_cache[arc] = current_points
-            self._invalidate_outline_cache()
+            if cached_points is not None:
+                self._graph_dirty = True
+                self._invalidate_outline_cache()
 
         return self._arc_points_cache[arc]
 
     def _invalidate_outline_cache(self):
         """Invalidate the cached outline for the group."""
         self._outline_cache = None
+        self._outline_dirty = True
 
     def get_cached_outline(self) -> Optional[List[complex]]:
         """Return the cached outline if it has been computed."""
         return self._outline_cache
+
+    def _quantize_point(self, point: complex) -> Tuple[int, int]:
+        """Quantize a complex point into an integer key for adjacency tracking."""
+        scale = self._POINT_SCALE
+        return (int(round(point.real * scale)), int(round(point.imag * scale)))
+
+    def _register_arc_in_graph(self, arc: 'ArcElement') -> None:
+        """Insert ``arc`` into the endpoint adjacency graph."""
+        if arc in self._arc_endpoint_keys and not self._graph_dirty:
+            return
+
+        start_key = self._quantize_point(arc.start)
+        end_key = self._quantize_point(arc.end)
+        self._arc_endpoint_keys[arc] = (start_key, end_key)
+        self._endpoint_graph.setdefault(start_key, []).append(ArcGroup._Edge(arc, end_key, True))
+        self._endpoint_graph.setdefault(end_key, []).append(ArcGroup._Edge(arc, start_key, False))
+
+    def _rebuild_endpoint_graph(self) -> None:
+        """Recompute the endpoint adjacency graph from the current arcs."""
+        self._endpoint_graph.clear()
+        self._arc_endpoint_keys = {}
+        for arc in self.arcs:
+            self._register_arc_in_graph(arc)
+        self._graph_dirty = False
+
+    def _next_edge(
+        self,
+        node_key: Tuple[int, int],
+        visited_arcs: Set['ArcElement'],
+        last_key: Optional[Tuple[int, int]]
+    ) -> Optional['_Edge']:
+        """Return the next unvisited edge from ``node_key``."""
+        edges = self._endpoint_graph.get(node_key)
+        if not edges:
+            return None
+
+        if last_key is not None:
+            for edge in edges:
+                if edge.arc in visited_arcs:
+                    continue
+                if edge.other_key != last_key:
+                    return edge
+
+        for edge in edges:
+            if edge.arc not in visited_arcs:
+                return edge
+
+        return None
+
+    def _append_arc_points(self, outline: List[complex], arc: 'ArcElement', forward: bool, tol: float) -> None:
+        """Append arc sample points to ``outline`` respecting direction."""
+        pts = self._ensure_arc_points(arc)
+        if not pts:
+            return
+
+        sequence = pts if forward else list(reversed(pts))
+        if not outline:
+            outline.extend(sequence)
+            return
+
+        if abs(outline[-1] - sequence[0]) <= tol:
+            outline.extend(sequence[1:])
+        else:
+            outline.extend(sequence)
+
+    def _close_outline(self, outline: List[complex], tol: float) -> None:
+        """Ensure the outline is explicitly closed if endpoints coincide."""
+        if not outline:
+            return
+
+        if abs(outline[0] - outline[-1]) <= tol:
+            outline[-1] = outline[0]
+        else:
+            outline.append(outline[0])
+
+    def _traverse_from_arc(self, start_arc: 'ArcElement', forward: bool, tol: float) -> Optional[List[complex]]:
+        """Attempt to walk the outline starting with ``start_arc``."""
+        key_pair = self._arc_endpoint_keys.get(start_arc)
+        if key_pair is None:
+            return None
+
+        start_key, end_key = key_pair if forward else (key_pair[1], key_pair[0])
+        outline: List[complex] = []
+        visited_arcs: Set['ArcElement'] = set()
+
+        self._append_arc_points(outline, start_arc, forward, tol)
+        visited_arcs.add(start_arc)
+
+        if self._graph_dirty:
+            return None
+
+        current_key = end_key
+        last_key: Optional[Tuple[int, int]] = start_key
+        total_arcs = len(self._arc_endpoint_keys)
+        safety_limit = total_arcs * 2 + 10
+
+        steps = 0
+        while len(visited_arcs) < total_arcs and steps < safety_limit:
+            edge = self._next_edge(current_key, visited_arcs, last_key)
+            if edge is None:
+                return None
+
+            self._append_arc_points(outline, edge.arc, edge.forward, tol)
+            visited_arcs.add(edge.arc)
+            if self._graph_dirty:
+                return None
+            last_key = current_key
+            current_key = edge.other_key
+            steps += 1
+
+        if len(visited_arcs) != total_arcs or current_key != start_key:
+            return None
+
+        self._close_outline(outline, tol)
+        return outline
+
+    def _build_outline_from_graph(self, tol: float) -> Optional[List[complex]]:
+        """Construct the outline using the cached adjacency graph."""
+        if not self.arcs:
+            return []
+
+        attempts = 0
+        max_attempts = max(1, len(self.arcs) * 2)
+
+        while attempts < max_attempts:
+            if self._graph_dirty or not self._arc_endpoint_keys:
+                self._rebuild_endpoint_graph()
+                attempts += 1
+                if not self._arc_endpoint_keys:
+                    return []
+
+            progress = False
+            for arc in self.arcs:
+                if arc not in self._arc_endpoint_keys:
+                    continue
+
+                progress = True
+                for direction in (True, False):
+                    outline = self._traverse_from_arc(arc, direction, tol)
+                    if outline is not None:
+                        return outline
+                    if self._graph_dirty:
+                        break
+
+                if self._graph_dirty:
+                    break
+
+            if not progress:
+                return []
+
+            if not self._graph_dirty:
+                break
+
+        return None
 
     def _match_points(self, a: complex, b: complex, tol: float = 1e-6) -> bool:
         """
@@ -1049,18 +1224,8 @@ class ArcGroup:
             else:
                 return ordered_pts + list(reversed(pts))[1:]
     
-    def get_closed_outline(self, tol: float = 1e-3) -> List[complex]:
-        """Order arcs into a closed outline.
-        
-        Attempts to chain arcs by matching endpoints, reversing when needed.
-        Falls back to proximity-based attachment for remaining arcs.
-        
-        Returns:
-            List of points forming the outline (closed if endpoints match).
-        """
-        if self._outline_cache is not None:
-            return list(self._outline_cache)
-
+    def _build_outline_greedy(self, tol: float = 1e-3) -> List[complex]:
+        """Fallback outline construction via greedy endpoint chaining."""
         if not self.arcs:
             return []
 
@@ -1097,9 +1262,28 @@ class ArcGroup:
         # Close the outline if endpoints match
         if ordered_pts and abs(ordered_pts[0] - ordered_pts[-1]) <= tol:
             ordered_pts[-1] = ordered_pts[0]
-        
-        self._outline_cache = ordered_pts.copy()
+
         return ordered_pts
+
+    def finalize_outline(self, tol: float = 1e-3) -> List[complex]:
+        """Compute (or return) the cached outline ordered by adjacency."""
+        if not self._outline_dirty and self._outline_cache is not None:
+            return list(self._outline_cache)
+
+        outline = self._build_outline_from_graph(tol)
+        if outline is None:
+            outline = self._build_outline_greedy(tol)
+
+        if outline is None:
+            outline = []
+
+        self._outline_cache = list(outline)
+        self._outline_dirty = False
+        return list(self._outline_cache)
+
+    def get_closed_outline(self, tol: float = 1e-3) -> List[complex]:
+        """Return an ordered outline for the group."""
+        return self.finalize_outline(tol)
 
     def to_svg_fill(self, context: DrawingContext, debug: bool = False, fill_opacity: float = 0.25, pattern_fill: bool = False, line_settings = (2,0), use_clipped_lines: bool = True, draw_outline: bool = True, line_offset: float = 0):
         """
@@ -1118,7 +1302,7 @@ class ArcGroup:
             line_offset: Inset distance from polygon edge for line clipping (positive = shrink inward).
         """
         # Get the points for the outline
-        pts = self.get_closed_outline()
+        pts = self.finalize_outline()
         if not pts:
             return
         # scale points using the drawing context's scale factor
@@ -1568,12 +1752,7 @@ class DoyleSpiral:
             if "outer" in group_key:
                 continue
 
-            outline = group.get_cached_outline()
-            if outline is None:
-                computed_outline = group.get_closed_outline()
-                outline = group.get_cached_outline()
-                if outline is None:
-                    outline = computed_outline
+            outline = group.finalize_outline()
 
             outline_points = [[p.real, p.imag] for p in outline] if outline else []
 
