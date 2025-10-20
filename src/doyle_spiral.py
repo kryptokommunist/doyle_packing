@@ -17,6 +17,7 @@ import random
 import math
 import itertools
 from matplotlib.path import Path as MplPath
+import json
 
 # ============================================
 # Base Geometry and Drawing Classes
@@ -1090,6 +1091,8 @@ class DoyleSpiral:
         self.generate_outer_circles()
         self.compute_all_intersections()
         context.set_normalization_scale(self.circles + self.outer_circles)
+
+        self.fill_pattern_angle = fill_pattern_angle
         
         spiral_center = 0 + 0j
         self.arc_groups.clear()
@@ -1234,6 +1237,66 @@ class DoyleSpiral:
 
         # Return the SVG as a string
         return context.to_string()
+
+    def export_to_json(self, filename: str = 'doyle_spiral.json'):
+        """
+        Exports the spiral's arc groups to a JSON file.
+        
+        Preserves arcgroup data including outlines, ring indices, and line angles.
+        
+        Args:
+            filename: Output filename for the JSON file.
+        """
+        # Ensure arc groups have been created
+        if not self.arc_groups:
+            print("No arc groups to export. Run to_svg() with 'arram_boyle' mode first.")
+            return
+        
+        # Build the export data structure
+        export_data = {
+            "spiral_params": {
+                "p": self.p,
+                "q": self.q,
+                "t": self.t,
+                "max_d": self.max_d,
+                "arc_mode": self.arc_mode,
+                "num_gaps": self.num_gaps
+            },
+            "arcgroups": []
+        }
+        
+        for group_key, group in self.arc_groups.items():
+            if "outer" in group_key: continue
+            # Get the closed outline as points
+            outline = group.get_closed_outline()
+            
+            # Convert complex numbers to [x, y] pairs
+            outline_points = [[p.real, p.imag] for p in outline]
+            
+            # Calculate the average line angle from all arcs in the group
+            # The line angle is inferred from the ring index
+            ring_index = group.ring_index if group.ring_index is not None else 0
+            line_angle = ring_index * self.fill_pattern_angle  # Adjust multiplier as needed for your use case
+            
+            group_data = {
+                "id": group.id,
+                "name": group.name,
+                "ring_index": group.ring_index,
+                "line_angle": line_angle,  # Angle in degrees
+                "outline": outline_points,
+                "arc_count": len(group.arcs)
+            }
+            
+            export_data["arcgroups"].append(group_data)
+        
+        # Write to JSON file
+        try:
+            with open(filename, 'w', encoding='utf-8') as f:
+                json.dump(export_data, f, indent=2)
+            print(f"✅ Spiral exported successfully to '{filename}'")
+            print(f"   - {len(export_data['arcgroups'])} arc groups")
+        except Exception as e:
+            print(f"❌ Error exporting spiral: {e}")
 
 # ============================================
 # Doyle Math and Arc Selection
@@ -1455,8 +1518,8 @@ def spiral_ui():
     and displays the generated SVG. Includes controls for manually adding arcs to groups.
     """
     # Create interactive widgets for controlling spiral parameters and rendering
-    p = widgets.IntSlider(value=16, min=2, max=20, step=1, description='p')
-    q = widgets.IntSlider(value=16, min=4, max=40, step=1, description='q')
+    p = widgets.IntSlider(value=16, min=2, max=64, step=1, description='p')
+    q = widgets.IntSlider(value=16, min=4, max=128, step=1, description='q')
     t = widgets.FloatSlider(value=0, min=0, max=1, step=0.05, description='t')
     mode = widgets.Dropdown(options=['doyle', 'arram_boyle'], value='arram_boyle', description='Mode')
     arc_mode = widgets.Dropdown(options=['closest', 'farthest', 'alternating', 'all', 'random', 'symmetric', 'angular'], value='closest', description='Arc Mode')
@@ -1541,9 +1604,33 @@ def spiral_ui():
                 print(f"✅ SVG saved successfully as '{filename}'")
             except Exception as e:
                 print(f"❌ Error saving SVG: {e}")
-    
-    # Wire up the save button
-    save_button.on_click(save_svg)
+
+    def save_json(_=None):
+        """Saves the current spiral to JSON format."""
+        with save_output:
+            clear_output(wait=True)
+            spiral = spiral_holder.get("spiral")
+            if spiral is None:
+                print("⚠️ No spiral to save. Please render first.")
+                return
+            
+            filename = filename_json_input.value.strip()
+            if not filename:
+                print("⚠️ Please enter a filename.")
+                return
+            
+            if not filename.endswith('.json'):
+                filename += '.json'
+            
+            spiral.export_to_json(filename)
+        
+        # Wire up the save button
+        save_button.on_click(save_svg)
+
+    #json export controls
+    filename_json_input = widgets.Text(value='doyle_spiral.json', description='JSON Filename:', placeholder='Enter filename')
+    save_json_button = widgets.Button(description='Save JSON', button_style='info', icon='save')
+    save_json_button.on_click(save_json)
 
     # Wire up observers / callbacks: call the render function when widget values change
     for w in [p, q, t, mode, arc_mode, num_gaps, debug, add_fill_pattern, fill_pattern_spacing, fill_pattern_angle, fill_pattern_offset, red_outline, draw_group_outline]:
@@ -1556,6 +1643,6 @@ def spiral_ui():
     controls_top = widgets.HBox([p, q, t, mode])
     controls_arc = widgets.HBox([arc_mode, num_gaps, debug, red_outline])
     controls_fill = widgets.HBox([add_fill_pattern, fill_pattern_spacing, fill_pattern_angle, fill_pattern_offset, draw_group_outline])
-    controls_save = widgets.HBox([filename_input, save_button])
+    controls_save = widgets.HBox([filename_input, save_button, filename_json_input, save_json_button])
     display(widgets.VBox([controls_top, controls_arc, controls_fill, controls_save, save_output, out]))
 
