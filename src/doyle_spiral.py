@@ -20,6 +20,11 @@ import itertools
 from matplotlib.path import Path as MplPath
 import json
 
+try:  # pragma: no cover - compiled extension might be unavailable
+    import _geometry_accel  # type: ignore
+except ImportError:  # pragma: no cover - fallback to Python implementations
+    _geometry_accel = None  # type: ignore
+
 try:
     from shapely.geometry import Polygon as ShapelyPolygon
     from shapely.geometry import LineString, MultiLineString, GeometryCollection, MultiPolygon
@@ -68,9 +73,22 @@ class Shape:
 
 def convert_polygon_to_array(polygon):
     """Convert polygon from complex numbers or list to numpy array."""
-    if polygon and isinstance(polygon[0], complex):
-        return np.array([(p.real, p.imag) for p in polygon])
-    return np.array(polygon)
+    if polygon is None:
+        return None
+
+    try:
+        length = len(polygon)
+    except TypeError:
+        return np.asarray(polygon, dtype=float)
+
+    if length == 0:
+        return np.empty((0, 2), dtype=float)
+
+    first = polygon[0]
+    if isinstance(first, complex):
+        return np.array([(p.real, p.imag) for p in polygon], dtype=float)
+
+    return np.asarray(polygon, dtype=float)
 
 def apply_polygon_inset(polygon_array, offset):
     """Apply inward buffer to polygon using shapely."""
@@ -280,6 +298,9 @@ class LineFillCache:
         else:
             clipped_array = np.array(base_array, dtype=float, copy=False)
 
+        if clipped_array is not None:
+            clipped_array = np.ascontiguousarray(clipped_array, dtype=float)
+
         if clipped_array is None or len(clipped_array) < 3:
             return None
 
@@ -392,6 +413,11 @@ def lines_in_polygon(
     if polygon_array is None or polygon_array.shape[0] < 3:
         return []
 
+    if line_spacing <= 0:
+        return []
+
+    polygon_array = np.ascontiguousarray(np.asarray(polygon_array, dtype=float))
+
     # Apply inward offset if specified (used when no cached array provided)
     if offset:
         polygon_array = apply_polygon_inset(polygon_array, offset)
@@ -403,20 +429,43 @@ def lines_in_polygon(
         line_starts = None
         line_ends = None
 
+    if centroid is None:
+        centroid = polygon_array.mean(axis=0)
+    else:
+        centroid = np.asarray(centroid, dtype=float)
+
+    if centroid is None or centroid.shape[0] != 2:
+        centroid = polygon_array.mean(axis=0)
+
+    if bbox_diag is None:
+        min_x, min_y = polygon_array[:, 0].min(), polygon_array[:, 1].min()
+        max_x, max_y = polygon_array[:, 0].max(), polygon_array[:, 1].max()
+        bbox_diag = math.hypot(max_x - min_x, max_y - min_y)
+
+    bbox_diag = float(bbox_diag) if bbox_diag is not None else 0.0
+    if bbox_diag <= 0.0:
+        return []
+
+    centroid_tuple = (float(centroid[0]), float(centroid[1]))
+
+    accelerator = getattr(_geometry_accel, "generate_line_fill", None)
+    if accelerator is not None:
+        try:
+            segments = accelerator(
+                polygon_array,
+                float(line_spacing),
+                float(angle),
+                centroid_tuple,
+                float(bbox_diag),
+            )
+            return list(segments)
+        except Exception:  # pragma: no cover - fallback to Python implementation on failure
+            pass
+
     if polygon_path is None:
         polygon_path = MplPath(polygon_array)
 
     if line_starts is None or line_ends is None:
-        if centroid is None:
-            centroid = polygon_array.mean(axis=0)
-
-        if bbox_diag is None:
-            min_x, min_y = polygon_array[:, 0].min(), polygon_array[:, 1].min()
-            max_x, max_y = polygon_array[:, 0].max(), polygon_array[:, 1].max()
-            bbox_diag = math.hypot(max_x - min_x, max_y - min_y)
-        if not bbox_diag:
-            return []
-
         # Calculate line direction and perpendicular offset direction
         theta = math.radians(angle)
         line_dir = np.array([math.cos(theta), math.sin(theta)])
@@ -436,6 +485,9 @@ def lines_in_polygon(
         line_ends = np.asarray(line_ends, dtype=float)
         if line_starts.shape[0] == 0 or line_ends.shape[0] == 0:
             return []
+
+    line_starts = np.ascontiguousarray(line_starts, dtype=float)
+    line_ends = np.ascontiguousarray(line_ends, dtype=float)
 
     line_segments = []
 
@@ -461,6 +513,14 @@ def lines_in_polygon(
             )
 
         return line_segments
+
+    # Attempt accelerated fallback via C extension
+    if _geometry_accel is not None:
+        try:
+            clipped = _geometry_accel.clip_lines_to_polygon(polygon_array, line_starts, line_ends)
+            return list(clipped)
+        except Exception:  # pragma: no cover - fallback to Python implementation on failure
+            pass
 
     # Fallback: manual clipping using polygon intersections
     for start, end in zip(line_starts, line_ends):
@@ -618,6 +678,7 @@ class DrawingContext:
         )
 
         polygon_data = cache_entry.get("polygon_data")
+        accel_generate = getattr(_geometry_accel, "generate_line_fill", None)
         if polygon_signature is not None and polygon_data is None:
             polygon_data = self._line_fill_cache.prepare_polygon_data(base_array, line_offset)
             self._line_fill_cache.store_polygon_data(polygon_signature, line_offset, polygon_data)
@@ -637,7 +698,7 @@ class DrawingContext:
         else:
             line_starts = cache_entry.get("line_starts")
             line_ends = cache_entry.get("line_ends")
-            if line_starts is None or line_ends is None:
+            if (line_starts is None or line_ends is None) and accel_generate is None:
                 line_starts, line_ends = self._line_fill_cache.compute_line_endpoints(
                     polygon_data,
                     line_spacing,
@@ -791,6 +852,21 @@ class CircleElement(Shape):
         Returns:
             A list of complex numbers representing the intersection points (0, 1, or 2 points).
         """
+        if _geometry_accel is not None:
+            try:
+                points = _geometry_accel.circle_circle_intersections(
+                    self.center.real,
+                    self.center.imag,
+                    self.radius,
+                    other.center.real,
+                    other.center.imag,
+                    other.radius,
+                    tol,
+                )
+                return [complex(p) for p in points]
+            except Exception:  # pragma: no cover - fall back to Python implementation on failure
+                pass
+
         d = abs(self.center - other.center)
         r1, r2 = self.radius, other.radius
 
