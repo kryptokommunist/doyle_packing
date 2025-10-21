@@ -856,6 +856,7 @@ class ArcGroup {
     this.debugFill = null;
     this.debugStroke = null;
     this.ringIndex = null;
+    this.baseCircle = null;
     this._outlineCache = null;
     this.template = null;
     this.templateTransform = null;
@@ -951,7 +952,17 @@ class ArcGroup {
     if (this._outlineCache) {
       return this._outlineCache.slice();
     }
-    if (this.template && this.templateTransform && this.template.normalizedOutline) {
+    const templateArcCount = this.template?.arcPointCounts?.length
+      ?? this.template?.normalizedArcs?.length
+      ?? null;
+    const useTemplate =
+      this.template
+      && this.templateTransform
+      && this.template.normalizedOutline
+      && templateArcCount !== null
+      && templateArcCount === this.arcs.length;
+
+    if (useTemplate) {
       const { normalizedOutline } = this.template;
       const { cos, sin, radius, center } = this.templateTransform;
       const points = [];
@@ -1773,6 +1784,7 @@ class DoyleSpiralEngine {
       const group = this.createGroupForCircle(circle, key);
       const ring = radiusToRing.get(Number(circle.radius.toFixed(6)));
       group.ringIndex = ring !== undefined ? ring : null;
+      group.baseCircle = circle;
       if (debugGroups) {
         group.debugFill = colorFromSeed(circle.id);
         group.debugStroke = '#000000';
@@ -1909,6 +1921,50 @@ class DoyleSpiralEngine {
     }
   }
 
+  _refreshTemplatesForExtendedGroups() {
+    if (!this._ringTemplates || !this._ringTemplates.size) {
+      return;
+    }
+    const processed = new Set();
+    for (const [key, group] of this.arcGroups.entries()) {
+      if (!key.startsWith('circle_')) {
+        continue;
+      }
+      const template = group.template;
+      const transform = group.templateTransform;
+      if (!template || !transform) {
+        continue;
+      }
+      if (processed.has(template)) {
+        continue;
+      }
+      const templateArcCount = template.arcPointCounts?.length ?? template.normalizedArcs?.length ?? 0;
+      if (templateArcCount === group.arcs.length) {
+        processed.add(template);
+        continue;
+      }
+      const baseCircle = group.baseCircle || group.arcs[0]?.circle || null;
+      if (!baseCircle) {
+        processed.add(template);
+        continue;
+      }
+      const outline = group.getClosedOutline();
+      if (!outline || !outline.length) {
+        processed.add(template);
+        continue;
+      }
+      const normalized = this._normalisePointsForTemplate(outline, baseCircle.center, baseCircle.radius);
+      if (normalized) {
+        template.normalizedOutline = normalized;
+        template.arcPointCounts = group.arcs.map(arc => {
+          const pts = arc.getPoints();
+          return Array.isArray(pts) ? pts.length : 0;
+        });
+      }
+      processed.add(template);
+    }
+  }
+
   _renderArramBoyle(context, {
     debugGroups = false,
     addFillPattern = false,
@@ -1931,6 +1987,7 @@ class DoyleSpiralEngine {
     this._createArcGroupsForCircles(radiusToRing, spiralCenter, debugGroups, addFillPattern, drawGroupOutline, context);
     this._drawOuterClosureArcs(spiralCenter, debugGroups, redOutline, addFillPattern, drawGroupOutline, context);
     this._extendGroupsWithNeighbours(spiralCenter);
+    this._refreshTemplatesForExtendedGroups();
 
     const ringIndices = Array.from(this.arcGroups.values())
       .filter(group => group.ringIndex !== null && group.ringIndex !== undefined)
