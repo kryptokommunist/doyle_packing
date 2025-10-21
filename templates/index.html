@@ -95,6 +95,7 @@
     }
 
     input[type="number"],
+    input[type="text"],
     select {
       width: 100%;
       padding: 0.75rem 0.9rem;
@@ -152,6 +153,23 @@
       display: flex;
       flex-wrap: wrap;
       gap: 0.75rem;
+    }
+
+    .export-controls {
+      display: flex;
+      gap: 0.6rem;
+      flex: 1 1 240px;
+      align-items: center;
+    }
+
+    .export-controls input {
+      flex: 1 1 auto;
+      min-width: 0;
+    }
+
+    .export-controls button {
+      flex: 0 0 auto;
+      white-space: nowrap;
     }
 
     button {
@@ -514,6 +532,19 @@
 
           <div class="actions">
             <button type="submit" id="renderButton">Refresh preview</button>
+            <div class="export-controls">
+              <input
+                type="text"
+                id="exportFilename"
+                value="doyle-spiral"
+                aria-label="SVG file name"
+                autocomplete="off"
+                spellcheck="false"
+              />
+              <button type="button" class="secondary" id="exportSvgButton" disabled>
+                Download SVG
+              </button>
+            </div>
           </div>
         </form>
       </section>
