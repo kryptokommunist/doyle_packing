@@ -292,20 +292,44 @@ function insetPolygon(points, offset) {
       y: curr.y + normalNext.y * offset,
     };
 
+    let candidate = null;
     const intersection = intersectLines(shiftedPrev, dir1, shiftedNext, dir2);
-    if (intersection) {
-      insetPoints.push(intersection);
+    if (intersection && polygonContains(intersection, base)) {
+      candidate = intersection;
     } else {
       const avg = normaliseVector({
         x: normalPrev.x + normalNext.x,
         y: normalPrev.y + normalNext.y,
       });
       if (avg) {
-        insetPoints.push({
+        const fallback = {
           x: curr.x + avg.x * offset,
           y: curr.y + avg.y * offset,
-        });
+        };
+        if (polygonContains(fallback, base)) {
+          candidate = fallback;
+        }
       }
+      if (!candidate) {
+        const prevCandidate = {
+          x: curr.x + normalPrev.x * offset,
+          y: curr.y + normalPrev.y * offset,
+        };
+        if (polygonContains(prevCandidate, base)) {
+          candidate = prevCandidate;
+        } else {
+          const nextCandidate = {
+            x: curr.x + normalNext.x * offset,
+            y: curr.y + normalNext.y * offset,
+          };
+          if (polygonContains(nextCandidate, base)) {
+            candidate = nextCandidate;
+          }
+        }
+      }
+    }
+    if (candidate) {
+      insetPoints.push(candidate);
     }
   }
 
@@ -1748,6 +1772,7 @@ export {
   ArcGroup,
   ArcSelector,
   CircleElement,
+  insetPolygon,
   DoyleSpiralEngine,
   renderSpiral,
   computeGeometry,
