@@ -253,6 +253,10 @@ function insetPolygon(points, offset) {
     return [];
   }
 
+  const baseArea = Math.abs(polygonSignedArea(base));
+  if (baseArea <= 1e-12) {
+    return [];
+  }
   const orientation = polygonSignedArea(base) >= 0 ? 1 : -1;
   const insetPoints = [];
   const count = base.length;
@@ -293,19 +297,28 @@ function insetPolygon(points, offset) {
     };
 
     const intersection = intersectLines(shiftedPrev, dir1, shiftedNext, dir2);
+    let candidate = null;
     if (intersection) {
-      insetPoints.push(intersection);
-    } else {
+      const distance = Math.hypot(intersection.x - curr.x, intersection.y - curr.y);
+      const MAX_RATIO = 10;
+      if (Number.isFinite(distance) && distance <= offset * MAX_RATIO + 1e-9) {
+        candidate = intersection;
+      }
+    }
+    if (!candidate) {
       const avg = normaliseVector({
         x: normalPrev.x + normalNext.x,
         y: normalPrev.y + normalNext.y,
       });
       if (avg) {
-        insetPoints.push({
+        candidate = {
           x: curr.x + avg.x * offset,
           y: curr.y + avg.y * offset,
-        });
+        };
       }
+    }
+    if (candidate) {
+      insetPoints.push(candidate);
     }
   }
 
@@ -313,7 +326,11 @@ function insetPolygon(points, offset) {
   if (cleaned.length < 3) {
     return [];
   }
-  if (Math.abs(polygonSignedArea(cleaned)) < 1e-6) {
+  const insetArea = Math.abs(polygonSignedArea(cleaned));
+  if (!Number.isFinite(insetArea) || insetArea <= 1e-9) {
+    return [];
+  }
+  if (insetArea >= baseArea * (1 - 1e-6)) {
     return [];
   }
   return cleaned;
