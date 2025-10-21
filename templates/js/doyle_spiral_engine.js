@@ -145,6 +145,148 @@ function polygonContains(point, polygon) {
   return inside;
 }
 
+function polygonSignedArea(points) {
+  if (!points || points.length < 3) {
+    return 0;
+  }
+  let area = 0;
+  for (let i = 0, j = points.length - 1; i < points.length; j = i, i += 1) {
+    area += points[j].x * points[i].y - points[i].x * points[j].y;
+  }
+  return area / 2;
+}
+
+function normaliseVector(vec) {
+  const length = Math.hypot(vec.x, vec.y);
+  if (length < 1e-9) {
+    return null;
+  }
+  return { x: vec.x / length, y: vec.y / length };
+}
+
+function inwardNormal(direction, orientationSign) {
+  if (orientationSign >= 0) {
+    return { x: -direction.y, y: direction.x };
+  }
+  return { x: direction.y, y: -direction.x };
+}
+
+function intersectLines(point1, dir1, point2, dir2) {
+  const det = dir1.x * dir2.y - dir1.y * dir2.x;
+  if (Math.abs(det) < 1e-9) {
+    return null;
+  }
+  const dx = point2.x - point1.x;
+  const dy = point2.y - point1.y;
+  const t = (dx * dir2.y - dy * dir2.x) / det;
+  return {
+    x: point1.x + dir1.x * t,
+    y: point1.y + dir1.y * t,
+  };
+}
+
+function sanitisePolygonPoints(points, tolerance = 1e-9) {
+  if (!Array.isArray(points)) {
+    return [];
+  }
+  const result = [];
+  for (const pt of points) {
+    if (!pt) {
+      continue;
+    }
+    const current = { x: pt.x, y: pt.y };
+    const previous = result[result.length - 1];
+    if (previous && Math.hypot(current.x - previous.x, current.y - previous.y) <= tolerance) {
+      continue;
+    }
+    result.push(current);
+  }
+  if (result.length > 1) {
+    const first = result[0];
+    const last = result[result.length - 1];
+    if (Math.hypot(first.x - last.x, first.y - last.y) <= tolerance) {
+      result.pop();
+    }
+  }
+  return result;
+}
+
+function insetPolygon(points, offset) {
+  if (!offset || offset <= 0) {
+    return sanitisePolygonPoints(points);
+  }
+
+  const base = sanitisePolygonPoints(points);
+  if (base.length < 3) {
+    return [];
+  }
+
+  const orientation = polygonSignedArea(base) >= 0 ? 1 : -1;
+  const insetPoints = [];
+  const count = base.length;
+
+  for (let i = 0; i < count; i += 1) {
+    const prev = base[(i - 1 + count) % count];
+    const curr = base[i];
+    const next = base[(i + 1) % count];
+
+    const prevDir = normaliseVector({ x: curr.x - prev.x, y: curr.y - prev.y });
+    const nextDir = normaliseVector({ x: next.x - curr.x, y: next.y - curr.y });
+
+    let normalPrev = prevDir ? inwardNormal(prevDir, orientation) : null;
+    let normalNext = nextDir ? inwardNormal(nextDir, orientation) : null;
+
+    if (!normalPrev && !normalNext) {
+      insetPoints.push({ x: curr.x, y: curr.y });
+      continue;
+    }
+
+    if (!normalPrev) {
+      normalPrev = normalNext;
+    }
+    if (!normalNext) {
+      normalNext = normalPrev;
+    }
+
+    const dir1 = prevDir || nextDir || { x: 1, y: 0 };
+    const dir2 = nextDir || prevDir || { x: 0, y: 1 };
+
+    const shiftedPrev = {
+      x: curr.x + normalPrev.x * offset,
+      y: curr.y + normalPrev.y * offset,
+    };
+    const shiftedNext = {
+      x: curr.x + normalNext.x * offset,
+      y: curr.y + normalNext.y * offset,
+    };
+
+    const intersection = intersectLines(shiftedPrev, dir1, shiftedNext, dir2);
+    if (intersection) {
+      insetPoints.push(intersection);
+    } else {
+      const avg = normaliseVector({
+        x: normalPrev.x + normalNext.x,
+        y: normalPrev.y + normalNext.y,
+      });
+      if (avg) {
+        insetPoints.push({
+          x: curr.x + avg.x * offset,
+          y: curr.y + avg.y * offset,
+        });
+      }
+    }
+  }
+
+  const cleaned = sanitisePolygonPoints(insetPoints);
+  if (cleaned.length < 3) {
+    return [];
+  }
+  if (Math.abs(polygonSignedArea(cleaned)) < 1e-6) {
+    return [];
+  }
+  return cleaned;
+}
+
 function lineSegmentIntersection(p1, p2, p3, p4) {
   const x1 = p1.x;
   const y1 = p1.y;
@@ -190,8 +332,17 @@ function findLinePolygonIntersections(start, end, polygon) {
   return intersections;
 }
 
-function linesInPolygon(polygonPoints, spacing, angleDeg) {
-  if (!polygonPoints.length || spacing <= 0) {
+function linesInPolygon(polygonPoints, spacing, angleDeg, offset = 0) {
+  if (!polygonPoints || polygonPoints.length < 3) {
+    return [];
+  }
+  const spacingAbs = Math.abs(spacing);
+  if (spacingAbs < 1e-9) {
+    return [];
+  }
+
+  const working = insetPolygon(polygonPoints, offset);
+  if (!working || working.length < 3) {
     return [];
   }
 
@@ -203,7 +354,7 @@ function linesInPolygon(polygonPoints, spacing, angleDeg) {
   let minY = Infinity;
   let maxX = -Infinity;
   let maxY = -Infinity;
-  for (const p of polygonPoints) {
+  for (const p of working) {
     minX = Math.min(minX, p.x);
     minY = Math.min(minY, p.y);
     maxX = Math.max(maxX, p.x);
@@ -211,34 +362,34 @@ function linesInPolygon(polygonPoints, spacing, angleDeg) {
   }
 
   const bboxDiag = Math.hypot(maxX - minX, maxY - minY);
-  const centroid = polygonCentroid(polygonPoints);
+  if (!Number.isFinite(bboxDiag) || bboxDiag <= 0) {
+    return [];
+  }
+  const centroid = polygonCentroid(working);
   const span = { x: lineDir.x * bboxDiag * 2, y: lineDir.y * bboxDiag * 2 };
   const startBase = { x: centroid.x - span.x, y: centroid.y - span.y };
   const endBase = { x: centroid.x + span.x, y: centroid.y + span.y };
 
-  const numLines = Math.floor(bboxDiag / Math.max(spacing, 1e-6)) + 3;
+  const effectiveSpacing = Math.max(spacingAbs, 1e-6);
+  const numLines = Math.floor(bboxDiag / effectiveSpacing) + 3;
   const segments = [];
   for (let i = -numLines; i <= numLines; i += 1) {
-    const offsetX = perpDir.x * spacing * i;
-    const offsetY = perpDir.y * spacing * i;
+    const offsetX = perpDir.x * effectiveSpacing * i;
+    const offsetY = perpDir.y * effectiveSpacing * i;
     const start = { x: startBase.x + offsetX, y: startBase.y + offsetY };
     const end = { x: endBase.x + offsetX, y: endBase.y + offsetY };
-    const intersections = findLinePolygonIntersections(start, end, polygonPoints);
+    const intersections = findLinePolygonIntersections(start, end, working);
     for (let j = 0; j < intersections.length - 1; j += 2) {
       const p1 = intersections[j].point;
       const p2 = intersections[j + 1].point;
       const mid = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
-      if (polygonContains(mid, polygonPoints)) {
+      if (polygonContains(mid, working)) {
         segments.push([p1, p2]);
       }
     }
   }
 
   return segments;
-}
-
-function convertPolygonToArray(points) {
-  return points.map(p => ({ x: p.re, y: p.im }));
 }
 
 // ------------------------------------------------------------
@@ -731,10 +882,14 @@ class DrawingContext {
       return;
     }
     const scaled = points.map(pt => this._scaled(pt));
-    const raw = convertPolygonToArray(points);
 
     if (fill === 'pattern') {
-      const segments = linesInPolygon(raw, linePatternSettings[0], linePatternSettings[1]);
+      const segments = linesInPolygon(
+        scaled,
+        linePatternSettings[0],
+        linePatternSettings[1],
+        lineOffset,
+      );
       if (drawOutline) {
         const polygon = document.createElementNS(SVG_NS, 'polygon');
         polygon.setAttribute('points', scaled.map(p => `${p.x.toFixed(4)},${p.y.toFixed(4)}`).join(' '));
@@ -746,13 +901,11 @@ class DrawingContext {
       }
       const lineColor = stroke || '#000000';
       for (const [p1, p2] of segments) {
-        const s1 = { x: p1.x * this.scaleFactor, y: p1.y * this.scaleFactor };
-        const s2 = { x: p2.x * this.scaleFactor, y: p2.y * this.scaleFactor };
         const line = document.createElementNS(SVG_NS, 'line');
-        line.setAttribute('x1', s1.x.toFixed(4));
-        line.setAttribute('y1', s1.y.toFixed(4));
-        line.setAttribute('x2', s2.x.toFixed(4));
-        line.setAttribute('y2', s2.y.toFixed(4));
+        line.setAttribute('x1', p1.x.toFixed(4));
+        line.setAttribute('y1', p1.y.toFixed(4));
+        line.setAttribute('x2', p2.x.toFixed(4));
+        line.setAttribute('y2', p2.y.toFixed(4));
         line.setAttribute('stroke', lineColor);
         line.setAttribute('stroke-width', '0.5');
         line.setAttribute('stroke-linecap', 'round');
