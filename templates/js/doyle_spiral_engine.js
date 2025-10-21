@@ -350,17 +350,39 @@ function lineSegmentIntersection(p1, p2, p3, p4) {
   };
 }
 
-function findLinePolygonIntersections(start, end, polygon) {
+function findLinePolygonIntersections(start, end, polygon, lineDir, orientation) {
   const intersections = [];
   for (let i = 0; i < polygon.length; i += 1) {
     const p3 = polygon[i];
     const p4 = polygon[(i + 1) % polygon.length];
     const intersection = lineSegmentIntersection(start, end, p3, p4);
     if (intersection) {
-      intersections.push({ ...intersection, edgeIndex: i });
+      const edgeDir = { x: p4.x - p3.x, y: p4.y - p3.y };
+      const edgeUnit = normaliseVector(edgeDir);
+      if (!edgeUnit) {
+        continue;
+      }
+      const inward = inwardNormal(edgeUnit, orientation);
+      const dot = inward.x * lineDir.x + inward.y * lineDir.y;
+      if (Math.abs(dot) <= 1e-9) {
+        continue;
+      }
+      const classification = dot > 0 ? 1 : -1;
+      intersections.push({
+        ...intersection,
+        edgeIndex: i,
+        classification,
+      });
     }
   }
-  intersections.sort((a, b) => a.t - b.t);
+  const ORDER_TOL = 1e-10;
+  intersections.sort((a, b) => {
+    const diff = a.t - b.t;
+    if (Math.abs(diff) <= ORDER_TOL) {
+      return b.classification - a.classification;
+    }
+    return diff;
+  });
   return intersections;
 }
 
@@ -377,6 +399,8 @@ function linesInPolygon(polygonPoints, spacing, angleDeg, offset = 0) {
   if (!working || working.length < 3) {
     return [];
   }
+
+  const orientation = polygonSignedArea(working) >= 0 ? 1 : -1;
 
   const angle = degToRad(angleDeg);
   const lineDir = { x: Math.cos(angle), y: Math.sin(angle) };
@@ -410,85 +434,69 @@ function linesInPolygon(polygonPoints, spacing, angleDeg, offset = 0) {
     const offsetY = perpDir.y * effectiveSpacing * i;
     const start = { x: startBase.x + offsetX, y: startBase.y + offsetY };
     const end = { x: endBase.x + offsetX, y: endBase.y + offsetY };
-    const intersections = findLinePolygonIntersections(start, end, working);
+    const intersections = findLinePolygonIntersections(
+      start,
+      end,
+      working,
+      lineDir,
+      orientation,
+    );
     if (intersections.length < 2) {
       continue;
     }
 
-    const grouped = [];
+    const merged = [];
     const GROUP_TOL = 1e-8;
     for (const entry of intersections) {
-      const last = grouped[grouped.length - 1];
-      if (last && Math.abs(entry.t - last.t) <= GROUP_TOL) {
-        last.sumX += entry.point.x;
-        last.sumY += entry.point.y;
-        last.sumT += entry.t;
+      const last = merged[merged.length - 1];
+      if (
+        last &&
+        Math.abs(entry.t - last.t) <= GROUP_TOL &&
+        entry.classification === last.classification
+      ) {
+        last.point.x = (last.point.x * last.count + entry.point.x) / (last.count + 1);
+        last.point.y = (last.point.y * last.count + entry.point.y) / (last.count + 1);
+        last.t = (last.t * last.count + entry.t) / (last.count + 1);
         last.count += 1;
       } else {
-        grouped.push({
+        merged.push({
           t: entry.t,
-          sumX: entry.point.x,
-          sumY: entry.point.y,
-          sumT: entry.t,
+          point: { x: entry.point.x, y: entry.point.y },
+          classification: entry.classification,
           count: 1,
         });
       }
     }
 
-    if (grouped.length < 2) {
+    if (merged.length < 2) {
       continue;
     }
 
-    const processed = grouped.map(item => ({
-      t: item.sumT / item.count,
-      point: {
-        x: item.sumX / item.count,
-        y: item.sumY / item.count,
-      },
-    }));
+    let activeStart = polygonContains(start, working)
+      ? { x: start.x, y: start.y }
+      : null;
 
-    const dx = end.x - start.x;
-    const dy = end.y - start.y;
-    const EPS_T = 1e-7;
-    let state = polygonContains(start, working);
-    let activeStart = state ? { x: start.x, y: start.y } : null;
-
-    for (const entry of processed) {
-      const { t, point } = entry;
-      const beforeT = Math.max(0, t - EPS_T);
-      const afterT = Math.min(1, t + EPS_T);
-      const beforePoint = {
-        x: start.x + dx * beforeT,
-        y: start.y + dy * beforeT,
-      };
-      const afterPoint = {
-        x: start.x + dx * afterT,
-        y: start.y + dy * afterT,
-      };
-
-      const insideBefore = polygonContains(beforePoint, working);
-      const insideAfter = polygonContains(afterPoint, working);
-
-      if (insideBefore === insideAfter) {
-        state = insideAfter;
-        continue;
-      }
-
-      if (!insideBefore && insideAfter) {
-        activeStart = { x: point.x, y: point.y };
-      } else if (insideBefore && !insideAfter) {
-        const segmentStart = activeStart || { x: point.x, y: point.y };
+    for (const entry of merged) {
+      const { point, classification } = entry;
+      if (classification > 0) {
+        if (!activeStart) {
+          activeStart = { x: point.x, y: point.y };
+        }
+      } else if (classification < 0) {
+        if (!activeStart) {
+          activeStart = { x: point.x, y: point.y };
+        }
         if (
-          Math.hypot(segmentStart.x - point.x, segmentStart.y - point.y) >= 1e-6
+          activeStart &&
+          Math.hypot(activeStart.x - point.x, activeStart.y - point.y) >= 1e-6
         ) {
           segments.push([
-            { x: segmentStart.x, y: segmentStart.y },
+            { x: activeStart.x, y: activeStart.y },
             { x: point.x, y: point.y },
           ]);
         }
         activeStart = null;
       }
-      state = insideAfter;
     }
   }
 
@@ -885,15 +893,22 @@ class DrawingContext {
   constructor(size = 800) {
     this.size = size;
     this.scaleFactor = 1;
-    this.svg = document.createElementNS(SVG_NS, 'svg');
-    this.svg.setAttribute('xmlns', SVG_NS);
-    this.svg.setAttribute('viewBox', `${-size / 2} ${-size / 2} ${size} ${size}`);
-    this.svg.setAttribute('width', size);
-    this.svg.setAttribute('height', size);
-    this.defs = document.createElementNS(SVG_NS, 'defs');
-    this.mainGroup = document.createElementNS(SVG_NS, 'g');
-    this.svg.appendChild(this.defs);
-    this.svg.appendChild(this.mainGroup);
+    this.hasDOM = typeof document !== 'undefined' && !!document.createElementNS;
+    if (this.hasDOM) {
+      this.svg = document.createElementNS(SVG_NS, 'svg');
+      this.svg.setAttribute('xmlns', SVG_NS);
+      this.svg.setAttribute('viewBox', `${-size / 2} ${-size / 2} ${size} ${size}`);
+      this.svg.setAttribute('width', size);
+      this.svg.setAttribute('height', size);
+      this.defs = document.createElementNS(SVG_NS, 'defs');
+      this.mainGroup = document.createElementNS(SVG_NS, 'g');
+      this.svg.appendChild(this.defs);
+      this.svg.appendChild(this.mainGroup);
+    } else {
+      this.svg = null;
+      this.defs = null;
+      this.mainGroup = null;
+    }
   }
 
   setNormalizationScale(elements) {
@@ -926,6 +941,9 @@ class DrawingContext {
   }
 
   drawScaledCircle(circle, { color = '#4CB39B', opacity = 0.8 } = {}) {
+    if (!this.hasDOM) {
+      return;
+    }
     if (!circle.visible) {
       return;
     }
@@ -941,6 +959,9 @@ class DrawingContext {
   }
 
   drawScaledArc(arc, { color = '#000000', width = 1.2 } = {}) {
+    if (!this.hasDOM) {
+      return;
+    }
     if (!arc.visible) {
       return;
     }
@@ -982,6 +1003,9 @@ class DrawingContext {
     lineOffset = 0,
   } = {}) {
     if (!points || !points.length) {
+      return;
+    }
+    if (!this.hasDOM) {
       return;
     }
     const scaled = points.map(pt => this._scaled(pt));
@@ -1036,10 +1060,16 @@ class DrawingContext {
   }
 
   toString() {
+    if (!this.hasDOM || !this.svg) {
+      return '';
+    }
     return new XMLSerializer().serializeToString(this.svg);
   }
 
   toElement() {
+    if (!this.hasDOM) {
+      return null;
+    }
     return this.svg;
   }
 }
@@ -1165,7 +1195,8 @@ class ArcSelector {
       });
       const pairs = arcs.map((arc, idx) => ({ arc, dist: distances[idx] }));
       pairs.sort((a, b) => (mode === 'farthest' ? b.dist - a.dist : a.dist - b.dist));
-      return pairs.slice(Math.min(numGaps, pairs.length)).map(entry => entry.arc);
+      const skip = Math.min(Math.max(numGaps, 0), pairs.length);
+      return pairs.slice(skip).map(entry => entry.arc);
     }
 
     if (mode === 'alternating') {
@@ -1248,7 +1279,8 @@ class ArcSelector {
       const angularDiffs = angles.map(a => Math.abs(Math.atan2(Math.sin(a - targetAngle), Math.cos(a - targetAngle))));
       const pairs = arcs.map((arc, idx) => ({ arc, diff: angularDiffs[idx] }));
       pairs.sort((a, b) => a.diff - b.diff);
-      return pairs.slice(Math.min(numGaps, pairs.length)).map(entry => entry.arc);
+      const skip = Math.min(Math.max(numGaps, 0), pairs.length);
+      return pairs.slice(skip).map(entry => entry.arc);
     }
 
     throw new Error(`Unknown arc selection mode "${mode}"`);
@@ -1453,6 +1485,12 @@ class DoyleSpiralEngine {
     if (!groups.length) {
       return;
     }
+    const preferenceMap = new Map([
+      ['-1', 'start'],
+      ['-2', 'end'],
+      ['-5', 'end'],
+      ['-6', 'start'],
+    ]);
     for (const circle of this.circles) {
       const key = `circle_${circle.id}`;
       const group = this.arcGroups.get(key);
@@ -1463,7 +1501,6 @@ class DoyleSpiralEngine {
       if (neighbours.length !== 6) {
         continue;
       }
-      const indexMap = { '-1': -3, '-2': -2, '-5': 1, '-6': 0 };
       for (const k of [-1, -2, -5, -6]) {
         const idx = ((k % neighbours.length) + neighbours.length) % neighbours.length;
         const neighbour = neighbours[idx];
@@ -1471,11 +1508,26 @@ class DoyleSpiralEngine {
         if (!arcs.length) {
           continue;
         }
-        let arcIndex = indexMap[k.toString()] ?? 0;
-        if (arcIndex < 0) {
-          arcIndex = (arcs.length + arcIndex) % arcs.length;
-        } else if (arcIndex >= arcs.length) {
-          arcIndex %= arcs.length;
+        const preference = preferenceMap.get(k.toString()) || 'start';
+        let sharedIndex = -1;
+        for (let intersectionIdx = 0; intersectionIdx < neighbour.intersections.length; intersectionIdx += 1) {
+          if (neighbour.intersections[intersectionIdx][1] === circle) {
+            sharedIndex = intersectionIdx;
+            break;
+          }
+        }
+        if (sharedIndex === -1) {
+          continue;
+        }
+        let arcIndex = -1;
+        if (preference === 'end') {
+          arcIndex = arcs.findIndex(([, endIdx]) => endIdx === sharedIndex);
+        }
+        if (arcIndex === -1) {
+          arcIndex = arcs.findIndex(([startIdx]) => startIdx === sharedIndex);
+        }
+        if (arcIndex === -1) {
+          arcIndex = 0;
         }
         const [i, j] = arcs[arcIndex];
         const start = neighbour.intersections[i][0];
