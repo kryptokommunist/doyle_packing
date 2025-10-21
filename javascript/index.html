@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Doyle Spiral Studio</title>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.152.2/build/three.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <style>
+    :root {
+      color-scheme: light dark;
+      font-family: "Inter", "Segoe UI", system-ui, sans-serif;
+      --page-bg: radial-gradient(circle at 20% -10%, #bae6fd, #dbeafe 40%, #e2e8f0 85%);
+      --panel-bg: rgba(255, 255, 255, 0.86);
+      --panel-border: rgba(148, 163, 184, 0.24);
+      --text-strong: #0f172a;
+      --text-muted: #64748b;
+      --accent: #2563eb;
+      --accent-soft: rgba(37, 99, 235, 0.12);
+      --danger: #b91c1c;
+      background: var(--page-bg);
+      min-height: 100%;
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      padding: 2.5rem clamp(1rem, 3vw, 2.5rem);
+      color: var(--text-strong);
+    }
+
+    .app-shell {
+      width: min(1200px, 100%);
+      display: grid;
+      gap: 2rem;
+    }
+
+    header {
+      display: flex;
+      flex-direction: column;
+      gap: 0.65rem;
+    }
+
+    header h1 {
+      font-size: clamp(2rem, 4vw, 2.8rem);
+      letter-spacing: -0.03em;
+    }
+
+    header p {
+      color: var(--text-muted);
+      max-width: 65ch;
+      line-height: 1.6;
+    }
+
+    .layout {
+      display: grid;
+      gap: 2rem;
+      grid-template-columns: minmax(320px, 360px) 1fr;
+    }
+
+    .panel {
+      background: var(--panel-bg);
+      border-radius: 1.5rem;
+      padding: 1.8rem;
+      border: 1px solid var(--panel-border);
+      box-shadow: 0 25px 45px rgba(15, 23, 42, 0.12);
+      backdrop-filter: blur(18px);
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+    }
+
+    form {
+      display: grid;
+      gap: 1.25rem;
+    }
+
+    .field-group {
+      display: grid;
+      gap: 0.6rem;
+    }
+
+    label {
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-muted);
+      font-weight: 600;
+    }
+
+    input[type="number"],
+    select {
+      width: 100%;
+      padding: 0.75rem 0.9rem;
+      border-radius: 0.9rem;
+      border: 1px solid rgba(148, 163, 184, 0.3);
+      font-size: 0.95rem;
+      background: rgba(255, 255, 255, 0.9);
+      color: var(--text-strong);
+    }
+
+    input[type="range"] {
+      width: 100%;
+      accent-color: var(--accent);
+    }
+
+    .inline-fields {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+      gap: 1rem;
+    }
+
+    .checkbox-row {
+      display: flex;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+    }
+
+    .checkbox-row label {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.45rem 0.75rem;
+      border-radius: 0.75rem;
+      border: 1px solid rgba(148, 163, 184, 0.3);
+      text-transform: none;
+      letter-spacing: 0.01em;
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      font-weight: 500;
+      background: rgba(255, 255, 255, 0.6);
+    }
+
+    .checkbox-row input {
+      width: 1rem;
+      height: 1rem;
+    }
+
+    .fill-settings {
+      display: grid;
+      gap: 1rem;
+      grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+    }
+
+    button {
+      appearance: none;
+      border: none;
+      border-radius: 0.9rem;
+      padding: 0.9rem 1.3rem;
+      font-size: 0.95rem;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      cursor: pointer;
+      transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+      background: var(--accent);
+      color: white;
+      box-shadow: 0 18px 30px rgba(37, 99, 235, 0.22);
+    }
+
+    button.secondary {
+      background: rgba(148, 163, 184, 0.16);
+      color: var(--text-strong);
+      box-shadow: none;
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      box-shadow: none;
+    }
+
+    button:hover:not(:disabled) {
+      transform: translateY(-1px);
+    }
+
+    .status {
+      padding: 0.75rem 1rem;
+      border-radius: 0.85rem;
+      font-size: 0.85rem;
+      background: rgba(148, 163, 184, 0.14);
+      color: var(--text-muted);
+    }
+
+    .status.loading {
+      background: rgba(37, 99, 235, 0.12);
+      color: var(--accent);
+    }
+
+    .status.error {
+      background: rgba(220, 38, 38, 0.16);
+      color: var(--danger);
+    }
+
+    .preview {
+      position: relative;
+      display: grid;
+      gap: 1.25rem;
+    }
+
+    .view-toggle {
+      display: inline-flex;
+      background: rgba(255, 255, 255, 0.78);
+      border-radius: 999px;
+      padding: 0.25rem;
+      border: 1px solid rgba(148, 163, 184, 0.3);
+      box-shadow: 0 18px 30px rgba(15, 23, 42, 0.1);
+      width: fit-content;
+    }
+
+    .view-toggle button {
+      background: transparent;
+      box-shadow: none;
+      color: var(--text-muted);
+      padding: 0.55rem 1.15rem;
+      font-size: 0.9rem;
+    }
+
+    .view-toggle button.active {
+      background: var(--accent);
+      color: white;
+      box-shadow: 0 12px 24px rgba(37, 99, 235, 0.3);
+    }
+
+    [hidden] {
+      display: none !important;
+    }
+
+    .preview-card {
+      background: var(--panel-bg);
+      border-radius: 1.5rem;
+      border: 1px solid var(--panel-border);
+      min-height: 520px;
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      justify-content: center;
+      box-shadow: 0 25px 45px rgba(15, 23, 42, 0.1);
+      overflow: hidden;
+      position: relative;
+    }
+
+    #svgPreview svg {
+      width: 100%;
+      height: 100%;
+    }
+
+    .empty-state {
+      text-align: center;
+      color: var(--text-muted);
+      padding: 3rem;
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 1rem;
+    }
+
+    .stat-card {
+      background: rgba(255, 255, 255, 0.65);
+      border-radius: 1rem;
+      padding: 0.9rem 1.2rem;
+      border: 1px solid rgba(148, 163, 184, 0.2);
+      font-size: 0.9rem;
+      color: var(--text-muted);
+    }
+
+    .stat-card strong {
+      display: block;
+      color: var(--text-strong);
+      font-size: 1.1rem;
+      margin-bottom: 0.15rem;
+    }
+
+    .three-card {
+      padding: 1.5rem;
+      gap: 1.25rem;
+    }
+
+    .three-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+
+    .three-top button {
+      padding: 0.7rem 1.1rem;
+      font-size: 0.85rem;
+    }
+
+    .three-stage {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(240px, 280px);
+      gap: 1.5rem;
+      align-items: stretch;
+    }
+
+    .three-stage.collapsed {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .three-stage.collapsed .three-settings {
+      display: none;
+    }
+
+    #threeCanvas {
+      width: 100%;
+      height: clamp(420px, 60vh, 620px);
+      display: block;
+      background: linear-gradient(160deg, rgba(15, 23, 42, 0.94), rgba(30, 41, 59, 0.88));
+      border-radius: 1.25rem;
+      cursor: grab;
+    }
+
+    #threeCanvas:active {
+      cursor: grabbing;
+    }
+
+    .three-settings {
+      background: rgba(248, 250, 252, 0.88);
+      border-radius: 1.25rem;
+      border: 1px solid rgba(148, 163, 184, 0.25);
+      padding: 1.2rem 1.4rem;
+      display: grid;
+      gap: 1.1rem;
+    }
+
+    .three-settings h2 {
+      font-size: 0.9rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+    }
+
+    .three-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 1rem;
+    }
+
+    .three-settings label {
+      font-size: 0.72rem;
+      margin-bottom: 0.35rem;
+    }
+
+    .range-value {
+      margin-top: 0.3rem;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+    }
+
+    .three-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.6rem;
+    }
+
+    .three-actions button {
+      font-size: 0.85rem;
+      padding: 0.7rem 1rem;
+    }
+
+    .pulse {
+      animation: pulse 1.2s ease;
+    }
+
+    @keyframes pulse {
+      0% { box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.45); }
+      70% { box-shadow: 0 0 0 12px rgba(37, 99, 235, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(37, 99, 235, 0); }
+    }
+
+    .three-stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 1rem;
+    }
+
+    .three-stats .stat-card {
+      background: rgba(255, 255, 255, 0.7);
+    }
+
+    @media (max-width: 980px) {
+      .layout {
+        grid-template-columns: 1fr;
+      }
+      .panel {
+        order: 2;
+      }
+      .preview {
+        order: 1;
+      }
+      .three-stage {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 720px) {
+      body {
+        padding: 1.6rem 1rem 2.4rem;
+      }
+      .panel {
+        padding: 1.4rem;
+      }
+      .preview-card {
+        padding: 1.2rem;
+      }
+      .three-top button {
+        width: 100%;
+      }
+      .three-top {
+        flex-direction: column;
+        align-items: stretch;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <header>
+      <h1>Doyle Spiral Studio</h1>
+      <p>Generate Doyle spirals with the native Python geometry engine and preview the results instantly. Switch between the SVG composition and the immersive 3D extrusion without leaving the page.</p>
+    </header>
+
+    <div class="layout">
+      <section class="panel">
+        <form id="controlsForm">
+          <div class="inline-fields">
+            <div class="field-group">
+              <label for="inputP">P (families)</label>
+              <input id="inputP" name="p" type="number" min="2" max="128" step="1" value="16" required />
+            </div>
+            <div class="field-group">
+              <label for="inputQ">Q (circles)</label>
+              <input id="inputQ" name="q" type="number" min="2" max="256" step="1" value="16" required />
+            </div>
+          </div>
+
+          <div class="field-group">
+            <label for="inputT">T (phase)</label>
+            <input id="inputT" name="t" type="range" min="0" max="1" step="0.02" value="0" />
+            <div class="status" id="tValue">0.00</div>
+          </div>
+
+          <div class="inline-fields">
+            <div class="field-group">
+              <label for="modeSelect">2D mode</label>
+              <select id="modeSelect" name="mode">
+                <option value="arram_boyle" selected>Arram-Boyle arcs</option>
+                <option value="doyle">Classic circles</option>
+              </select>
+            </div>
+            <div class="field-group">
+              <label for="arcModeSelect">Arc selection</label>
+              <select id="arcModeSelect" name="arc_mode">
+                <option value="closest">Closest</option>
+                <option value="farthest">Farthest</option>
+                <option value="alternating">Alternating</option>
+                <option value="all">All arcs</option>
+                <option value="random">Randomised</option>
+                <option value="symmetric">Symmetric</option>
+                <option value="angular">Angular</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="inline-fields">
+            <div class="field-group">
+              <label for="numGaps">Gaps</label>
+              <input id="numGaps" name="num_gaps" type="number" min="0" max="8" value="2" />
+            </div>
+            <div class="field-group">
+              <label for="svgSize">Canvas size</label>
+              <input id="svgSize" name="size" type="number" min="200" max="1600" step="50" value="800" />
+            </div>
+          </div>
+
+          <div class="checkbox-row">
+            <label><input type="checkbox" name="add_fill_pattern" id="togglePattern"> Pattern fill</label>
+            <label><input type="checkbox" name="draw_group_outline" id="toggleOutline" checked> Group outline</label>
+            <label><input type="checkbox" name="red_outline" id="toggleRed"> Highlight rim</label>
+          </div>
+
+          <div class="fill-settings" id="fillSettings" hidden>
+            <div class="field-group">
+              <label for="fillSpacing">Line spacing</label>
+              <input id="fillSpacing" name="fill_pattern_spacing" type="number" min="0.5" step="0.5" value="5" />
+            </div>
+            <div class="field-group">
+              <label for="fillAngle">Angle shift</label>
+              <input id="fillAngle" name="fill_pattern_angle" type="number" min="-180" max="180" step="1" value="0" />
+            </div>
+            <div class="field-group">
+              <label for="fillOffset">Inset</label>
+              <input id="fillOffset" name="fill_pattern_offset" type="number" min="0" step="0.5" value="0" />
+            </div>
+          </div>
+
+          <div class="status" id="statusMessage">Adjust parameters and the spiral will render automatically.</div>
+
+          <div class="actions">
+            <button type="submit" id="renderButton">Refresh preview</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="preview">
+        <div class="view-toggle" role="group" aria-label="Preview mode">
+          <button type="button" class="active" data-view="2d" aria-pressed="true">2D SVG</button>
+          <button type="button" data-view="3d" aria-pressed="false">3D View</button>
+        </div>
+
+        <div class="preview-card" id="view2d">
+          <div id="svgPreview" class="empty-state">Rendering spiral…</div>
+        </div>
+
+        <div class="stats" id="stats" hidden>
+          <div class="stat-card"><strong id="statArcGroups">0</strong>Arc groups</div>
+          <div class="stat-card"><strong id="statPolygons">0</strong>Polygons extruded</div>
+          <div class="stat-card"><strong id="statMode">Arram-Boyle</strong>Render mode</div>
+        </div>
+
+        <div class="preview-card three-card" id="view3d" hidden>
+          <div class="three-top">
+            <div class="status" id="threeStatus">Switch to the 3D view to load geometry.</div>
+            <button type="button" class="secondary" id="threeSettingsToggle" aria-expanded="true">Hide 3D settings</button>
+          </div>
+          <div class="three-stage" id="threeStage">
+            <canvas id="threeCanvas"></canvas>
+            <aside class="three-settings" id="threeSettings">
+              <h2>3D Settings</h2>
+              <div class="three-grid">
+                <div>
+                  <label for="threeRotationSpeed">Rotation Speed</label>
+                  <input type="range" id="threeRotationSpeed" min="0" max="2" step="0.05" value="0.4">
+                  <div class="range-value"><span id="threeRotationSpeedValue">0.40</span> revolutions / sec</div>
+                </div>
+                <div>
+                  <label for="threePulseSpeed">Pulse Speed</label>
+                  <input type="range" id="threePulseSpeed" min="0.5" max="5" step="0.1" value="2.0">
+                  <div class="range-value"><span id="threePulseSpeedValue">2.0</span> pulses / sec</div>
+                </div>
+                <div>
+                  <label for="threeMetalness">Metalness</label>
+                  <input type="range" id="threeMetalness" min="0" max="1" step="0.05" value="0.85">
+                  <div class="range-value"><span id="threeMetalnessValue">0.85</span></div>
+                </div>
+                <div>
+                  <label for="threeRoughness">Roughness</label>
+                  <input type="range" id="threeRoughness" min="0" max="1" step="0.05" value="0.25">
+                  <div class="range-value"><span id="threeRoughnessValue">0.25</span></div>
+                </div>
+              </div>
+              <div>
+                <label for="threeManualRotation">Manual Rotation</label>
+                <input type="range" id="threeManualRotation" min="0" max="360" step="1" value="0">
+                <div class="range-value"><span id="threeManualRotationValue">0</span>°</div>
+              </div>
+              <div class="three-actions">
+                <button type="button" id="threeReloadGeometry">Reload geometry</button>
+                <button type="button" class="secondary" id="threeLoadJson">Open local JSON</button>
+                <button type="button" class="secondary" id="threeResetCamera">Reset view</button>
+              </div>
+            </aside>
+          </div>
+          <div class="three-stats" id="threeStats" hidden>
+            <div class="stat-card"><strong id="threeStatArcGroups">0</strong>Arc groups</div>
+            <div class="stat-card"><strong id="threeStatPolygons">0</strong>Polygons extruded</div>
+            <div class="stat-card"><strong id="threeStatParameters">–</strong>Parameters</div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <input type="file" id="threeFileInput" accept="application/json" hidden />
+
+  <script type="module" src="./js/app.js"></script>
+</body>
+</html>

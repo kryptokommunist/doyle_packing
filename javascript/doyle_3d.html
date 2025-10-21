@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Doyle Spiral 3D Viewer</title>
+  <!-- three.js from jsDelivr. The previous CDN asset started failing the integrity check which kept the viewer from booting. -->
+  <script src="https://cdn.jsdelivr.net/npm/three@0.152.2/build/three.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <style>
+    :root {
+      color-scheme: light dark;
+      font-family: "Inter", "Segoe UI", system-ui, sans-serif;
+      --surface: rgba(255, 255, 255, 0.82);
+      --border: rgba(15, 23, 42, 0.08);
+      --text: #0f172a;
+      --muted: #64748b;
+      --accent: #2563eb;
+      background: radial-gradient(circle at top, #e0f2fe, #e2e8f0 55%, #cbd5f5);
+      min-height: 100%;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      padding: 2.5rem 1.5rem 3.5rem;
+      color: var(--text);
+    }
+
+    .viewer-shell {
+      width: min(1080px, 100%);
+      display: grid;
+      gap: 1.5rem;
+    }
+
+    header {
+      display: flex;
+      flex-direction: column;
+      gap: 0.6rem;
+    }
+
+    header h1 {
+      font-size: clamp(1.8rem, 2.6vw, 2.4rem);
+      letter-spacing: -0.02em;
+    }
+
+    header p {
+      color: var(--muted);
+      max-width: 60ch;
+      line-height: 1.5;
+    }
+
+    .canvas-card {
+      background: var(--surface);
+      border-radius: 1.5rem;
+      border: 1px solid var(--border);
+      box-shadow: 0 25px 45px rgba(15, 23, 42, 0.08);
+      overflow: hidden;
+      backdrop-filter: blur(18px);
+      display: flex;
+      flex-direction: column;
+    }
+
+    canvas {
+      width: 100%;
+      height: clamp(420px, 60vh, 620px);
+      display: block;
+      background: linear-gradient(160deg, rgba(15,23,42,0.94), rgba(30,41,59,0.88));
+      cursor: grab;
+    }
+
+    canvas:active {
+      cursor: grabbing;
+    }
+
+    .toolbar {
+      display: grid;
+      gap: 1rem;
+      padding: 1.5rem 1.75rem 1.75rem;
+      background: rgba(248, 250, 252, 0.82);
+    }
+
+    .toolbar-row {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 1.2rem;
+    }
+
+    label {
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      font-weight: 600;
+      color: var(--muted);
+      margin-bottom: 0.35rem;
+      display: block;
+    }
+
+    input[type="range"] {
+      width: 100%;
+      accent-color: var(--accent);
+    }
+
+    .range-value {
+      margin-top: 0.3rem;
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      align-items: center;
+    }
+
+    button {
+      appearance: none;
+      border: none;
+      padding: 0.85rem 1.2rem;
+      border-radius: 0.9rem;
+      font-weight: 600;
+      font-size: 0.95rem;
+      letter-spacing: -0.01em;
+      cursor: pointer;
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+      background: var(--accent);
+      color: white;
+      box-shadow: 0 12px 20px rgba(37, 99, 235, 0.18);
+    }
+
+    button.secondary {
+      background: rgba(148, 163, 184, 0.2);
+      color: var(--text);
+      box-shadow: none;
+    }
+
+    button:hover {
+      transform: translateY(-1px);
+    }
+
+    #statusMessage {
+      font-size: 0.9rem;
+      color: var(--muted);
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 0.9rem;
+      margin-top: 0.75rem;
+    }
+
+    .stat {
+      background: rgba(255, 255, 255, 0.65);
+      border-radius: 0.9rem;
+      padding: 0.75rem 1rem;
+      font-size: 0.85rem;
+      color: var(--muted);
+      border: 1px solid rgba(148, 163, 184, 0.18);
+    }
+
+    .stat strong {
+      display: block;
+      color: var(--text);
+      font-size: 1.05rem;
+      margin-bottom: 0.2rem;
+    }
+
+    @media (max-width: 720px) {
+      body {
+        padding: 1.5rem 1rem 2.5rem;
+      }
+      .toolbar {
+        padding: 1.2rem 1.3rem 1.4rem;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="viewer-shell">
+    <header>
+      <h1>3D Doyle Spiral Viewer</h1>
+      <p>Explore the extruded geometry of the Doyle spiral generated from the main interface. Adjust materials and rotation to highlight different rings, or reload geometry with the current URL parameters.</p>
+      <span id="statusMessage">Waiting for parameters…</span>
+    </header>
+
+    <div class="canvas-card">
+      <canvas id="canvas"></canvas>
+      <div class="toolbar">
+        <div class="toolbar-row">
+          <div>
+            <label for="rotationSpeed">Rotation Speed</label>
+            <input type="range" id="rotationSpeed" min="0" max="2" step="0.05" value="0.4">
+            <div class="range-value"><span id="rotationSpeedValue">0.40</span> revolutions / sec</div>
+          </div>
+          <div>
+            <label for="pulseSpeed">Pulse Speed</label>
+            <input type="range" id="pulseSpeed" min="0.5" max="5" step="0.1" value="2.0">
+            <div class="range-value"><span id="pulseSpeedValue">2.0</span> pulses / sec</div>
+          </div>
+          <div>
+            <label for="metalness">Metalness</label>
+            <input type="range" id="metalness" min="0" max="1" step="0.05" value="0.85">
+            <div class="range-value"><span id="metalnessValue">0.85</span></div>
+          </div>
+          <div>
+            <label for="roughness">Roughness</label>
+            <input type="range" id="roughness" min="0" max="1" step="0.05" value="0.25">
+            <div class="range-value"><span id="roughnessValue">0.25</span></div>
+          </div>
+        </div>
+
+        <div class="toolbar-row">
+          <div>
+            <label for="manualRotation">Manual Rotation</label>
+            <input type="range" id="manualRotation" min="0" max="360" step="1" value="0">
+            <div class="range-value"><span id="manualRotationValue">0</span>°</div>
+          </div>
+        </div>
+
+        <div class="actions">
+          <button id="reloadGeometry" type="button">Reload from parameters</button>
+          <button id="loadJson" class="secondary" type="button">Open local JSON</button>
+          <button id="resetCamera" class="secondary" type="button">Reset view</button>
+        </div>
+
+        <div class="stats" id="stats" hidden>
+          <div class="stat"><strong id="statArcGroups">0</strong>Arc groups</div>
+          <div class="stat"><strong id="statPolygons">0</strong>Polygons extruded</div>
+          <div class="stat"><strong id="statParameters">–</strong>Parameters</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <input type="file" id="fileInput" accept="application/json" hidden />
+
+  <script type="module" src="./js/viewer.js"></script>
+</body>
+</html>
