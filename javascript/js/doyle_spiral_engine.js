@@ -243,6 +243,45 @@ function sanitisePolygonPoints(points, tolerance = 1e-9) {
   return result;
 }
 
+function clipPolygonWithLine(polygon, clipStart, clipEnd, tolerance = 1e-9) {
+  if (!polygon || !polygon.length) {
+    return [];
+  }
+  const result = [];
+  const edgeDir = { x: clipEnd.x - clipStart.x, y: clipEnd.y - clipStart.y };
+  const isInside = point => {
+    const cross = edgeDir.x * (point.y - clipStart.y) - edgeDir.y * (point.x - clipStart.x);
+    return cross >= -tolerance;
+  };
+
+  let previous = polygon[polygon.length - 1];
+  let prevInside = isInside(previous);
+
+  for (const current of polygon) {
+    const currInside = isInside(current);
+    if (currInside) {
+      if (!prevInside) {
+        const dir = { x: current.x - previous.x, y: current.y - previous.y };
+        const intersection = intersectLines(previous, dir, clipStart, edgeDir);
+        if (intersection) {
+          result.push(intersection);
+        }
+      }
+      result.push({ x: current.x, y: current.y });
+    } else if (prevInside) {
+      const dir = { x: current.x - previous.x, y: current.y - previous.y };
+      const intersection = intersectLines(previous, dir, clipStart, edgeDir);
+      if (intersection) {
+        result.push(intersection);
+      }
+    }
+    previous = current;
+    prevInside = currInside;
+  }
+
+  return sanitisePolygonPoints(result, tolerance * 10);
+}
+
 function insetPolygon(points, offset) {
   if (!offset || offset <= 0) {
     return sanitisePolygonPoints(points);
@@ -253,63 +292,44 @@ function insetPolygon(points, offset) {
     return [];
   }
 
-  const orientation = polygonSignedArea(base) >= 0 ? 1 : -1;
-  const insetPoints = [];
-  const count = base.length;
+  const signedArea = polygonSignedArea(base);
+  const isClockwise = signedArea < 0;
+  const working = (isClockwise ? base.slice().reverse() : base.slice()).map(pt => ({
+    x: pt.x,
+    y: pt.y,
+  }));
+
+  let clipped = working.slice();
+  const count = working.length;
+  const tol = 1e-9;
 
   for (let i = 0; i < count; i += 1) {
-    const prev = base[(i - 1 + count) % count];
-    const curr = base[i];
-    const next = base[(i + 1) % count];
-
-    const prevDir = normaliseVector({ x: curr.x - prev.x, y: curr.y - prev.y });
-    const nextDir = normaliseVector({ x: next.x - curr.x, y: next.y - curr.y });
-
-    let normalPrev = prevDir ? inwardNormal(prevDir, orientation) : null;
-    let normalNext = nextDir ? inwardNormal(nextDir, orientation) : null;
-
-    if (!normalPrev && !normalNext) {
-      insetPoints.push({ x: curr.x, y: curr.y });
+    const curr = working[i];
+    const next = working[(i + 1) % count];
+    const edgeDir = { x: next.x - curr.x, y: next.y - curr.y };
+    const length = Math.hypot(edgeDir.x, edgeDir.y);
+    if (length < tol) {
       continue;
     }
-
-    if (!normalPrev) {
-      normalPrev = normalNext;
-    }
-    if (!normalNext) {
-      normalNext = normalPrev;
-    }
-
-    const dir1 = prevDir || nextDir || { x: 1, y: 0 };
-    const dir2 = nextDir || prevDir || { x: 0, y: 1 };
-
-    const shiftedPrev = {
-      x: curr.x + normalPrev.x * offset,
-      y: curr.y + normalPrev.y * offset,
-    };
-    const shiftedNext = {
-      x: curr.x + normalNext.x * offset,
-      y: curr.y + normalNext.y * offset,
-    };
-
-    const intersection = intersectLines(shiftedPrev, dir1, shiftedNext, dir2);
-    if (intersection) {
-      insetPoints.push(intersection);
-    } else {
-      const avg = normaliseVector({
-        x: normalPrev.x + normalNext.x,
-        y: normalPrev.y + normalNext.y,
-      });
-      if (avg) {
-        insetPoints.push({
-          x: curr.x + avg.x * offset,
-          y: curr.y + avg.y * offset,
-        });
-      }
+    const normal = { x: -edgeDir.y / length, y: edgeDir.x / length };
+    const offsetVec = { x: normal.x * offset, y: normal.y * offset };
+    const clipStart = { x: curr.x + offsetVec.x, y: curr.y + offsetVec.y };
+    const clipEnd = { x: next.x + offsetVec.x, y: next.y + offsetVec.y };
+    clipped = clipPolygonWithLine(clipped, clipStart, clipEnd, tol);
+    if (!clipped.length) {
+      break;
     }
   }
 
-  const cleaned = sanitisePolygonPoints(insetPoints);
+  if (!clipped.length) {
+    return [];
+  }
+
+  if (isClockwise) {
+    clipped.reverse();
+  }
+
+  const cleaned = sanitisePolygonPoints(clipped);
   if (cleaned.length < 3) {
     return [];
   }
@@ -1743,6 +1763,13 @@ function computeGeometry(params = {}) {
   return renderSpiral({ ...params, mode: 'arram_boyle' }, 'arram_boyle');
 }
 
+const __TESTING__ = {
+  insetPolygon,
+  clipPolygonWithLine,
+  sanitisePolygonPoints,
+  polygonSignedArea,
+};
+
 export {
   ArcElement,
   ArcGroup,
@@ -1752,4 +1779,5 @@ export {
   renderSpiral,
   computeGeometry,
   normaliseParams,
+  __TESTING__,
 };
