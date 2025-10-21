@@ -28,6 +28,12 @@ const animationAddFrameButton = document.getElementById('animationAddFrame');
 const animationClearButton = document.getElementById('animationClear');
 const animationGenerateButton = document.getElementById('animationGenerate');
 const animationStatus = document.getElementById('animationStatus');
+const animationSlider = document.getElementById('animationSlider');
+const animationFrameLabel = document.getElementById('animationFrameLabel');
+const animationPlayButton = document.getElementById('animationPlay');
+const animationPauseButton = document.getElementById('animationPause');
+const animationPrevButton = document.getElementById('animationPrev');
+const animationNextButton = document.getElementById('animationNext');
 const threeStatus = document.getElementById('threeStatus');
 const threeSettingsToggle = document.getElementById('threeSettingsToggle');
 const threeStage = document.getElementById('threeStage');
@@ -67,6 +73,11 @@ const animationState = {
   assignments: new Map(),
   geometry: null,
   groupMap: new Map(),
+};
+
+const playbackState = {
+  timer: null,
+  delay: 900,
 };
 
 function sanitiseFileName(name) {
@@ -262,6 +273,101 @@ function updateAnimationStatus(message, state = 'idle') {
   }
 }
 
+function isPlaybackActive() {
+  return playbackState.timer !== null;
+}
+
+function stopPlayback({ silent = false } = {}) {
+  if (!isPlaybackActive()) {
+    return false;
+  }
+  window.clearInterval(playbackState.timer);
+  playbackState.timer = null;
+  updateTimelineControls();
+  if (!silent) {
+    updateAnimationStatus('Playback paused.');
+  }
+  return true;
+}
+
+function updateTimelineControls() {
+  const totalFrames = animationState.frames.length;
+  if (animationSlider) {
+    const max = Math.max(totalFrames, 1);
+    animationSlider.max = String(max);
+    animationSlider.value = String(totalFrames ? animationState.activeFrame + 1 : 1);
+    animationSlider.disabled = totalFrames <= 1;
+  }
+
+  if (animationFrameLabel) {
+    if (!totalFrames) {
+      animationFrameLabel.textContent = 'No frames configured';
+    } else {
+      const frame = animationState.frames[animationState.activeFrame];
+      const arcCount = frame ? frame.groups.length : 0;
+      animationFrameLabel.textContent = `Frame ${animationState.activeFrame + 1} of ${totalFrames} • ${arcCount} arc${
+        arcCount === 1 ? '' : 's'
+      }`;
+    }
+  }
+
+  const hasFrames = totalFrames > 0;
+  const hasPrev = hasFrames && animationState.activeFrame > 0;
+  const hasNext = hasFrames && animationState.activeFrame < totalFrames - 1;
+  if (animationPrevButton) {
+    animationPrevButton.disabled = !hasPrev;
+  }
+  if (animationNextButton) {
+    animationNextButton.disabled = !hasNext;
+  }
+
+  const playing = isPlaybackActive();
+  const hasAssignments = animationState.assignments.size > 0;
+  if (animationPlayButton) {
+    animationPlayButton.disabled = playing || !hasFrames || !hasAssignments;
+  }
+  if (animationPauseButton) {
+    animationPauseButton.disabled = !playing;
+  }
+}
+
+function startPlayback() {
+  if (isPlaybackActive()) {
+    return;
+  }
+  if (!animationState.frames.length) {
+    updateAnimationStatus('Add frames before playing.', 'error');
+    return;
+  }
+  if (!animationState.assignments.size) {
+    updateAnimationStatus('Assign arcs to frames before playing.', 'error');
+    return;
+  }
+
+  if (animationState.activeFrame >= animationState.frames.length) {
+    animationState.activeFrame = Math.max(0, animationState.frames.length - 1);
+  }
+  if (animationState.frames.length > 1 && animationState.activeFrame === animationState.frames.length - 1) {
+    setActiveFrame(0, { notify: false, fromPlayback: true });
+  }
+
+  updateAnimationStatus('Playing animation…');
+  playbackState.timer = window.setInterval(() => {
+    if (!animationState.frames.length) {
+      stopPlayback({ silent: true });
+      return;
+    }
+    const nextIndex = animationState.activeFrame + 1;
+    if (nextIndex >= animationState.frames.length) {
+      stopPlayback({ silent: true });
+      updateAnimationStatus('Playback complete.');
+    } else {
+      setActiveFrame(nextIndex, { notify: false, fromPlayback: true });
+    }
+  }, playbackState.delay);
+  updateTimelineControls();
+}
+
 function flashArcGroup(groupId) {
   const element = overlayMap.get(String(groupId));
   if (!element) {
@@ -289,6 +395,7 @@ function unmarkArcGroup(groupId) {
   }
   element.classList.remove('arc-selected');
   element.removeAttribute('data-assigned-frame');
+  element.style.opacity = '';
 }
 
 function createFrame(initialGroups = []) {
@@ -311,6 +418,7 @@ function ensureFrameExists(index) {
 
 function resetAnimationState(geometry, preserveLength = false) {
   const hasData = hasGeometry(geometry);
+  stopPlayback({ silent: true });
   animationState.geometry = hasData ? geometry : null;
   animationState.groupMap = new Map();
   animationState.assignments = new Map();
@@ -343,6 +451,7 @@ function resetAnimationState(geometry, preserveLength = false) {
   overlayMap.forEach(element => {
     element.classList.remove('arc-selected', 'arc-flash');
     element.removeAttribute('data-assigned-frame');
+    element.style.opacity = '';
   });
 
   if (animationPresetSelect) {
@@ -370,10 +479,7 @@ function getFrameContributions(frameIndex) {
       continue;
     }
     const diff = frameIndex - sourceIdx;
-    const strength = Math.max(0, 1 - 0.25 * diff);
-    if (strength <= 0) {
-      continue;
-    }
+    const strength = Math.pow(0.5, diff);
     frame.groups.forEach(groupId => {
       contributions.push({
         groupId,
@@ -385,12 +491,45 @@ function getFrameContributions(frameIndex) {
   return contributions;
 }
 
+function updateOverlayHighlights() {
+  if (!overlayMap.size) {
+    return;
+  }
+  if (activeView !== 'animate') {
+    overlayMap.forEach(element => {
+      element.style.opacity = '';
+    });
+    return;
+  }
+
+  const contributions = getFrameContributions(animationState.activeFrame);
+  const strengthByGroup = new Map();
+  contributions.forEach(entry => {
+    const id = String(entry.groupId);
+    const current = strengthByGroup.get(id) || 0;
+    strengthByGroup.set(id, Math.max(current, entry.strength));
+  });
+
+  overlayMap.forEach((element, id) => {
+    if (animationState.assignments.has(id)) {
+      element.classList.add('arc-selected');
+      const strength = strengthByGroup.has(id) ? strengthByGroup.get(id) : 0.15;
+      element.style.opacity = strength.toFixed(3);
+    } else {
+      element.classList.remove('arc-selected');
+      element.style.opacity = '';
+    }
+  });
+}
+
 function renderAnimationFrames() {
   if (!animationFramesEl) {
     return;
   }
   animationFramesEl.replaceChildren();
   if (!animationState.frames.length) {
+    updateTimelineControls();
+    updateOverlayHighlights();
     return;
   }
   animationState.frames.forEach((frame, frameIndex) => {
@@ -433,8 +572,10 @@ function renderAnimationFrames() {
         const meta = animationState.groupMap.get(String(entry.groupId));
         const ringLabel = meta && Number.isInteger(meta.ring) ? `R${meta.ring + 1}` : 'R–';
         badge.textContent = `${ringLabel} • #${entry.groupId}`;
-        badge.dataset.strength = entry.strength.toFixed(2);
-        badge.style.opacity = entry.strength.toFixed(2);
+        const strengthValue = Math.max(0, Math.min(1, entry.strength));
+        const displayStrength = strengthValue.toFixed(3);
+        badge.dataset.strength = displayStrength;
+        badge.style.opacity = displayStrength;
         if (entry.sourceFrame === frameIndex) {
           const removeButton = document.createElement('button');
           removeButton.type = 'button';
@@ -462,11 +603,17 @@ function renderAnimationFrames() {
 
     animationFramesEl.appendChild(card);
   });
+  updateTimelineControls();
+  updateOverlayHighlights();
 }
 
-function setActiveFrame(index, notify = true) {
+function setActiveFrame(index, options = {}) {
+  const { notify = true, fromPlayback = false } = options;
   if (index < 0 || index >= animationState.frames.length) {
     return;
+  }
+  if (!fromPlayback) {
+    stopPlayback({ silent: true });
   }
   animationState.activeFrame = index;
   renderAnimationFrames();
@@ -486,7 +633,8 @@ function clearFrames() {
   updateAnimationStatus('Timeline cleared. Frames reset to default.');
 }
 
-function removeGroupFromFrame(groupId, frameIndex) {
+function removeGroupFromFrame(groupId, frameIndex, options = {}) {
+  const { silent = false, skipRender = false } = options;
   const frame = animationState.frames[frameIndex];
   if (!frame) {
     return;
@@ -494,8 +642,12 @@ function removeGroupFromFrame(groupId, frameIndex) {
   frame.groups = frame.groups.filter(id => id !== groupId);
   animationState.assignments.delete(groupId);
   unmarkArcGroup(groupId);
-  renderAnimationFrames();
-  updateAnimationStatus(`Removed arc from frame ${frameIndex + 1}.`);
+  if (!skipRender) {
+    renderAnimationFrames();
+  }
+  if (!silent) {
+    updateAnimationStatus(`Removed arc from frame ${frameIndex + 1}.`);
+  }
 }
 
 function handleArcGroupClick(event) {
@@ -511,13 +663,15 @@ function handleArcGroupClick(event) {
   if (!groupId) {
     return;
   }
-  if (animationState.assignments.has(groupId)) {
-    updateAnimationStatus(
-      `Arc already assigned to frame ${animationState.assignments.get(groupId) + 1}.`,
-      'error',
-    );
-    flashArcGroup(groupId);
-    return;
+  const assignedFrame = animationState.assignments.get(groupId);
+  if (assignedFrame !== undefined) {
+    if (assignedFrame === animationState.activeFrame) {
+      removeGroupFromFrame(groupId, assignedFrame, { silent: true, skipRender: true });
+      renderAnimationFrames();
+      updateAnimationStatus(`Arc removed from frame ${assignedFrame + 1}.`);
+      return;
+    }
+    removeGroupFromFrame(groupId, assignedFrame, { silent: true, skipRender: true });
   }
   ensureFrameExists(animationState.activeFrame);
   animationState.frames[animationState.activeFrame].groups.push(groupId);
@@ -525,7 +679,11 @@ function handleArcGroupClick(event) {
   markArcGroupSelected(groupId, animationState.activeFrame);
   flashArcGroup(groupId);
   renderAnimationFrames();
-  updateAnimationStatus(`Arc added to frame ${animationState.activeFrame + 1}.`);
+  if (assignedFrame !== undefined && assignedFrame !== animationState.activeFrame) {
+    updateAnimationStatus(`Arc moved to frame ${animationState.activeFrame + 1}.`);
+  } else {
+    updateAnimationStatus(`Arc added to frame ${animationState.activeFrame + 1}.`);
+  }
 }
 
 function buildArcGroupOverlay(svgElement, geometry) {
@@ -563,6 +721,7 @@ function buildArcGroupOverlay(svgElement, geometry) {
     if (group.line_angle !== undefined && group.line_angle !== null) {
       polygon.dataset.lineAngle = String(group.line_angle);
     }
+    polygon.style.opacity = '';
     polygon.addEventListener('click', handleArcGroupClick);
     overlay.appendChild(polygon);
     overlayMap.set(String(group.id), polygon);
@@ -574,12 +733,14 @@ function applyPresetFrames(frameGroups, presetId = 'manual') {
     updateAnimationStatus('Render the spiral before applying presets.', 'error');
     return;
   }
+  stopPlayback({ silent: true });
   frameIdCounter = 0;
   animationState.frames = [];
   animationState.assignments.clear();
   overlayMap.forEach(element => {
     element.classList.remove('arc-selected', 'arc-flash');
     element.removeAttribute('data-assigned-frame');
+    element.style.opacity = '';
   });
 
   const frames = Array.isArray(frameGroups) && frameGroups.length ? frameGroups : [[]];
@@ -628,6 +789,11 @@ function applyAnimationToGeometry() {
   if (!animationState.frames.length) {
     updateAnimationStatus('Add at least one frame before animating.', 'error');
     return;
+  }
+  stopPlayback({ silent: true });
+  if (!fillToggle.checked) {
+    fillToggle.checked = true;
+    toggleFillSettings();
   }
   const framesWithGroups = animationState.frames
     .map((frame, index) => ({ frame, index }))
@@ -776,6 +942,10 @@ viewButtons.forEach(button => {
     const showAnimate = view === 'animate';
     const show2d = view === '2d';
 
+    if (!showAnimate) {
+      stopPlayback({ silent: true });
+    }
+
     if (view2d) {
       view2d.hidden = !show2d;
     }
@@ -799,6 +969,8 @@ viewButtons.forEach(button => {
     } else {
       setWorkspaceAnimateMode(false);
     }
+
+    updateOverlayHighlights();
 
     if (!show3d) {
       updateStats(lastRender ? lastRender.geometry : null);
@@ -831,6 +1003,62 @@ if (threeSettingsToggle) {
 
 if (exportButton) {
   exportButton.addEventListener('click', downloadCurrentSvg);
+}
+
+if (animationSlider) {
+  animationSlider.addEventListener('input', event => {
+    if (!animationState.frames.length) {
+      animationSlider.value = '1';
+      return;
+    }
+    const value = Number(event.target.value);
+    if (!Number.isFinite(value)) {
+      return;
+    }
+    const index = Math.min(animationState.frames.length - 1, Math.max(0, Math.round(value) - 1));
+    if (index !== animationState.activeFrame) {
+      setActiveFrame(index, { notify: false });
+    }
+  });
+}
+
+if (animationPrevButton) {
+  animationPrevButton.addEventListener('click', () => {
+    if (!animationState.frames.length) {
+      return;
+    }
+    const prev = Math.max(0, animationState.activeFrame - 1);
+    if (prev !== animationState.activeFrame) {
+      setActiveFrame(prev);
+    }
+  });
+}
+
+if (animationNextButton) {
+  animationNextButton.addEventListener('click', () => {
+    if (!animationState.frames.length) {
+      return;
+    }
+    const next = Math.min(animationState.frames.length - 1, animationState.activeFrame + 1);
+    if (next !== animationState.activeFrame) {
+      setActiveFrame(next);
+    }
+  });
+}
+
+if (animationPlayButton) {
+  animationPlayButton.addEventListener('click', () => {
+    startPlayback();
+  });
+}
+
+if (animationPauseButton) {
+  animationPauseButton.addEventListener('click', () => {
+    const wasPlaying = stopPlayback();
+    if (!wasPlaying) {
+      updateAnimationStatus('Playback is not running.');
+    }
+  });
 }
 
 if (animationAddFrameButton) {

@@ -376,59 +376,72 @@
       padding: 1.5rem;
       display: flex;
       flex-direction: column;
-      gap: 1.5rem;
+      gap: 1.35rem;
     }
 
-    .animate-layout {
-      flex: 1 1 auto;
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) minmax(260px, 320px);
-      gap: 1.5rem;
-      min-height: 420px;
-    }
-
-    .animation-panel {
+    .animation-scrub {
       background: rgba(248, 250, 252, 0.9);
       border-radius: 1.25rem;
       border: 1px solid rgba(148, 163, 184, 0.25);
-      padding: 1.2rem 1.3rem;
-      display: flex;
-      flex-direction: column;
-      gap: 1.1rem;
-    }
-
-    .animation-panel h2 {
-      font-size: 0.9rem;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      color: var(--text-muted);
-    }
-
-    .animation-controls {
+      padding: 1rem 1.25rem;
       display: grid;
       gap: 0.75rem;
     }
 
-    .animation-controls select,
-    .animation-controls button {
+    .animation-transport {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.6rem;
+    }
+
+    .animation-transport button {
+      flex: 0 0 auto;
+      font-size: 0.85rem;
+      padding: 0.6rem 1rem;
+    }
+
+    .animation-slider {
+      display: grid;
+      gap: 0.35rem;
+    }
+
+    #animationSlider {
       width: 100%;
     }
 
-    .animation-controls .dual-actions {
+    .animation-frame-label {
+      font-size: 0.8rem;
+      color: var(--text-muted);
       display: flex;
-      gap: 0.6rem;
+      justify-content: space-between;
+      gap: 0.4rem;
       flex-wrap: wrap;
     }
 
-    .animation-controls .dual-actions button {
-      flex: 1 1 auto;
+    .animation-config {
+      display: grid;
+      gap: 1rem;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      align-items: end;
+    }
+
+    .animation-config .dual-actions {
+      display: flex;
+      gap: 0.6rem;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .animation-config .dual-actions button {
+      flex: 1 1 140px;
     }
 
     .frame-list {
       display: grid;
       gap: 0.9rem;
       overflow-y: auto;
-      max-height: clamp(220px, 35vh, 280px);
+      max-height: clamp(220px, 40vh, 300px);
       padding-right: 0.4rem;
     }
 
@@ -638,12 +651,6 @@
       .three-stage {
         grid-template-columns: 1fr;
       }
-      .animate-layout {
-        grid-template-columns: 1fr;
-      }
-      .animation-panel {
-        order: -1;
-      }
     }
 
     @media (max-width: 720px) {
@@ -786,32 +793,48 @@
         </div>
 
         <div class="preview-card animate-card" id="viewAnimate" hidden>
-          <div class="animate-layout">
-            <div class="svg-host" id="svgAnimateHost"></div>
-            <aside class="animation-panel" id="animationPanel">
-              <h2>Animate arcs</h2>
-              <div class="animation-controls">
-                <div class="field-group">
-                  <label for="animationPreset">Preset sequences</label>
-                  <select id="animationPreset">
-                    <option value="manual" selected>Manual selection</option>
-                    <option value="alternating_rings">Alternating rings</option>
-                    <option value="spiral_arms">Spiral arms sweep</option>
-                    <option value="ring_wave">Ring wave</option>
-                    <option value="radiant_spokes">Radiant spokes</option>
-                  </select>
-                </div>
-                <div class="dual-actions">
-                  <button type="button" class="secondary" id="animationAddFrame">Add frame</button>
-                  <button type="button" class="secondary" id="animationClear">Clear timeline</button>
-                </div>
-              </div>
-              <div class="frame-list" id="animationFrames" aria-live="polite"></div>
-              <div class="animation-actions">
-                <button type="button" id="animationGenerate">Animate selection</button>
-                <div class="status" id="animationStatus">Select a frame and click an arc to build the sequence.</div>
-              </div>
-            </aside>
+          <div class="svg-host" id="svgAnimateHost"></div>
+          <div class="animation-scrub" aria-label="Animation timeline controls">
+            <div class="animation-transport">
+              <button type="button" class="secondary" id="animationPrev" aria-label="Previous frame">Previous</button>
+              <button type="button" class="secondary" id="animationPlay">Play</button>
+              <button type="button" class="secondary" id="animationPause" disabled>Pause</button>
+              <button type="button" class="secondary" id="animationNext" aria-label="Next frame">Next</button>
+            </div>
+            <div class="animation-slider">
+              <input
+                type="range"
+                id="animationSlider"
+                min="1"
+                max="1"
+                value="1"
+                step="1"
+                aria-label="Animation frame position"
+                disabled
+              />
+              <div class="animation-frame-label" id="animationFrameLabel">Frame 1 of 1 • 0 arcs</div>
+            </div>
+          </div>
+          <div class="animation-config">
+            <div class="field-group">
+              <label for="animationPreset">Preset sequences</label>
+              <select id="animationPreset">
+                <option value="manual" selected>Manual selection</option>
+                <option value="alternating_rings">Alternating rings</option>
+                <option value="spiral_arms">Spiral arms sweep</option>
+                <option value="ring_wave">Ring wave</option>
+                <option value="radiant_spokes">Radiant spokes</option>
+              </select>
+            </div>
+            <div class="dual-actions">
+              <button type="button" class="secondary" id="animationAddFrame">Add frame</button>
+              <button type="button" class="secondary" id="animationClear">Clear timeline</button>
+            </div>
+          </div>
+          <div class="frame-list" id="animationFrames" aria-live="polite"></div>
+          <div class="animation-actions">
+            <button type="button" id="animationGenerate">Animate selection</button>
+            <div class="status" id="animationStatus">Select a frame and click an arc to build the sequence.</div>
           </div>
         </div>
 
