@@ -273,6 +273,72 @@
       height: 100%;
     }
 
+    .svg-host {
+      flex: 1 1 auto;
+      position: relative;
+    }
+
+    .svg-workspace {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .svg-host::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      border-radius: 1rem;
+    }
+
+    .svg-workspace.animate-mode .svg-host::after {
+      box-shadow: inset 0 0 0 2px rgba(37, 99, 235, 0.2);
+    }
+
+    .svg-preview-wrapper,
+    .svg-empty-wrapper {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .svg-workspace.animate-mode .arcgroup-overlay {
+      pointer-events: auto;
+    }
+
+    .arcgroup-overlay {
+      pointer-events: none;
+    }
+
+    .arcgroup-overlay polygon {
+      fill: rgba(255, 215, 0, 0);
+      stroke: none;
+      cursor: pointer;
+      transition: fill 0.25s ease, opacity 0.25s ease;
+    }
+
+    .arcgroup-overlay polygon:hover {
+      fill: rgba(255, 215, 0, 0.18);
+    }
+
+    .arcgroup-overlay polygon.arc-selected {
+      fill: rgba(255, 215, 0, 0.3);
+    }
+
+    .arcgroup-overlay polygon.arc-flash {
+      animation: arcFlash 0.9s ease;
+    }
+
+    @keyframes arcFlash {
+      0% { fill: rgba(255, 215, 0, 0.4); }
+      50% { fill: rgba(255, 215, 0, 0.8); }
+      100% { fill: rgba(255, 215, 0, 0.25); }
+    }
+
     .empty-state {
       text-align: center;
       color: var(--text-muted);
@@ -304,6 +370,167 @@
     .three-card {
       padding: 1.5rem;
       gap: 1.25rem;
+    }
+
+    .animate-card {
+      padding: 1.5rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1.35rem;
+    }
+
+    .animation-scrub {
+      background: rgba(248, 250, 252, 0.9);
+      border-radius: 1.25rem;
+      border: 1px solid rgba(148, 163, 184, 0.25);
+      padding: 1rem 1.25rem;
+      display: grid;
+      gap: 0.75rem;
+    }
+
+    .animation-transport {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.6rem;
+    }
+
+    .animation-transport button {
+      flex: 0 0 auto;
+      font-size: 0.85rem;
+      padding: 0.6rem 1rem;
+    }
+
+    .animation-slider {
+      display: grid;
+      gap: 0.35rem;
+    }
+
+    #animationSlider {
+      width: 100%;
+    }
+
+    .animation-frame-label {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      display: flex;
+      justify-content: space-between;
+      gap: 0.4rem;
+      flex-wrap: wrap;
+    }
+
+    .animation-config {
+      display: grid;
+      gap: 1rem;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      align-items: end;
+    }
+
+    .animation-config .dual-actions {
+      display: flex;
+      gap: 0.6rem;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .animation-config .dual-actions button {
+      flex: 1 1 140px;
+    }
+
+    .frame-list {
+      display: grid;
+      gap: 0.9rem;
+      overflow-y: auto;
+      max-height: clamp(220px, 40vh, 300px);
+      padding-right: 0.4rem;
+    }
+
+    .frame-card {
+      background: rgba(255, 255, 255, 0.8);
+      border: 1px solid rgba(148, 163, 184, 0.25);
+      border-radius: 1.1rem;
+      padding: 0.9rem 1rem;
+      display: grid;
+      gap: 0.6rem;
+      transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .frame-card.active {
+      border-color: rgba(37, 99, 235, 0.4);
+      box-shadow: 0 12px 24px rgba(37, 99, 235, 0.18);
+    }
+
+    .frame-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.85rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-muted);
+    }
+
+    .frame-groups {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+
+    .frame-group {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+      padding: 0.35rem 0.6rem;
+      border-radius: 999px;
+      background: rgba(37, 99, 235, 0.12);
+      color: var(--text-strong);
+      font-size: 0.8rem;
+      line-height: 1;
+    }
+
+    .frame-group.ghost button {
+      display: none;
+    }
+
+    .frame-group button {
+      background: none;
+      border: none;
+      font-size: 0.8rem;
+      color: inherit;
+      cursor: pointer;
+      padding: 0;
+      width: 1.1rem;
+      height: 1.1rem;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 999px;
+    }
+
+    .frame-group[data-strength] {
+      --strength: attr(data-strength number);
+    }
+
+    .frame-group[data-strength] {
+      background: rgba(255, 215, 0, calc(0.6 * var(--strength)));
+      color: #5b4000;
+    }
+
+    .frame-footer {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      display: flex;
+      justify-content: space-between;
+    }
+
+    .animation-actions {
+      display: flex;
+      flex-direction: column;
+      gap: 0.6rem;
+    }
+
+    .animation-actions button {
+      width: 100%;
     }
 
     .three-top {
@@ -552,10 +779,63 @@
         <div class="view-toggle" role="group" aria-label="Preview mode">
           <button type="button" class="active" data-view="2d" aria-pressed="true">2D SVG</button>
           <button type="button" data-view="3d" aria-pressed="false">3D View</button>
+          <button type="button" data-view="animate" aria-pressed="false">Animate</button>
         </div>
 
         <div class="preview-card" id="view2d">
-          <div id="svgPreview" class="empty-state">Rendering spiral…</div>
+          <div class="svg-host" id="svg2dHost">
+            <div id="svgWorkspace" class="svg-workspace">
+              <div class="svg-preview-wrapper">
+                <div id="svgPreview" class="empty-state">Rendering spiral…</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="preview-card animate-card" id="viewAnimate" hidden>
+          <div class="svg-host" id="svgAnimateHost"></div>
+          <div class="animation-scrub" aria-label="Animation timeline controls">
+            <div class="animation-transport">
+              <button type="button" class="secondary" id="animationPrev" aria-label="Previous frame">Previous</button>
+              <button type="button" class="secondary" id="animationPlay">Play</button>
+              <button type="button" class="secondary" id="animationPause" disabled>Pause</button>
+              <button type="button" class="secondary" id="animationNext" aria-label="Next frame">Next</button>
+            </div>
+            <div class="animation-slider">
+              <input
+                type="range"
+                id="animationSlider"
+                min="1"
+                max="1"
+                value="1"
+                step="1"
+                aria-label="Animation frame position"
+                disabled
+              />
+              <div class="animation-frame-label" id="animationFrameLabel">Frame 1 of 1 • 0 arcs</div>
+            </div>
+          </div>
+          <div class="animation-config">
+            <div class="field-group">
+              <label for="animationPreset">Preset sequences</label>
+              <select id="animationPreset">
+                <option value="manual" selected>Manual selection</option>
+                <option value="alternating_rings">Alternating rings</option>
+                <option value="spiral_arms">Spiral arms sweep</option>
+                <option value="ring_wave">Ring wave</option>
+                <option value="radiant_spokes">Radiant spokes</option>
+              </select>
+            </div>
+            <div class="dual-actions">
+              <button type="button" class="secondary" id="animationAddFrame">Add frame</button>
+              <button type="button" class="secondary" id="animationClear">Clear timeline</button>
+            </div>
+          </div>
+          <div class="frame-list" id="animationFrames" aria-live="polite"></div>
+          <div class="animation-actions">
+            <button type="button" id="animationGenerate">Animate selection</button>
+            <div class="status" id="animationStatus">Select a frame and click an arc to build the sequence.</div>
+          </div>
         </div>
 
         <div class="stats" id="stats" hidden>
