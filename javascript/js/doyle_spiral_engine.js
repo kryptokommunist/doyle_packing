@@ -710,6 +710,35 @@ class CircleElement {
 }
 
 class ArcElement {
+  static _shapeCache = new Map();
+
+  static _shapeKey(steps, delta) {
+    const quantised = Math.round(delta * 1e9) / 1e9;
+    return `${steps}|${quantised}`;
+  }
+
+  static _getShape(steps, delta) {
+    const key = ArcElement._shapeKey(steps, delta);
+    if (ArcElement._shapeCache.has(key)) {
+      return ArcElement._shapeCache.get(key);
+    }
+    const count = Math.max(1, steps | 0);
+    const coords = new Float64Array(count * 2);
+    if (count === 1) {
+      coords[0] = 1;
+      coords[1] = 0;
+    } else {
+      for (let i = 0; i < count; i += 1) {
+        const t = i / (count - 1);
+        const angle = delta * t;
+        coords[i * 2] = Math.cos(angle);
+        coords[i * 2 + 1] = Math.sin(angle);
+      }
+    }
+    ArcElement._shapeCache.set(key, coords);
+    return coords;
+  }
+
   constructor(circle, start, end, steps = 40, visible = true) {
     this.circle = circle;
     this.start = complexFrom(start);
@@ -717,6 +746,7 @@ class ArcElement {
     this.steps = Math.max(1, steps | 0);
     this.visible = visible;
     this._pointsCache = null;
+    this._template = null;
   }
 
   _invalidate() {
@@ -747,9 +777,46 @@ class ArcElement {
     }
   }
 
+  applyTemplate(template, transform, arcIndex, { preserveCache = false } = {}) {
+    if (!template || !transform || typeof arcIndex !== 'number') {
+      this._template = null;
+      if (!preserveCache) {
+        this._invalidate();
+      }
+      return;
+    }
+    this._template = { template, transform, arcIndex };
+    if (!preserveCache) {
+      this._invalidate();
+    }
+  }
+
   getPoints() {
     if (this._pointsCache) {
       return this._pointsCache;
+    }
+    if (this._template) {
+      const { template, transform, arcIndex } = this._template;
+      const bases = template?.normalizedArcs?.[arcIndex];
+      if (!bases || !transform) {
+        this._template = null;
+      } else {
+        const { cos, sin, radius, center } = transform;
+        const total = bases.length / 2;
+        const points = new Array(total);
+        for (let idx = 0; idx < bases.length; idx += 2) {
+          const x = bases[idx];
+          const y = bases[idx + 1];
+          const rx = x * cos - y * sin;
+          const ry = x * sin + y * cos;
+          points[idx / 2] = {
+            re: center.re + rx * radius,
+            im: center.im + ry * radius,
+          };
+        }
+        this._pointsCache = points;
+        return points;
+      }
     }
     const c = this.circle.center;
     const r = this.circle.radius;
@@ -759,16 +826,19 @@ class ArcElement {
     if (delta > Math.PI) {
       delta -= 2 * Math.PI;
     }
-    const points = [];
-    if (this.steps === 1) {
-      points.push(Complex.add(c, Complex.mulScalar(Complex.expi(a1), r)));
-    } else {
-      for (let i = 0; i < this.steps; i += 1) {
-        const t = i / (this.steps - 1);
-        const angle = a1 + delta * t;
-        const point = Complex.add(c, Complex.mulScalar(Complex.expi(angle), r));
-        points.push(point);
-      }
+    const templatePoints = ArcElement._getShape(this.steps, delta);
+    const cosA = Math.cos(a1);
+    const sinA = Math.sin(a1);
+    const points = new Array(templatePoints.length / 2);
+    for (let idx = 0; idx < templatePoints.length; idx += 2) {
+      const baseX = templatePoints[idx];
+      const baseY = templatePoints[idx + 1];
+      const rotX = baseX * cosA - baseY * sinA;
+      const rotY = baseX * sinA + baseY * cosA;
+      points[idx / 2] = {
+        re: c.re + rotX * r,
+        im: c.im + rotY * r,
+      };
     }
     this._pointsCache = points;
     return points;
@@ -787,6 +857,8 @@ class ArcGroup {
     this.debugStroke = null;
     this.ringIndex = null;
     this._outlineCache = null;
+    this.template = null;
+    this.templateTransform = null;
   }
 
   addArc(arc) {
@@ -802,6 +874,14 @@ class ArcGroup {
 
   isEmpty() {
     return this.arcs.length === 0;
+  }
+
+  setTemplate(template, transform, preserveCache = false) {
+    this.template = template || null;
+    this.templateTransform = transform || null;
+    if (!preserveCache) {
+      this._outlineCache = null;
+    }
   }
 
   _matchPoints(a, b, tol = 1e-6) {
@@ -870,6 +950,20 @@ class ArcGroup {
   getClosedOutline(tol = 1e-3) {
     if (this._outlineCache) {
       return this._outlineCache.slice();
+    }
+    if (this.template && this.templateTransform && this.template.normalizedOutline) {
+      const { normalizedOutline } = this.template;
+      const { cos, sin, radius, center } = this.templateTransform;
+      const points = [];
+      for (let idx = 0; idx < normalizedOutline.length; idx += 2) {
+        const x = normalizedOutline[idx];
+        const y = normalizedOutline[idx + 1];
+        const rx = x * cos - y * sin;
+        const ry = x * sin + y * cos;
+        points.push({ re: center.re + rx * radius, im: center.im + ry * radius });
+      }
+      this._outlineCache = points.slice();
+      return points.slice();
     }
     if (!this.arcs.length) {
       return [];
@@ -1383,6 +1477,7 @@ class DoyleSpiralEngine {
     this._generated = false;
     this.arcGroups = new Map();
     this.fillPatternAngle = 0;
+    this._ringTemplates = new Map();
   }
 
   generateCircles() {
@@ -1577,6 +1672,94 @@ class DoyleSpiralEngine {
     return mapping;
   }
 
+  _ringTemplateKey(ringIndex, arcsToDraw) {
+    const signature = (arcsToDraw || [])
+      .map(pair => (Array.isArray(pair) ? `${pair[0]}-${pair[1]}` : String(pair)))
+      .join('|');
+    return `${ringIndex}|${this.arcMode}|${this.numGaps}|${signature}`;
+  }
+
+  _normalisePointsForTemplate(points, center, radius) {
+    if (!points || !points.length || !center || !radius) {
+      return null;
+    }
+    const invRadius = 1 / radius;
+    const out = new Float64Array(points.length * 2);
+    for (let idx = 0; idx < points.length; idx += 1) {
+      const diff = Complex.sub(points[idx], center);
+      out[idx * 2] = diff.re * invRadius;
+      out[idx * 2 + 1] = diff.im * invRadius;
+    }
+    return out;
+  }
+
+  _buildRingTemplate(circle, group, arcs, arcsToDraw) {
+    if (!circle || !group || !arcs || !arcs.length) {
+      return null;
+    }
+    const center = circle.center;
+    const radius = circle.radius || 1;
+    const normalizedArcs = [];
+    const arcPointCounts = [];
+    for (const arc of arcs) {
+      const pts = arc.getPoints();
+      const normalised = this._normalisePointsForTemplate(pts, center, radius);
+      normalizedArcs.push(normalised);
+      arcPointCounts.push((pts && pts.length) || 0);
+    }
+    const outlinePoints = group.getClosedOutline();
+    const normalizedOutline = this._normalisePointsForTemplate(outlinePoints, center, radius);
+    let referenceVector = { re: 1, im: 0 };
+    if (normalizedArcs.length && normalizedArcs[0] && normalizedArcs[0].length >= 2) {
+      const x = normalizedArcs[0][0];
+      const y = normalizedArcs[0][1];
+      const len = Math.hypot(x, y);
+      if (len > 1e-9) {
+        referenceVector = { re: x / len, im: y / len };
+      }
+    }
+    return {
+      normalizedArcs,
+      normalizedOutline,
+      referenceVector,
+      referenceArcIndex: 0,
+      arcPointCounts,
+      signature: (arcsToDraw || []).map(([i, j]) => `${i}-${j}`).join('|'),
+    };
+  }
+
+  _computeTemplateTransform(template, circle, arcsToDraw) {
+    if (!template || !circle || !arcsToDraw || !arcsToDraw.length) {
+      return null;
+    }
+    const refIdx = Math.min(template.referenceArcIndex || 0, arcsToDraw.length - 1);
+    const [startIdx] = arcsToDraw[refIdx];
+    const entry = circle.intersections[startIdx];
+    if (!entry || !entry[0]) {
+      return null;
+    }
+    const startPoint = entry[0];
+    const center = circle.center;
+    const vec = Complex.sub(startPoint, center);
+    const len = Math.hypot(vec.re, vec.im);
+    if (len < 1e-9) {
+      return { cos: 1, sin: 0, radius: circle.radius, center };
+    }
+    const normActual = { re: vec.re / len, im: vec.im / len };
+    const base = template.referenceVector || { re: 1, im: 0 };
+    const dot = clamp(base.re * normActual.re + base.im * normActual.im, -1, 1);
+    const cross = base.re * normActual.im - base.im * normActual.re;
+    const norm = Math.hypot(dot, cross);
+    const cos = norm > 1e-12 ? dot / norm : 1;
+    const sin = norm > 1e-12 ? cross / norm : 0;
+    return {
+      cos,
+      sin,
+      radius: circle.radius,
+      center,
+    };
+  }
+
   _createArcGroupsForCircles(radiusToRing, spiralCenter, debugGroups, addFillPattern, drawGroupOutline, context) {
     for (const circle of this.circles) {
       if (circle.intersections.length !== 6) {
@@ -1594,6 +1777,7 @@ class DoyleSpiralEngine {
         group.debugFill = colorFromSeed(circle.id);
         group.debugStroke = '#000000';
       }
+      const arcs = [];
       for (const [i, j] of arcsToDraw) {
         const start = circle.intersections[i][0];
         const end = circle.intersections[j][0];
@@ -1603,6 +1787,28 @@ class DoyleSpiralEngine {
           context.drawScaled(arc);
         }
         group.addArc(arc);
+        arcs.push(arc);
+      }
+
+      const templateKey = this._ringTemplateKey(group.ringIndex ?? -1, arcsToDraw);
+      let template = this._ringTemplates.get(templateKey) || null;
+      let preserveCache = false;
+      if (!template) {
+        template = this._buildRingTemplate(circle, group, arcs, arcsToDraw);
+        if (template) {
+          this._ringTemplates.set(templateKey, template);
+          preserveCache = true;
+        }
+      }
+
+      if (template) {
+        const transform = this._computeTemplateTransform(template, circle, arcsToDraw);
+        if (transform) {
+          group.setTemplate(template, transform, preserveCache);
+          for (let idx = 0; idx < arcs.length; idx += 1) {
+            arcs[idx].applyTemplate(template, transform, idx, { preserveCache });
+          }
+        }
       }
     }
   }
@@ -1717,6 +1923,7 @@ class DoyleSpiralEngine {
     context.setNormalizationScale(this.circles.concat(this.outerCircles));
     this.fillPatternAngle = fillPatternAngle;
     this.arcGroups.clear();
+    this._ringTemplates = new Map();
 
     const spiralCenter = Complex.ZERO;
     const radiusToRing = this._computeRingIndices();
