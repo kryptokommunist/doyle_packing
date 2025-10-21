@@ -743,6 +743,52 @@
           return clockwiseOffset(angleA) - clockwiseOffset(angleB);
         });
       }
+
+      getNeighbourCircles({
+        limit = null,
+        spiralCenter = complex(0, 0),
+        clockwise = true,
+        tieByDistance = true,
+      } = {}) {
+        const neighbours = Array.from(this.neighbours);
+        if (!neighbours.length) {
+          return [];
+        }
+
+        if (typeof limit === 'number' && neighbours.length > limit) {
+          neighbours.sort((a, b) => distanceComplex(a.center, this.center) - distanceComplex(b.center, this.center));
+          neighbours.splice(limit);
+        }
+
+        const baseAngle = argComplex(subComplex(this.center, spiralCenter));
+        const relativeAngle = (other) => {
+          let angle = argComplex(subComplex(other.center, spiralCenter)) - baseAngle;
+          angle %= TWO_PI;
+          if (angle < 0) {
+            angle += TWO_PI;
+          }
+          return angle;
+        };
+
+        neighbours.sort((a, b) => {
+          const angleA = relativeAngle(a);
+          const angleB = relativeAngle(b);
+          if (tieByDistance && Math.abs(angleA - angleB) < 1e-9) {
+            const distA = distanceComplex(a.center, this.center);
+            const distB = distanceComplex(b.center, this.center);
+            if (Math.abs(distA - distB) > 1e-9) {
+              return distA - distB;
+            }
+          }
+          return angleA - angleB;
+        });
+
+        if (clockwise) {
+          neighbours.reverse();
+        }
+
+        return neighbours;
+      }
     }
 
     class ArcElement {
@@ -1397,6 +1443,51 @@
         }
       }
 
+      _completeArcGroups(spiralCenter) {
+        const neighbourIndexOrder = [-1, -2, -5, -6];
+        const arcIndexMap = new Map([
+          [-1, -3],
+          [-2, -2],
+          [-5, 1],
+          [-6, 0],
+        ]);
+
+        for (const circle of this.circles) {
+          const key = `circle_${circle.id}`;
+          const group = this.arcGroups[key];
+          if (!group) {
+            continue;
+          }
+          const neighbours = circle.getNeighbourCircles({ spiralCenter });
+          if (neighbours.length !== 6) {
+            continue;
+          }
+
+          for (const idx of neighbourIndexOrder) {
+            const neighbour = neighbours[(idx + neighbours.length) % neighbours.length];
+            if (!neighbour) {
+              continue;
+            }
+            const arcs = ArcSelector.select_arcs_for_gaps(neighbour, spiralCenter, 0, 'all');
+            if (!arcs.length) {
+              continue;
+            }
+
+            let arcIndex = arcIndexMap.get(idx) ?? 0;
+            arcIndex = ((arcIndex % arcs.length) + arcs.length) % arcs.length;
+            const [startIdx, endIdx] = arcs[arcIndex];
+            const startEntry = neighbour.intersections[startIdx];
+            const endEntry = neighbour.intersections[endIdx];
+            if (!startEntry || !endEntry) {
+              continue;
+            }
+
+            const arc = new ArcElement(neighbour, startEntry.point, endEntry.point, 72, true);
+            group.addArc(arc);
+          }
+        }
+      }
+
       _drawOuterClosureArcs(spiralCenter, options, context) {
         for (const circle of this.outerCircles) {
           if (circle.intersections.length < 2) {
@@ -1439,6 +1530,7 @@
         const radiusToRing = this._computeRingIndices();
         this._createArcGroups(radiusToRing, spiralCenter, options, context);
         this._drawOuterClosureArcs(spiralCenter, options, context);
+        this._completeArcGroups(spiralCenter);
 
         const innerGroups = Object.entries(this.arcGroups).filter(([key]) => !key.startsWith('outer_'));
         if (options.debugGroups) {
