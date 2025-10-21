@@ -319,6 +319,29 @@ function insetPolygon(points, offset) {
   return cleaned;
 }
 
+function estimateArcSteps(circle, start, end) {
+  if (!circle || circle.radius <= 0 || !start || !end) {
+    return 12;
+  }
+  const center = circle.center || Complex.ZERO;
+  const startAngle = Complex.angle(Complex.sub(start, center));
+  const endAngle = Complex.angle(Complex.sub(end, center));
+  let delta = (endAngle - startAngle) % (2 * Math.PI);
+  if (delta < 0) {
+    delta += 2 * Math.PI;
+  }
+  if (delta > Math.PI) {
+    delta = 2 * Math.PI - delta;
+  }
+  const arcLength = Math.abs(delta) * circle.radius;
+  if (!Number.isFinite(arcLength) || arcLength <= 0) {
+    return 12;
+  }
+  const desiredSegmentLength = clamp(circle.radius * 0.12, 6, 30);
+  const rawSteps = Math.ceil(arcLength / desiredSegmentLength);
+  return clamp(rawSteps, 10, 44);
+}
+
 function lineSegmentIntersection(p1, p2, p3, p4) {
   const x1 = p1.x;
   const y1 = p1.y;
@@ -390,6 +413,7 @@ function linesInPolygon(polygonPoints, spacing, angleDeg, offset = 0) {
   if (!polygonPoints || polygonPoints.length < 3) {
     return [];
   }
+
   const spacingAbs = Math.abs(spacing);
   if (spacingAbs < 1e-9) {
     return [];
@@ -400,103 +424,108 @@ function linesInPolygon(polygonPoints, spacing, angleDeg, offset = 0) {
     return [];
   }
 
-  const orientation = polygonSignedArea(working) >= 0 ? 1 : -1;
-
   const angle = degToRad(angleDeg);
-  const lineDir = { x: Math.cos(angle), y: Math.sin(angle) };
-  const perpDir = { x: -lineDir.y, y: lineDir.x };
+  const cosAngle = Math.cos(angle);
+  const sinAngle = Math.sin(angle);
 
-  let minX = Infinity;
+  const rotatePoint = point => ({
+    x: point.x * cosAngle + point.y * sinAngle,
+    y: -point.x * sinAngle + point.y * cosAngle,
+  });
+
+  const unrotatePoint = point => ({
+    x: point.x * cosAngle - point.y * sinAngle,
+    y: point.x * sinAngle + point.y * cosAngle,
+  });
+
+  const rotated = working.map(rotatePoint);
+  const centroid = polygonCentroid(working);
+  const centroidRot = rotatePoint(centroid);
+
   let minY = Infinity;
-  let maxX = -Infinity;
   let maxY = -Infinity;
-  for (const p of working) {
-    minX = Math.min(minX, p.x);
-    minY = Math.min(minY, p.y);
-    maxX = Math.max(maxX, p.x);
-    maxY = Math.max(maxY, p.y);
+  for (const pt of rotated) {
+    if (pt.y < minY) {
+      minY = pt.y;
+    }
+    if (pt.y > maxY) {
+      maxY = pt.y;
+    }
   }
 
-  const bboxDiag = Math.hypot(maxX - minX, maxY - minY);
-  if (!Number.isFinite(bboxDiag) || bboxDiag <= 0) {
+  if (!Number.isFinite(minY) || !Number.isFinite(maxY) || maxY - minY < 1e-9) {
     return [];
   }
-  const centroid = polygonCentroid(working);
-  const span = { x: lineDir.x * bboxDiag * 2, y: lineDir.y * bboxDiag * 2 };
-  const startBase = { x: centroid.x - span.x, y: centroid.y - span.y };
-  const endBase = { x: centroid.x + span.x, y: centroid.y + span.y };
+
+  const edges = [];
+  const count = rotated.length;
+  for (let i = 0; i < count; i += 1) {
+    const a = rotated[i];
+    const b = rotated[(i + 1) % count];
+    const dy = b.y - a.y;
+    if (Math.abs(dy) < 1e-9) {
+      continue;
+    }
+    const minEdgeY = Math.min(a.y, b.y);
+    const maxEdgeY = Math.max(a.y, b.y);
+    edges.push({
+      x1: a.x,
+      y1: a.y,
+      dx: b.x - a.x,
+      dy,
+      invDy: 1 / dy,
+      minY: minEdgeY,
+      maxY: maxEdgeY,
+    });
+  }
+
+  if (!edges.length) {
+    return [];
+  }
 
   const effectiveSpacing = Math.max(spacingAbs, 1e-6);
-  const numLines = Math.floor(bboxDiag / effectiveSpacing) + 3;
+  const startIndex = Math.floor((minY - centroidRot.y) / effectiveSpacing) - 1;
+  const endIndex = Math.ceil((maxY - centroidRot.y) / effectiveSpacing) + 1;
+
   const segments = [];
-  for (let i = -numLines; i <= numLines; i += 1) {
-    const offsetX = perpDir.x * effectiveSpacing * i;
-    const offsetY = perpDir.y * effectiveSpacing * i;
-    const start = { x: startBase.x + offsetX, y: startBase.y + offsetY };
-    const end = { x: endBase.x + offsetX, y: endBase.y + offsetY };
-    const intersections = findLinePolygonIntersections(
-      start,
-      end,
-      working,
-      lineDir,
-      orientation,
-    );
+  for (let idx = startIndex; idx <= endIndex; idx += 1) {
+    const yLine = centroidRot.y + idx * effectiveSpacing;
+    if (yLine < minY - effectiveSpacing || yLine > maxY + effectiveSpacing) {
+      continue;
+    }
+
+    const intersections = [];
+    for (const edge of edges) {
+      if (yLine < edge.minY || yLine >= edge.maxY) {
+        continue;
+      }
+      const t = (yLine - edge.y1) * edge.invDy;
+      const x = edge.x1 + edge.dx * t;
+      intersections.push(x);
+    }
+
     if (intersections.length < 2) {
       continue;
     }
 
-    const merged = [];
-    const GROUP_TOL = 1e-8;
-    for (const entry of intersections) {
-      const last = merged[merged.length - 1];
-      if (
-        last &&
-        Math.abs(entry.t - last.t) <= GROUP_TOL &&
-        entry.classification === last.classification
-      ) {
-        last.point.x = (last.point.x * last.count + entry.point.x) / (last.count + 1);
-        last.point.y = (last.point.y * last.count + entry.point.y) / (last.count + 1);
-        last.t = (last.t * last.count + entry.t) / (last.count + 1);
-        last.count += 1;
-      } else {
-        merged.push({
-          t: entry.t,
-          point: { x: entry.point.x, y: entry.point.y },
-          classification: entry.classification,
-          count: 1,
-        });
+    intersections.sort((a, b) => a - b);
+
+    for (let i = 0; i + 1 < intersections.length; i += 2) {
+      const xStart = intersections[i];
+      const xEnd = intersections[i + 1];
+      if (!Number.isFinite(xStart) || !Number.isFinite(xEnd)) {
+        continue;
       }
-    }
-
-    if (merged.length < 2) {
-      continue;
-    }
-
-    let activeStart = polygonContains(start, working)
-      ? { x: start.x, y: start.y }
-      : null;
-
-    for (const entry of merged) {
-      const { point, classification } = entry;
-      if (classification > 0) {
-        if (!activeStart) {
-          activeStart = { x: point.x, y: point.y };
-        }
-      } else if (classification < 0) {
-        if (!activeStart) {
-          activeStart = { x: point.x, y: point.y };
-        }
-        if (
-          activeStart &&
-          Math.hypot(activeStart.x - point.x, activeStart.y - point.y) >= 1e-6
-        ) {
-          segments.push([
-            { x: activeStart.x, y: activeStart.y },
-            { x: point.x, y: point.y },
-          ]);
-        }
-        activeStart = null;
+      if (Math.abs(xStart - xEnd) < 1e-6) {
+        continue;
       }
+
+      const startPoint = unrotatePoint({ x: xStart, y: yLine });
+      const endPoint = unrotatePoint({ x: xEnd, y: yLine });
+      segments.push([
+        { x: startPoint.x, y: startPoint.y },
+        { x: endPoint.x, y: endPoint.y },
+      ]);
     }
   }
 
@@ -517,56 +546,69 @@ class CircleElement {
     this.id = ++CIRCLE_ID;
     this.intersections = [];
     this.neighbours = new Set();
+    this._intersectionKeys = null;
+    this._orderedNeighbours = null;
   }
 
   _getIntersectionPoints(other, tol = 1e-6) {
-    const d = Complex.abs(Complex.sub(this.center, other.center));
+    const x1 = this.center.re;
+    const y1 = this.center.im;
+    const x2 = other.center.re;
+    const y2 = other.center.im;
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const dSq = dx * dx + dy * dy;
+    const d = Math.sqrt(dSq);
     const r1 = this.radius;
     const r2 = other.radius;
     if (d > r1 + r2 + tol || d < Math.abs(r1 - r2) - tol || d < tol) {
       return [];
     }
-    const a = (r1 * r1 - r2 * r2 + d * d) / (2 * d);
+    const a = (r1 * r1 - r2 * r2 + dSq) / (2 * d);
     const hSq = r1 * r1 - a * a;
     if (hSq < -tol) {
       return [];
     }
     const h = Math.sqrt(Math.max(hSq, 0));
-    const mid = Complex.add(
-      this.center,
-      Complex.mulScalar(Complex.sub(other.center, this.center), a / d),
-    );
-    const perpUnit = Complex.mulScalar(Complex.sub(other.center, this.center), 1 / d);
-    const perp = { re: -perpUnit.im, im: perpUnit.re };
-    const p1 = Complex.add(mid, Complex.mulScalar(perp, h));
+    const ratio = a / d;
+    const midX = x1 + dx * ratio;
+    const midY = y1 + dy * ratio;
+    const invD = d === 0 ? 0 : 1 / d;
+    const ux = dx * invD;
+    const uy = dy * invD;
+    const perpX = -uy;
+    const perpY = ux;
+    const p1 = { re: midX + perpX * h, im: midY + perpY * h };
     if (h < tol) {
       return [p1];
     }
-    const p2 = Complex.sub(mid, Complex.mulScalar(perp, h));
+    const p2 = { re: midX - perpX * h, im: midY - perpY * h };
     return [p1, p2];
   }
 
-  computeIntersections(circles, startReference = Complex.ZERO, tol = 1e-3) {
+  resetIntersections() {
     this.intersections = [];
     this.neighbours.clear();
-    const seen = new Set();
+    this._intersectionKeys = new Set();
+    this._orderedNeighbours = null;
+  }
 
-    for (const other of circles) {
-      if (other === this) {
-        continue;
-      }
-      const pts = this._getIntersectionPoints(other, tol);
-      for (const pt of pts) {
-        const key = `${pt.re.toFixed(6)}_${pt.im.toFixed(6)}`;
-        if (!seen.has(key)) {
-          this.intersections.push([pt, other]);
-          seen.add(key);
-          this.neighbours.add(other);
-        }
-      }
+  addIntersection(point, other) {
+    if (!point || !other || !this._intersectionKeys) {
+      return;
     }
+    const key = `${point.re.toFixed(6)}_${point.im.toFixed(6)}`;
+    if (this._intersectionKeys.has(key)) {
+      return;
+    }
+    this._intersectionKeys.add(key);
+    this.intersections.push([point, other]);
+    this.neighbours.add(other);
+  }
 
+  finalizeIntersections(startReference = Complex.ZERO) {
     if (!this.intersections.length) {
+      this._intersectionKeys = null;
       return;
     }
 
@@ -594,12 +636,41 @@ class CircleElement {
       const angB = Complex.angle(Complex.sub(b[0], c));
       return clockwiseOffset(angA) - clockwiseOffset(angB);
     });
+
+    this._intersectionKeys = null;
+  }
+
+  computeIntersections(circles, startReference = Complex.ZERO, tol = 1e-3) {
+    this.resetIntersections();
+
+    for (const other of circles) {
+      if (other === this) {
+        continue;
+      }
+      const pts = this._getIntersectionPoints(other, tol);
+      for (const pt of pts) {
+        this.addIntersection(pt, other);
+      }
+    }
+
+    this.finalizeIntersections(startReference);
   }
 
   getNeighbourCircles(k = null, spiralCenter = Complex.ZERO, clockwise = true, tieByDistance = true) {
     let neighbours = Array.from(this.neighbours);
     if (!neighbours.length) {
       return [];
+    }
+    const scRe = (spiralCenter && spiralCenter.re) || 0;
+    const scIm = (spiralCenter && spiralCenter.im) || 0;
+    const cacheable =
+      k === null &&
+      clockwise === true &&
+      tieByDistance === true &&
+      Math.abs(scRe) < 1e-9 &&
+      Math.abs(scIm) < 1e-9;
+    if (cacheable && this._orderedNeighbours) {
+      return this._orderedNeighbours;
     }
     if (k !== null && neighbours.length > k) {
       neighbours.sort((a, b) => {
@@ -631,11 +702,43 @@ class CircleElement {
     if (clockwise) {
       neighbours.reverse();
     }
+    if (cacheable) {
+      this._orderedNeighbours = neighbours;
+    }
     return neighbours;
   }
 }
 
 class ArcElement {
+  static _shapeCache = new Map();
+
+  static _shapeKey(steps, delta) {
+    const quantised = Math.round(delta * 1e9) / 1e9;
+    return `${steps}|${quantised}`;
+  }
+
+  static _getShape(steps, delta) {
+    const key = ArcElement._shapeKey(steps, delta);
+    if (ArcElement._shapeCache.has(key)) {
+      return ArcElement._shapeCache.get(key);
+    }
+    const count = Math.max(1, steps | 0);
+    const coords = new Float64Array(count * 2);
+    if (count === 1) {
+      coords[0] = 1;
+      coords[1] = 0;
+    } else {
+      for (let i = 0; i < count; i += 1) {
+        const t = i / (count - 1);
+        const angle = delta * t;
+        coords[i * 2] = Math.cos(angle);
+        coords[i * 2 + 1] = Math.sin(angle);
+      }
+    }
+    ArcElement._shapeCache.set(key, coords);
+    return coords;
+  }
+
   constructor(circle, start, end, steps = 40, visible = true) {
     this.circle = circle;
     this.start = complexFrom(start);
@@ -643,6 +746,7 @@ class ArcElement {
     this.steps = Math.max(1, steps | 0);
     this.visible = visible;
     this._pointsCache = null;
+    this._template = null;
   }
 
   _invalidate() {
@@ -673,9 +777,46 @@ class ArcElement {
     }
   }
 
+  applyTemplate(template, transform, arcIndex, { preserveCache = false } = {}) {
+    if (!template || !transform || typeof arcIndex !== 'number') {
+      this._template = null;
+      if (!preserveCache) {
+        this._invalidate();
+      }
+      return;
+    }
+    this._template = { template, transform, arcIndex };
+    if (!preserveCache) {
+      this._invalidate();
+    }
+  }
+
   getPoints() {
     if (this._pointsCache) {
       return this._pointsCache;
+    }
+    if (this._template) {
+      const { template, transform, arcIndex } = this._template;
+      const bases = template?.normalizedArcs?.[arcIndex];
+      if (!bases || !transform) {
+        this._template = null;
+      } else {
+        const { cos, sin, radius, center } = transform;
+        const total = bases.length / 2;
+        const points = new Array(total);
+        for (let idx = 0; idx < bases.length; idx += 2) {
+          const x = bases[idx];
+          const y = bases[idx + 1];
+          const rx = x * cos - y * sin;
+          const ry = x * sin + y * cos;
+          points[idx / 2] = {
+            re: center.re + rx * radius,
+            im: center.im + ry * radius,
+          };
+        }
+        this._pointsCache = points;
+        return points;
+      }
     }
     const c = this.circle.center;
     const r = this.circle.radius;
@@ -685,16 +826,19 @@ class ArcElement {
     if (delta > Math.PI) {
       delta -= 2 * Math.PI;
     }
-    const points = [];
-    if (this.steps === 1) {
-      points.push(Complex.add(c, Complex.mulScalar(Complex.expi(a1), r)));
-    } else {
-      for (let i = 0; i < this.steps; i += 1) {
-        const t = i / (this.steps - 1);
-        const angle = a1 + delta * t;
-        const point = Complex.add(c, Complex.mulScalar(Complex.expi(angle), r));
-        points.push(point);
-      }
+    const templatePoints = ArcElement._getShape(this.steps, delta);
+    const cosA = Math.cos(a1);
+    const sinA = Math.sin(a1);
+    const points = new Array(templatePoints.length / 2);
+    for (let idx = 0; idx < templatePoints.length; idx += 2) {
+      const baseX = templatePoints[idx];
+      const baseY = templatePoints[idx + 1];
+      const rotX = baseX * cosA - baseY * sinA;
+      const rotY = baseX * sinA + baseY * cosA;
+      points[idx / 2] = {
+        re: c.re + rotX * r,
+        im: c.im + rotY * r,
+      };
     }
     this._pointsCache = points;
     return points;
@@ -713,6 +857,9 @@ class ArcGroup {
     this.debugStroke = null;
     this.ringIndex = null;
     this._outlineCache = null;
+    this.template = null;
+    this.templateTransform = null;
+    this._templateArcCount = null;
   }
 
   addArc(arc) {
@@ -728,6 +875,58 @@ class ArcGroup {
 
   isEmpty() {
     return this.arcs.length === 0;
+  }
+
+  setTemplate(template, transform, preserveCache = false) {
+    this.template = template || null;
+    this.templateTransform = transform || null;
+    this._templateArcCount = this.template ? this.arcs.length : null;
+    if (!preserveCache) {
+      this._outlineCache = null;
+    }
+  }
+
+  _computeOutlineFromArcs(tol = 1e-3) {
+    if (!this.arcs.length) {
+      return [];
+    }
+    const entries = this.arcs.map(arc => ({ arc, points: arc.getPoints().slice() }));
+    entries.sort((a, b) => b.points.length - a.points.length);
+
+    let ordered = entries[0].points.slice();
+    const used = new Set([0]);
+
+    while (true) {
+      let attached = false;
+      for (let idx = 1; idx < entries.length; idx += 1) {
+        if (used.has(idx)) {
+          continue;
+        }
+        const result = this._tryAttachArc(ordered, entries[idx].points, tol);
+        if (result) {
+          ordered = result;
+          used.add(idx);
+          attached = true;
+          break;
+        }
+      }
+      if (!attached) {
+        break;
+      }
+    }
+
+    for (let idx = 0; idx < entries.length; idx += 1) {
+      if (used.has(idx)) {
+        continue;
+      }
+      ordered = this._attachByProximity(ordered, entries[idx].points);
+    }
+
+    if (ordered.length && this._matchPoints(ordered[0], ordered[ordered.length - 1], tol)) {
+      ordered[ordered.length - 1] = ordered[0];
+    }
+
+    return ordered;
   }
 
   _matchPoints(a, b, tol = 1e-6) {
@@ -797,47 +996,23 @@ class ArcGroup {
     if (this._outlineCache) {
       return this._outlineCache.slice();
     }
-    if (!this.arcs.length) {
-      return [];
-    }
-    const entries = this.arcs.map(arc => ({ arc, points: arc.getPoints().slice() }));
-    entries.sort((a, b) => b.points.length - a.points.length);
-
-    let ordered = entries[0].points.slice();
-    const used = new Set([0]);
-
-    while (true) {
-      let attached = false;
-      for (let idx = 1; idx < entries.length; idx += 1) {
-        if (used.has(idx)) {
-          continue;
-        }
-        const result = this._tryAttachArc(ordered, entries[idx].points, tol);
-        if (result) {
-          ordered = result;
-          used.add(idx);
-          attached = true;
-          break;
-        }
+    if (this.template && this.templateTransform && this.template.normalizedOutline) {
+      const { normalizedOutline } = this.template;
+      const { cos, sin, radius, center } = this.templateTransform;
+      const points = [];
+      for (let idx = 0; idx < normalizedOutline.length; idx += 2) {
+        const x = normalizedOutline[idx];
+        const y = normalizedOutline[idx + 1];
+        const rx = x * cos - y * sin;
+        const ry = x * sin + y * cos;
+        points.push({ re: center.re + rx * radius, im: center.im + ry * radius });
       }
-      if (!attached) {
-        break;
-      }
+      this._outlineCache = points.slice();
+      return points.slice();
     }
-
-    for (let idx = 0; idx < entries.length; idx += 1) {
-      if (used.has(idx)) {
-        continue;
-      }
-      ordered = this._attachByProximity(ordered, entries[idx].points);
-    }
-
-    if (ordered.length && this._matchPoints(ordered[0], ordered[ordered.length - 1], tol)) {
-      ordered[ordered.length - 1] = ordered[0];
-    }
-
-    this._outlineCache = ordered.slice();
-    return ordered.slice();
+    const outline = this._computeOutlineFromArcs(tol);
+    this._outlineCache = outline.slice();
+    return outline.slice();
   }
 
   toSVGFill(context, {
@@ -848,7 +1023,17 @@ class ArcGroup {
     drawOutline = true,
     lineOffset = 0,
   } = {}) {
-    const outline = this.getClosedOutline();
+    let outline;
+    if (
+      patternFill &&
+      this.template &&
+      this._templateArcCount !== null &&
+      this.arcs.length > this._templateArcCount
+    ) {
+      outline = this._computeOutlineFromArcs();
+    } else {
+      outline = this.getClosedOutline();
+    }
     if (!outline.length) {
       return;
     }
@@ -1309,6 +1494,7 @@ class DoyleSpiralEngine {
     this._generated = false;
     this.arcGroups = new Map();
     this.fillPatternAngle = 0;
+    this._ringTemplates = new Map();
   }
 
   generateCircles() {
@@ -1376,20 +1562,108 @@ class DoyleSpiralEngine {
       return;
     }
     const tol = 1e-3;
-    for (let i = 0; i < all.length; i += 1) {
-      const circle = all[i];
-      const candidates = [];
-      for (let j = 0; j < all.length; j += 1) {
-        if (i === j) {
+
+    for (const circle of all) {
+      circle.resetIntersections();
+    }
+
+    const sorted = all
+      .slice()
+      .sort((a, b) => a.center.re - b.center.re);
+    const tolSq = tol * tol;
+    const total = sorted.length;
+    const xs = new Float64Array(total);
+    const ys = new Float64Array(total);
+    const radii = new Float64Array(total);
+    const radiiSq = new Float64Array(total);
+    const suffixMaxRadius = new Float64Array(total);
+
+    for (let idx = 0; idx < total; idx += 1) {
+      const entry = sorted[idx];
+      xs[idx] = entry.center.re;
+      ys[idx] = entry.center.im;
+      radii[idx] = entry.radius;
+      radiiSq[idx] = entry.radius * entry.radius;
+    }
+    let runningMax = 0;
+    for (let idx = total - 1; idx >= 0; idx -= 1) {
+      if (radii[idx] > runningMax) {
+        runningMax = radii[idx];
+      }
+      suffixMaxRadius[idx] = runningMax;
+    }
+
+    for (let i = 0; i < total; i += 1) {
+      const circle = sorted[i];
+      const x1 = xs[i];
+      const y1 = ys[i];
+      const r1 = radii[i];
+      const r1Sq = r1 * r1;
+      const maxReachBase = r1 + tol;
+
+      for (let j = i + 1; j < total; j += 1) {
+        const other = sorted[j];
+        const dx = xs[j] - x1;
+        const r2 = radii[j];
+        const r2Sq = radiiSq[j];
+        const breakReach = maxReachBase + suffixMaxRadius[j];
+        if (dx > breakReach) {
+          break;
+        }
+        const reach = r1 + r2 + tol;
+        const dy = ys[j] - y1;
+        if (Math.abs(dy) > reach) {
           continue;
         }
-        const other = all[j];
-        const dist = Complex.abs(Complex.sub(circle.center, other.center));
-        if (dist <= circle.radius + other.radius + tol) {
-          candidates.push(other);
+
+        const distSq = dx * dx + dy * dy;
+        if (distSq <= tolSq) {
+          continue;
+        }
+
+        const dist = Math.sqrt(distSq);
+        if (dist > reach) {
+          continue;
+        }
+
+        const diffR = Math.abs(r1 - r2);
+        if (dist < diffR - tol) {
+          continue;
+        }
+
+        const a = (r1Sq - r2Sq + distSq) / (2 * dist);
+        let hSq = r1Sq - a * a;
+        if (hSq < 0) {
+          if (hSq < -tol) {
+            continue;
+          }
+          hSq = 0;
+        }
+        const h = hSq === 0 ? 0 : Math.sqrt(hSq);
+
+        const ratio = a / dist;
+        const midX = x1 + dx * ratio;
+        const midY = y1 + dy * ratio;
+        const invD = 1 / dist;
+        const ux = dx * invD;
+        const uy = dy * invD;
+        const perpX = -uy;
+        const perpY = ux;
+
+        const p1 = { re: midX + perpX * h, im: midY + perpY * h };
+        circle.addIntersection(p1, other);
+        other.addIntersection(p1, circle);
+
+        if (h > tol) {
+          const p2 = { re: midX - perpX * h, im: midY - perpY * h };
+          circle.addIntersection(p2, other);
+          other.addIntersection(p2, circle);
         }
       }
-      circle.computeIntersections(candidates, Complex.ZERO, tol);
+    }
+
+    for (const circle of all) {
+      circle.finalizeIntersections(Complex.ZERO);
     }
   }
 
@@ -1415,6 +1689,94 @@ class DoyleSpiralEngine {
     return mapping;
   }
 
+  _ringTemplateKey(ringIndex, arcsToDraw) {
+    const signature = (arcsToDraw || [])
+      .map(pair => (Array.isArray(pair) ? `${pair[0]}-${pair[1]}` : String(pair)))
+      .join('|');
+    return `${ringIndex}|${this.arcMode}|${this.numGaps}|${signature}`;
+  }
+
+  _normalisePointsForTemplate(points, center, radius) {
+    if (!points || !points.length || !center || !radius) {
+      return null;
+    }
+    const invRadius = 1 / radius;
+    const out = new Float64Array(points.length * 2);
+    for (let idx = 0; idx < points.length; idx += 1) {
+      const diff = Complex.sub(points[idx], center);
+      out[idx * 2] = diff.re * invRadius;
+      out[idx * 2 + 1] = diff.im * invRadius;
+    }
+    return out;
+  }
+
+  _buildRingTemplate(circle, group, arcs, arcsToDraw) {
+    if (!circle || !group || !arcs || !arcs.length) {
+      return null;
+    }
+    const center = circle.center;
+    const radius = circle.radius || 1;
+    const normalizedArcs = [];
+    const arcPointCounts = [];
+    for (const arc of arcs) {
+      const pts = arc.getPoints();
+      const normalised = this._normalisePointsForTemplate(pts, center, radius);
+      normalizedArcs.push(normalised);
+      arcPointCounts.push((pts && pts.length) || 0);
+    }
+    const outlinePoints = group.getClosedOutline();
+    const normalizedOutline = this._normalisePointsForTemplate(outlinePoints, center, radius);
+    let referenceVector = { re: 1, im: 0 };
+    if (normalizedArcs.length && normalizedArcs[0] && normalizedArcs[0].length >= 2) {
+      const x = normalizedArcs[0][0];
+      const y = normalizedArcs[0][1];
+      const len = Math.hypot(x, y);
+      if (len > 1e-9) {
+        referenceVector = { re: x / len, im: y / len };
+      }
+    }
+    return {
+      normalizedArcs,
+      normalizedOutline,
+      referenceVector,
+      referenceArcIndex: 0,
+      arcPointCounts,
+      signature: (arcsToDraw || []).map(([i, j]) => `${i}-${j}`).join('|'),
+    };
+  }
+
+  _computeTemplateTransform(template, circle, arcsToDraw) {
+    if (!template || !circle || !arcsToDraw || !arcsToDraw.length) {
+      return null;
+    }
+    const refIdx = Math.min(template.referenceArcIndex || 0, arcsToDraw.length - 1);
+    const [startIdx] = arcsToDraw[refIdx];
+    const entry = circle.intersections[startIdx];
+    if (!entry || !entry[0]) {
+      return null;
+    }
+    const startPoint = entry[0];
+    const center = circle.center;
+    const vec = Complex.sub(startPoint, center);
+    const len = Math.hypot(vec.re, vec.im);
+    if (len < 1e-9) {
+      return { cos: 1, sin: 0, radius: circle.radius, center };
+    }
+    const normActual = { re: vec.re / len, im: vec.im / len };
+    const base = template.referenceVector || { re: 1, im: 0 };
+    const dot = clamp(base.re * normActual.re + base.im * normActual.im, -1, 1);
+    const cross = base.re * normActual.im - base.im * normActual.re;
+    const norm = Math.hypot(dot, cross);
+    const cos = norm > 1e-12 ? dot / norm : 1;
+    const sin = norm > 1e-12 ? cross / norm : 0;
+    return {
+      cos,
+      sin,
+      radius: circle.radius,
+      center,
+    };
+  }
+
   _createArcGroupsForCircles(radiusToRing, spiralCenter, debugGroups, addFillPattern, drawGroupOutline, context) {
     for (const circle of this.circles) {
       if (circle.intersections.length !== 6) {
@@ -1432,14 +1794,38 @@ class DoyleSpiralEngine {
         group.debugFill = colorFromSeed(circle.id);
         group.debugStroke = '#000000';
       }
+      const arcs = [];
       for (const [i, j] of arcsToDraw) {
         const start = circle.intersections[i][0];
         const end = circle.intersections[j][0];
-        const arc = new ArcElement(circle, start, end, 40, true);
+        const steps = estimateArcSteps(circle, start, end);
+        const arc = new ArcElement(circle, start, end, steps, true);
         if (!addFillPattern && drawGroupOutline) {
           context.drawScaled(arc);
         }
         group.addArc(arc);
+        arcs.push(arc);
+      }
+
+      const templateKey = this._ringTemplateKey(group.ringIndex ?? -1, arcsToDraw);
+      let template = this._ringTemplates.get(templateKey) || null;
+      let preserveCache = false;
+      if (!template) {
+        template = this._buildRingTemplate(circle, group, arcs, arcsToDraw);
+        if (template) {
+          this._ringTemplates.set(templateKey, template);
+          preserveCache = true;
+        }
+      }
+
+      if (template) {
+        const transform = this._computeTemplateTransform(template, circle, arcsToDraw);
+        if (transform) {
+          group.setTemplate(template, transform, preserveCache);
+          for (let idx = 0; idx < arcs.length; idx += 1) {
+            arcs[idx].applyTemplate(template, transform, idx, { preserveCache });
+          }
+        }
       }
     }
   }
@@ -1460,7 +1846,8 @@ class DoyleSpiralEngine {
       distances.sort((a, b) => a.dist - b.dist);
       for (let idx = 1; idx < Math.min(3, distances.length); idx += 1) {
         const { i, j } = distances[idx];
-        const arc = new ArcElement(circle, pts[i], pts[j], 40, true);
+        const steps = estimateArcSteps(circle, pts[i], pts[j]);
+        const arc = new ArcElement(circle, pts[i], pts[j], steps, true);
         if (redOutline || (!addFillPattern && drawGroupOutline)) {
           const color = redOutline ? '#ff0000' : '#000000';
           context.drawScaled(arc, { color, width: 1.2 });
@@ -1532,7 +1919,8 @@ class DoyleSpiralEngine {
         const [i, j] = arcs[arcIndex];
         const start = neighbour.intersections[i][0];
         const end = neighbour.intersections[j][0];
-        const arc = new ArcElement(neighbour, start, end, 40, true);
+        const steps = estimateArcSteps(neighbour, start, end);
+        const arc = new ArcElement(neighbour, start, end, steps, true);
         group.addArc(arc);
       }
     }
@@ -1552,6 +1940,7 @@ class DoyleSpiralEngine {
     context.setNormalizationScale(this.circles.concat(this.outerCircles));
     this.fillPatternAngle = fillPatternAngle;
     this.arcGroups.clear();
+    this._ringTemplates = new Map();
 
     const spiralCenter = Complex.ZERO;
     const radiusToRing = this._computeRingIndices();
