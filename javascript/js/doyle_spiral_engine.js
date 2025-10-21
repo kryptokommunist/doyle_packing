@@ -319,6 +319,29 @@ function insetPolygon(points, offset) {
   return cleaned;
 }
 
+function estimateArcSteps(circle, start, end) {
+  if (!circle || circle.radius <= 0 || !start || !end) {
+    return 12;
+  }
+  const center = circle.center || Complex.ZERO;
+  const startAngle = Complex.angle(Complex.sub(start, center));
+  const endAngle = Complex.angle(Complex.sub(end, center));
+  let delta = (endAngle - startAngle) % (2 * Math.PI);
+  if (delta < 0) {
+    delta += 2 * Math.PI;
+  }
+  if (delta > Math.PI) {
+    delta = 2 * Math.PI - delta;
+  }
+  const arcLength = Math.abs(delta) * circle.radius;
+  if (!Number.isFinite(arcLength) || arcLength <= 0) {
+    return 12;
+  }
+  const desiredSegmentLength = clamp(circle.radius * 0.12, 6, 30);
+  const rawSteps = Math.ceil(arcLength / desiredSegmentLength);
+  return clamp(rawSteps, 10, 44);
+}
+
 function lineSegmentIntersection(p1, p2, p3, p4) {
   const x1 = p1.x;
   const y1 = p1.y;
@@ -390,6 +413,7 @@ function linesInPolygon(polygonPoints, spacing, angleDeg, offset = 0) {
   if (!polygonPoints || polygonPoints.length < 3) {
     return [];
   }
+
   const spacingAbs = Math.abs(spacing);
   if (spacingAbs < 1e-9) {
     return [];
@@ -400,103 +424,108 @@ function linesInPolygon(polygonPoints, spacing, angleDeg, offset = 0) {
     return [];
   }
 
-  const orientation = polygonSignedArea(working) >= 0 ? 1 : -1;
-
   const angle = degToRad(angleDeg);
-  const lineDir = { x: Math.cos(angle), y: Math.sin(angle) };
-  const perpDir = { x: -lineDir.y, y: lineDir.x };
+  const cosAngle = Math.cos(angle);
+  const sinAngle = Math.sin(angle);
 
-  let minX = Infinity;
+  const rotatePoint = point => ({
+    x: point.x * cosAngle + point.y * sinAngle,
+    y: -point.x * sinAngle + point.y * cosAngle,
+  });
+
+  const unrotatePoint = point => ({
+    x: point.x * cosAngle - point.y * sinAngle,
+    y: point.x * sinAngle + point.y * cosAngle,
+  });
+
+  const rotated = working.map(rotatePoint);
+  const centroid = polygonCentroid(working);
+  const centroidRot = rotatePoint(centroid);
+
   let minY = Infinity;
-  let maxX = -Infinity;
   let maxY = -Infinity;
-  for (const p of working) {
-    minX = Math.min(minX, p.x);
-    minY = Math.min(minY, p.y);
-    maxX = Math.max(maxX, p.x);
-    maxY = Math.max(maxY, p.y);
+  for (const pt of rotated) {
+    if (pt.y < minY) {
+      minY = pt.y;
+    }
+    if (pt.y > maxY) {
+      maxY = pt.y;
+    }
   }
 
-  const bboxDiag = Math.hypot(maxX - minX, maxY - minY);
-  if (!Number.isFinite(bboxDiag) || bboxDiag <= 0) {
+  if (!Number.isFinite(minY) || !Number.isFinite(maxY) || maxY - minY < 1e-9) {
     return [];
   }
-  const centroid = polygonCentroid(working);
-  const span = { x: lineDir.x * bboxDiag * 2, y: lineDir.y * bboxDiag * 2 };
-  const startBase = { x: centroid.x - span.x, y: centroid.y - span.y };
-  const endBase = { x: centroid.x + span.x, y: centroid.y + span.y };
+
+  const edges = [];
+  const count = rotated.length;
+  for (let i = 0; i < count; i += 1) {
+    const a = rotated[i];
+    const b = rotated[(i + 1) % count];
+    const dy = b.y - a.y;
+    if (Math.abs(dy) < 1e-9) {
+      continue;
+    }
+    const minEdgeY = Math.min(a.y, b.y);
+    const maxEdgeY = Math.max(a.y, b.y);
+    edges.push({
+      x1: a.x,
+      y1: a.y,
+      dx: b.x - a.x,
+      dy,
+      invDy: 1 / dy,
+      minY: minEdgeY,
+      maxY: maxEdgeY,
+    });
+  }
+
+  if (!edges.length) {
+    return [];
+  }
 
   const effectiveSpacing = Math.max(spacingAbs, 1e-6);
-  const numLines = Math.floor(bboxDiag / effectiveSpacing) + 3;
+  const startIndex = Math.floor((minY - centroidRot.y) / effectiveSpacing) - 1;
+  const endIndex = Math.ceil((maxY - centroidRot.y) / effectiveSpacing) + 1;
+
   const segments = [];
-  for (let i = -numLines; i <= numLines; i += 1) {
-    const offsetX = perpDir.x * effectiveSpacing * i;
-    const offsetY = perpDir.y * effectiveSpacing * i;
-    const start = { x: startBase.x + offsetX, y: startBase.y + offsetY };
-    const end = { x: endBase.x + offsetX, y: endBase.y + offsetY };
-    const intersections = findLinePolygonIntersections(
-      start,
-      end,
-      working,
-      lineDir,
-      orientation,
-    );
+  for (let idx = startIndex; idx <= endIndex; idx += 1) {
+    const yLine = centroidRot.y + idx * effectiveSpacing;
+    if (yLine < minY - effectiveSpacing || yLine > maxY + effectiveSpacing) {
+      continue;
+    }
+
+    const intersections = [];
+    for (const edge of edges) {
+      if (yLine < edge.minY || yLine >= edge.maxY) {
+        continue;
+      }
+      const t = (yLine - edge.y1) * edge.invDy;
+      const x = edge.x1 + edge.dx * t;
+      intersections.push(x);
+    }
+
     if (intersections.length < 2) {
       continue;
     }
 
-    const merged = [];
-    const GROUP_TOL = 1e-8;
-    for (const entry of intersections) {
-      const last = merged[merged.length - 1];
-      if (
-        last &&
-        Math.abs(entry.t - last.t) <= GROUP_TOL &&
-        entry.classification === last.classification
-      ) {
-        last.point.x = (last.point.x * last.count + entry.point.x) / (last.count + 1);
-        last.point.y = (last.point.y * last.count + entry.point.y) / (last.count + 1);
-        last.t = (last.t * last.count + entry.t) / (last.count + 1);
-        last.count += 1;
-      } else {
-        merged.push({
-          t: entry.t,
-          point: { x: entry.point.x, y: entry.point.y },
-          classification: entry.classification,
-          count: 1,
-        });
+    intersections.sort((a, b) => a - b);
+
+    for (let i = 0; i + 1 < intersections.length; i += 2) {
+      const xStart = intersections[i];
+      const xEnd = intersections[i + 1];
+      if (!Number.isFinite(xStart) || !Number.isFinite(xEnd)) {
+        continue;
       }
-    }
-
-    if (merged.length < 2) {
-      continue;
-    }
-
-    let activeStart = polygonContains(start, working)
-      ? { x: start.x, y: start.y }
-      : null;
-
-    for (const entry of merged) {
-      const { point, classification } = entry;
-      if (classification > 0) {
-        if (!activeStart) {
-          activeStart = { x: point.x, y: point.y };
-        }
-      } else if (classification < 0) {
-        if (!activeStart) {
-          activeStart = { x: point.x, y: point.y };
-        }
-        if (
-          activeStart &&
-          Math.hypot(activeStart.x - point.x, activeStart.y - point.y) >= 1e-6
-        ) {
-          segments.push([
-            { x: activeStart.x, y: activeStart.y },
-            { x: point.x, y: point.y },
-          ]);
-        }
-        activeStart = null;
+      if (Math.abs(xStart - xEnd) < 1e-6) {
+        continue;
       }
+
+      const startPoint = unrotatePoint({ x: xStart, y: yLine });
+      const endPoint = unrotatePoint({ x: xEnd, y: yLine });
+      segments.push([
+        { x: startPoint.x, y: startPoint.y },
+        { x: endPoint.x, y: endPoint.y },
+      ]);
     }
   }
 
@@ -517,56 +546,67 @@ class CircleElement {
     this.id = ++CIRCLE_ID;
     this.intersections = [];
     this.neighbours = new Set();
+    this._intersectionKeys = null;
   }
 
   _getIntersectionPoints(other, tol = 1e-6) {
-    const d = Complex.abs(Complex.sub(this.center, other.center));
+    const x1 = this.center.re;
+    const y1 = this.center.im;
+    const x2 = other.center.re;
+    const y2 = other.center.im;
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const dSq = dx * dx + dy * dy;
+    const d = Math.sqrt(dSq);
     const r1 = this.radius;
     const r2 = other.radius;
     if (d > r1 + r2 + tol || d < Math.abs(r1 - r2) - tol || d < tol) {
       return [];
     }
-    const a = (r1 * r1 - r2 * r2 + d * d) / (2 * d);
+    const a = (r1 * r1 - r2 * r2 + dSq) / (2 * d);
     const hSq = r1 * r1 - a * a;
     if (hSq < -tol) {
       return [];
     }
     const h = Math.sqrt(Math.max(hSq, 0));
-    const mid = Complex.add(
-      this.center,
-      Complex.mulScalar(Complex.sub(other.center, this.center), a / d),
-    );
-    const perpUnit = Complex.mulScalar(Complex.sub(other.center, this.center), 1 / d);
-    const perp = { re: -perpUnit.im, im: perpUnit.re };
-    const p1 = Complex.add(mid, Complex.mulScalar(perp, h));
+    const ratio = a / d;
+    const midX = x1 + dx * ratio;
+    const midY = y1 + dy * ratio;
+    const invD = d === 0 ? 0 : 1 / d;
+    const ux = dx * invD;
+    const uy = dy * invD;
+    const perpX = -uy;
+    const perpY = ux;
+    const p1 = { re: midX + perpX * h, im: midY + perpY * h };
     if (h < tol) {
       return [p1];
     }
-    const p2 = Complex.sub(mid, Complex.mulScalar(perp, h));
+    const p2 = { re: midX - perpX * h, im: midY - perpY * h };
     return [p1, p2];
   }
 
-  computeIntersections(circles, startReference = Complex.ZERO, tol = 1e-3) {
+  resetIntersections() {
     this.intersections = [];
     this.neighbours.clear();
-    const seen = new Set();
+    this._intersectionKeys = new Set();
+  }
 
-    for (const other of circles) {
-      if (other === this) {
-        continue;
-      }
-      const pts = this._getIntersectionPoints(other, tol);
-      for (const pt of pts) {
-        const key = `${pt.re.toFixed(6)}_${pt.im.toFixed(6)}`;
-        if (!seen.has(key)) {
-          this.intersections.push([pt, other]);
-          seen.add(key);
-          this.neighbours.add(other);
-        }
-      }
+  addIntersection(point, other) {
+    if (!point || !other || !this._intersectionKeys) {
+      return;
     }
+    const key = `${point.re.toFixed(6)}_${point.im.toFixed(6)}`;
+    if (this._intersectionKeys.has(key)) {
+      return;
+    }
+    this._intersectionKeys.add(key);
+    this.intersections.push([point, other]);
+    this.neighbours.add(other);
+  }
 
+  finalizeIntersections(startReference = Complex.ZERO) {
     if (!this.intersections.length) {
+      this._intersectionKeys = null;
       return;
     }
 
@@ -594,6 +634,24 @@ class CircleElement {
       const angB = Complex.angle(Complex.sub(b[0], c));
       return clockwiseOffset(angA) - clockwiseOffset(angB);
     });
+
+    this._intersectionKeys = null;
+  }
+
+  computeIntersections(circles, startReference = Complex.ZERO, tol = 1e-3) {
+    this.resetIntersections();
+
+    for (const other of circles) {
+      if (other === this) {
+        continue;
+      }
+      const pts = this._getIntersectionPoints(other, tol);
+      for (const pt of pts) {
+        this.addIntersection(pt, other);
+      }
+    }
+
+    this.finalizeIntersections(startReference);
   }
 
   getNeighbourCircles(k = null, spiralCenter = Complex.ZERO, clockwise = true, tieByDistance = true) {
@@ -1376,20 +1434,85 @@ class DoyleSpiralEngine {
       return;
     }
     const tol = 1e-3;
-    for (let i = 0; i < all.length; i += 1) {
-      const circle = all[i];
-      const candidates = [];
-      for (let j = 0; j < all.length; j += 1) {
-        if (i === j) {
-          continue;
-        }
-        const other = all[j];
-        const dist = Complex.abs(Complex.sub(circle.center, other.center));
-        if (dist <= circle.radius + other.radius + tol) {
-          candidates.push(other);
+
+    for (const circle of all) {
+      circle.resetIntersections();
+    }
+
+    let maxRadius = 0;
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+    for (const circle of all) {
+      if (circle.radius > maxRadius) {
+        maxRadius = circle.radius;
+      }
+      const x = circle.center.re;
+      const y = circle.center.im;
+      if (x < minX) {
+        minX = x;
+      }
+      if (x > maxX) {
+        maxX = x;
+      }
+      if (y < minY) {
+        minY = y;
+      }
+      if (y > maxY) {
+        maxY = y;
+      }
+    }
+    const spanX = maxX - minX;
+    const spanY = maxY - minY;
+    const extent = Math.max(spanX, spanY);
+    const approxCell = extent > 0 && all.length > 0 ? extent / Math.sqrt(all.length) : maxRadius;
+    const minCell = Math.max(maxRadius * 0.5, 1e-3);
+    const maxCell = Math.max(maxRadius * 4, 1e-3);
+    const cellSize = clamp(approxCell || maxRadius || 1, minCell, maxCell);
+    const cellKey = (x, y) => `${x},${y}`;
+    const cellIndex = new Map();
+    const grid = new Map();
+
+    for (const circle of all) {
+      const cellX = Math.floor(circle.center.re / cellSize);
+      const cellY = Math.floor(circle.center.im / cellSize);
+      cellIndex.set(circle, { x: cellX, y: cellY });
+      const key = cellKey(cellX, cellY);
+      if (!grid.has(key)) {
+        grid.set(key, []);
+      }
+      grid.get(key).push(circle);
+    }
+
+    for (const circle of all) {
+      const { x: baseX, y: baseY } = cellIndex.get(circle);
+      const range = Math.max(1, Math.ceil((circle.radius + maxRadius) / cellSize));
+      for (let dx = -range; dx <= range; dx += 1) {
+        for (let dy = -range; dy <= range; dy += 1) {
+          const bucket = grid.get(cellKey(baseX + dx, baseY + dy));
+          if (!bucket) {
+            continue;
+          }
+          for (const other of bucket) {
+            if (other === circle || other.id <= circle.id) {
+              continue;
+            }
+            const pts = circle._getIntersectionPoints(other, tol);
+            if (!pts.length) {
+              continue;
+            }
+            for (const pt of pts) {
+              circle.addIntersection(pt, other);
+              other.addIntersection(pt, circle);
+            }
+          }
         }
       }
-      circle.computeIntersections(candidates, Complex.ZERO, tol);
+    }
+
+    for (const circle of all) {
+      circle.finalizeIntersections(Complex.ZERO);
     }
   }
 
@@ -1435,7 +1558,8 @@ class DoyleSpiralEngine {
       for (const [i, j] of arcsToDraw) {
         const start = circle.intersections[i][0];
         const end = circle.intersections[j][0];
-        const arc = new ArcElement(circle, start, end, 40, true);
+        const steps = estimateArcSteps(circle, start, end);
+        const arc = new ArcElement(circle, start, end, steps, true);
         if (!addFillPattern && drawGroupOutline) {
           context.drawScaled(arc);
         }
@@ -1460,7 +1584,8 @@ class DoyleSpiralEngine {
       distances.sort((a, b) => a.dist - b.dist);
       for (let idx = 1; idx < Math.min(3, distances.length); idx += 1) {
         const { i, j } = distances[idx];
-        const arc = new ArcElement(circle, pts[i], pts[j], 40, true);
+        const steps = estimateArcSteps(circle, pts[i], pts[j]);
+        const arc = new ArcElement(circle, pts[i], pts[j], steps, true);
         if (redOutline || (!addFillPattern && drawGroupOutline)) {
           const color = redOutline ? '#ff0000' : '#000000';
           context.drawScaled(arc, { color, width: 1.2 });
@@ -1532,7 +1657,8 @@ class DoyleSpiralEngine {
         const [i, j] = arcs[arcIndex];
         const start = neighbour.intersections[i][0];
         const end = neighbour.intersections[j][0];
-        const arc = new ArcElement(neighbour, start, end, 40, true);
+        const steps = estimateArcSteps(neighbour, start, end);
+        const arc = new ArcElement(neighbour, start, end, steps, true);
         group.addArc(arc);
       }
     }
