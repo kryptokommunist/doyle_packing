@@ -273,6 +273,80 @@
       height: 100%;
     }
 
+    .svg-host {
+      flex: 1 1 auto;
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+
+    .svg-workspace {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      flex: 1 1 auto;
+      min-height: 0;
+    }
+
+    .svg-host::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      border-radius: 1rem;
+    }
+
+    .animate-active::after {
+      box-shadow: inset 0 0 0 2px rgba(37, 99, 235, 0.2);
+    }
+
+    .svg-preview-wrapper,
+    .svg-empty-wrapper {
+      flex: 1 1 auto;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+    }
+
+    .svg-workspace.animate-mode .arcgroup-overlay {
+      pointer-events: auto;
+    }
+
+    .arcgroup-overlay {
+      pointer-events: none;
+    }
+
+    .arcgroup-overlay polygon {
+      fill: rgba(255, 215, 0, 0);
+      stroke: none;
+      cursor: pointer;
+      transition: fill 0.25s ease, opacity 0.25s ease;
+    }
+
+    .arcgroup-overlay polygon:hover {
+      fill: rgba(255, 215, 0, 0.18);
+    }
+
+    .arcgroup-overlay polygon.arc-selected {
+      fill: rgba(255, 215, 0, 0.3);
+    }
+
+    .arcgroup-overlay polygon.arc-active {
+      fill: rgba(255, 215, 0, 0.5);
+    }
+
+    .arcgroup-overlay polygon.arc-flash {
+      animation: arcFlash 0.9s ease;
+    }
+
+    @keyframes arcFlash {
+      0% { fill: rgba(255, 215, 0, 0.4); }
+      50% { fill: rgba(255, 215, 0, 0.8); }
+      100% { fill: rgba(255, 215, 0, 0.25); }
+    }
+
     .empty-state {
       text-align: center;
       color: var(--text-muted);
@@ -304,6 +378,216 @@
     .three-card {
       padding: 1.5rem;
       gap: 1.25rem;
+    }
+
+    .animate-card {
+      padding: 1.5rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+    }
+
+    .animate-layout {
+      flex: 1 1 auto;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(260px, 320px);
+      gap: 1.5rem;
+      min-height: 420px;
+    }
+
+    .animation-panel {
+      background: rgba(248, 250, 252, 0.9);
+      border-radius: 1.25rem;
+      border: 1px solid rgba(148, 163, 184, 0.25);
+      padding: 1.2rem 1.3rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1.1rem;
+    }
+
+    .animation-panel h2 {
+      font-size: 0.9rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+    }
+
+    .animation-controls {
+      display: grid;
+      gap: 0.75rem;
+    }
+
+    .animation-controls select,
+    .animation-controls button {
+      width: 100%;
+    }
+
+    .animation-controls .dual-actions {
+      display: flex;
+      gap: 0.6rem;
+      flex-wrap: wrap;
+    }
+
+    .animation-controls .dual-actions button {
+      flex: 1 1 auto;
+    }
+
+    .animate-stage {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+      min-height: 0;
+    }
+
+    .timeline-panel {
+      background: rgba(255, 255, 255, 0.82);
+      border-radius: 1.15rem;
+      border: 1px solid rgba(148, 163, 184, 0.22);
+      padding: 1rem 1.2rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
+    }
+
+    .timeline-controls {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+      gap: 0.75rem;
+      align-items: center;
+    }
+
+    .timeline-controls button {
+      width: 100%;
+    }
+
+    #animationFrameSlider {
+      width: 100%;
+      accent-color: var(--accent);
+    }
+
+    .timeline-viewport {
+      position: relative;
+      overflow: hidden;
+      border-radius: 1rem;
+      background: rgba(148, 163, 184, 0.08);
+      border: 1px solid rgba(148, 163, 184, 0.16);
+      min-height: 168px;
+    }
+
+    .timeline-track {
+      display: flex;
+      width: 100%;
+      height: 100%;
+      transition: transform 0.35s ease;
+      align-items: stretch;
+    }
+
+    .timeline-track.empty::before {
+      content: 'Add frames to begin.';
+      color: var(--text-muted);
+      font-size: 0.85rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      height: 100%;
+      padding: 1rem;
+      text-align: center;
+    }
+
+    .frame-card {
+      background: rgba(255, 255, 255, 0.8);
+      border: 1px solid rgba(148, 163, 184, 0.25);
+      border-radius: 1.1rem;
+      padding: 0.9rem 1rem;
+      display: grid;
+      gap: 0.6rem;
+      transition: border-color 0.2s ease, box-shadow 0.2s ease;
+      min-height: 160px;
+      box-sizing: border-box;
+    }
+
+    .timeline-track .frame-card {
+      flex: 0 0 100%;
+    }
+
+    .frame-card.active {
+      border-color: rgba(37, 99, 235, 0.4);
+      box-shadow: 0 12px 24px rgba(37, 99, 235, 0.18);
+    }
+
+    .frame-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.85rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-muted);
+    }
+
+    .frame-groups {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+
+    .frame-group {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+      padding: 0.35rem 0.6rem;
+      border-radius: 999px;
+      background: rgba(37, 99, 235, 0.12);
+      color: var(--text-strong);
+      font-size: 0.8rem;
+      line-height: 1;
+    }
+
+    .frame-group.ghost button {
+      display: none;
+    }
+
+    .frame-group button {
+      background: none;
+      border: none;
+      font-size: 0.8rem;
+      color: inherit;
+      cursor: pointer;
+      padding: 0;
+      width: 1.1rem;
+      height: 1.1rem;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 999px;
+    }
+
+    .frame-group[data-strength] {
+      --strength: attr(data-strength number);
+    }
+
+    .frame-group[data-strength] {
+      background: rgba(255, 215, 0, calc(0.6 * var(--strength)));
+      color: #5b4000;
+    }
+
+    .frame-footer {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      display: flex;
+      justify-content: space-between;
+    }
+
+    .animation-actions {
+      display: flex;
+      flex-direction: column;
+      gap: 0.6rem;
+    }
+
+    .animation-actions button {
+      width: 100%;
     }
 
     .three-top {
@@ -423,6 +707,12 @@
       }
       .three-stage {
         grid-template-columns: 1fr;
+      }
+      .animate-layout {
+        grid-template-columns: 1fr;
+      }
+      .animation-panel {
+        order: -1;
       }
     }
 
@@ -552,10 +842,59 @@
         <div class="view-toggle" role="group" aria-label="Preview mode">
           <button type="button" class="active" data-view="2d" aria-pressed="true">2D SVG</button>
           <button type="button" data-view="3d" aria-pressed="false">3D View</button>
+          <button type="button" data-view="animate" aria-pressed="false">Animate</button>
         </div>
 
         <div class="preview-card" id="view2d">
-          <div id="svgPreview" class="empty-state">Rendering spiral…</div>
+          <div class="svg-host" id="svg2dHost">
+            <div id="svgWorkspace" class="svg-workspace">
+              <div class="svg-preview-wrapper">
+                <div id="svgPreview" class="empty-state">Rendering spiral…</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="preview-card animate-card" id="viewAnimate" hidden>
+          <div class="animate-layout">
+            <div class="animate-stage">
+              <div class="svg-host" id="svgAnimateHost"></div>
+              <div class="timeline-panel">
+                <div class="timeline-controls">
+                  <button type="button" class="secondary" id="animationPrevFrame">Previous frame</button>
+                  <button type="button" id="animationPlayPause">Play</button>
+                  <button type="button" class="secondary" id="animationNextFrame">Next frame</button>
+                </div>
+                <input type="range" id="animationFrameSlider" min="1" max="1" value="1" step="1" />
+                <div class="timeline-viewport" id="animationTimelineViewport">
+                  <div class="timeline-track empty" id="animationFrames" aria-live="polite"></div>
+                </div>
+              </div>
+            </div>
+            <aside class="animation-panel" id="animationPanel">
+              <h2>Animate arcs</h2>
+              <div class="animation-controls">
+                <div class="field-group">
+                  <label for="animationPreset">Preset sequences</label>
+                  <select id="animationPreset">
+                    <option value="manual" selected>Manual selection</option>
+                    <option value="alternating_rings">Alternating rings</option>
+                    <option value="spiral_arms">Spiral arms sweep</option>
+                    <option value="ring_wave">Ring wave</option>
+                    <option value="radiant_spokes">Radiant spokes</option>
+                  </select>
+                </div>
+                <div class="dual-actions">
+                  <button type="button" class="secondary" id="animationAddFrame">Add frame</button>
+                  <button type="button" class="secondary" id="animationClear">Clear timeline</button>
+                </div>
+              </div>
+              <div class="animation-actions">
+                <button type="button" id="animationGenerate">Animate selection</button>
+                <div class="status" id="animationStatus">Use the frame slider below and click arcs to build the sequence.</div>
+              </div>
+            </aside>
+          </div>
         </div>
 
         <div class="stats" id="stats" hidden>
