@@ -862,6 +862,29 @@ class ArcGroup {
     this.templateTransform = null;
   }
 
+  static _decodeNormalisedOutline(template) {
+    const outline = template?.normalizedOutline;
+    if (!outline || !outline.length) {
+      return null;
+    }
+    if (template._normalizedOutlinePoints) {
+      return template._normalizedOutlinePoints;
+    }
+    const points = new Array(outline.length / 2);
+    for (let idx = 0; idx < outline.length; idx += 2) {
+      points[idx / 2] = { x: outline[idx], y: outline[idx + 1] };
+    }
+    template._normalizedOutlinePoints = points;
+    return points;
+  }
+
+  static _templateCacheKey(spacing, angle, offset) {
+    const keySpacing = Number.isFinite(spacing) ? spacing.toFixed(6) : 'nan';
+    const keyAngle = Number.isFinite(angle) ? angle.toFixed(6) : 'nan';
+    const keyOffset = Number.isFinite(offset) ? offset.toFixed(6) : 'nan';
+    return `${keySpacing}|${keyAngle}|${keyOffset}`;
+  }
+
   addArc(arc) {
     this.arcs.push(arc);
     this._outlineCache = null;
@@ -1043,15 +1066,22 @@ class ArcGroup {
       return;
     }
     if (patternFill) {
-      const stroke = this.debugStroke || '#000000';
-      context.drawGroupOutline(outline, {
-        fill: 'pattern',
-        stroke,
-        strokeWidth: 0.8,
-        linePatternSettings: lineSettings,
+      const handled = this._drawPatternFillFromTemplate(context, outline, {
+        lineSettings,
         drawOutline,
         lineOffset,
       });
+      if (!handled) {
+        const stroke = this.debugStroke || '#000000';
+        context.drawGroupOutline(outline, {
+          fill: 'pattern',
+          stroke,
+          strokeWidth: 0.8,
+          linePatternSettings: lineSettings,
+          drawOutline,
+          lineOffset,
+        });
+      }
       return;
     }
     if (drawOutline) {
@@ -1061,6 +1091,109 @@ class ArcGroup {
         strokeWidth: 0.6,
       });
     }
+  }
+
+  _drawPatternFillFromTemplate(context, outline, {
+    lineSettings = [3, 0],
+    drawOutline = true,
+    lineOffset = 0,
+  } = {}) {
+    const template = this.template;
+    const transform = this.templateTransform;
+    if (!context?.hasDOM || !template || !transform || !template.normalizedOutline) {
+      return false;
+    }
+    const radius = transform.radius || 0;
+    if (!Number.isFinite(radius) || radius <= 0) {
+      return false;
+    }
+    const scale = context.scaleFactor * radius;
+    if (!Number.isFinite(scale) || scale <= 0) {
+      return false;
+    }
+    const [spacing = 3, angleDeg = 0] = Array.isArray(lineSettings) ? lineSettings : [3, 0];
+    if (!Number.isFinite(spacing) || Math.abs(spacing) < 1e-6) {
+      if (drawOutline) {
+        const stroke = this.debugStroke || '#000000';
+        context.drawGroupOutline(outline, {
+          fill: null,
+          stroke,
+          strokeWidth: 0.8,
+        });
+      }
+      return true;
+    }
+
+    const templateAngleRad = Math.atan2(transform.sin, transform.cos);
+    const normalizedSpacing = spacing / scale;
+    const normalizedOffset = lineOffset / scale;
+    const normalizedAngle = angleDeg - (templateAngleRad * 180) / Math.PI;
+
+    const cache = template.patternCache || (template.patternCache = new Map());
+    const cacheKey = ArcGroup._templateCacheKey(
+      normalizedSpacing,
+      normalizedAngle,
+      normalizedOffset,
+    );
+    let normalizedSegments = cache.get(cacheKey) || null;
+    if (!normalizedSegments) {
+      const normalizedPoints = ArcGroup._decodeNormalisedOutline(template);
+      if (!normalizedPoints) {
+        return false;
+      }
+      normalizedSegments = linesInPolygon(
+        normalizedPoints,
+        normalizedSpacing,
+        normalizedAngle,
+        normalizedOffset,
+      );
+      cache.set(cacheKey, normalizedSegments);
+    }
+
+    const stroke = this.debugStroke || '#000000';
+    if (drawOutline) {
+      context.drawGroupOutline(outline, {
+        fill: null,
+        stroke,
+        strokeWidth: 0.8,
+      });
+    }
+
+    if (!normalizedSegments || !normalizedSegments.length) {
+      return true;
+    }
+
+    const cos = transform.cos;
+    const sin = transform.sin;
+    const scaleFactor = scale;
+    const centerScaled = context._scaled(transform.center);
+    const path = document.createElementNS(SVG_NS, 'path');
+    let data = '';
+    for (const [start, end] of normalizedSegments) {
+      const sx = start.x;
+      const sy = start.y;
+      const ex = end.x;
+      const ey = end.y;
+      const rx1 = sx * cos - sy * sin;
+      const ry1 = sx * sin + sy * cos;
+      const rx2 = ex * cos - ey * sin;
+      const ry2 = ex * sin + ey * cos;
+      const x1 = centerScaled.x + rx1 * scaleFactor;
+      const y1 = centerScaled.y + ry1 * scaleFactor;
+      const x2 = centerScaled.x + rx2 * scaleFactor;
+      const y2 = centerScaled.y + ry2 * scaleFactor;
+      data += `M${x1.toFixed(4)},${y1.toFixed(4)}L${x2.toFixed(4)},${y2.toFixed(4)} `;
+    }
+    if (!data) {
+      return true;
+    }
+    path.setAttribute('d', data.trim());
+    path.setAttribute('stroke', stroke);
+    path.setAttribute('stroke-width', '0.5');
+    path.setAttribute('stroke-linecap', 'round');
+    path.setAttribute('fill', 'none');
+    context.mainGroup.appendChild(path);
+    return true;
   }
 }
 
@@ -1206,16 +1339,20 @@ class DrawingContext {
         this.mainGroup.appendChild(polygon);
       }
       const lineColor = stroke || '#000000';
-      for (const [p1, p2] of segments) {
-        const line = document.createElementNS(SVG_NS, 'line');
-        line.setAttribute('x1', p1.x.toFixed(4));
-        line.setAttribute('y1', p1.y.toFixed(4));
-        line.setAttribute('x2', p2.x.toFixed(4));
-        line.setAttribute('y2', p2.y.toFixed(4));
-        line.setAttribute('stroke', lineColor);
-        line.setAttribute('stroke-width', '0.5');
-        line.setAttribute('stroke-linecap', 'round');
-        this.mainGroup.appendChild(line);
+      if (segments.length) {
+        const path = document.createElementNS(SVG_NS, 'path');
+        let data = '';
+        for (const [p1, p2] of segments) {
+          data += `M${p1.x.toFixed(4)},${p1.y.toFixed(4)}L${p2.x.toFixed(4)},${p2.y.toFixed(4)} `;
+        }
+        if (data) {
+          path.setAttribute('d', data.trim());
+          path.setAttribute('stroke', lineColor);
+          path.setAttribute('stroke-width', '0.5');
+          path.setAttribute('stroke-linecap', 'round');
+          path.setAttribute('fill', 'none');
+          this.mainGroup.appendChild(path);
+        }
       }
       return;
     }
@@ -1960,6 +2097,10 @@ class DoyleSpiralEngine {
           const pts = arc.getPoints();
           return Array.isArray(pts) ? pts.length : 0;
         });
+        template._normalizedOutlinePoints = null;
+        if (template.patternCache) {
+          template.patternCache.clear();
+        }
       }
       processed.add(template);
     }
