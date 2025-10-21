@@ -357,25 +357,11 @@ function findLinePolygonIntersections(start, end, polygon) {
     const p4 = polygon[(i + 1) % polygon.length];
     const intersection = lineSegmentIntersection(start, end, p3, p4);
     if (intersection) {
-      intersections.push(intersection);
+      intersections.push({ ...intersection, edgeIndex: i });
     }
   }
   intersections.sort((a, b) => a.t - b.t);
-  if (intersections.length <= 1) {
-    return intersections;
-  }
-  const unique = [];
-  const seen = new Set();
-  for (const entry of intersections) {
-    const { point } = entry;
-    const key = `${point.x.toFixed(9)}_${point.y.toFixed(9)}`;
-    if (seen.has(key)) {
-      continue;
-    }
-    seen.add(key);
-    unique.push(entry);
-  }
-  return unique;
+  return intersections;
 }
 
 function linesInPolygon(polygonPoints, spacing, angleDeg, offset = 0) {
@@ -425,16 +411,84 @@ function linesInPolygon(polygonPoints, spacing, angleDeg, offset = 0) {
     const start = { x: startBase.x + offsetX, y: startBase.y + offsetY };
     const end = { x: endBase.x + offsetX, y: endBase.y + offsetY };
     const intersections = findLinePolygonIntersections(start, end, working);
-    for (let j = 0; j < intersections.length - 1; j += 2) {
-      const p1 = intersections[j].point;
-      const p2 = intersections[j + 1].point;
-      if (Math.hypot(p1.x - p2.x, p1.y - p2.y) < 1e-6) {
+    if (intersections.length < 2) {
+      continue;
+    }
+
+    const grouped = [];
+    const GROUP_TOL = 1e-8;
+    for (const entry of intersections) {
+      const last = grouped[grouped.length - 1];
+      if (last && Math.abs(entry.t - last.t) <= GROUP_TOL) {
+        last.sumX += entry.point.x;
+        last.sumY += entry.point.y;
+        last.sumT += entry.t;
+        last.count += 1;
+      } else {
+        grouped.push({
+          t: entry.t,
+          sumX: entry.point.x,
+          sumY: entry.point.y,
+          sumT: entry.t,
+          count: 1,
+        });
+      }
+    }
+
+    if (grouped.length < 2) {
+      continue;
+    }
+
+    const processed = grouped.map(item => ({
+      t: item.sumT / item.count,
+      point: {
+        x: item.sumX / item.count,
+        y: item.sumY / item.count,
+      },
+    }));
+
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const EPS_T = 1e-7;
+    let state = polygonContains(start, working);
+    let activeStart = state ? { x: start.x, y: start.y } : null;
+
+    for (const entry of processed) {
+      const { t, point } = entry;
+      const beforeT = Math.max(0, t - EPS_T);
+      const afterT = Math.min(1, t + EPS_T);
+      const beforePoint = {
+        x: start.x + dx * beforeT,
+        y: start.y + dy * beforeT,
+      };
+      const afterPoint = {
+        x: start.x + dx * afterT,
+        y: start.y + dy * afterT,
+      };
+
+      const insideBefore = polygonContains(beforePoint, working);
+      const insideAfter = polygonContains(afterPoint, working);
+
+      if (insideBefore === insideAfter) {
+        state = insideAfter;
         continue;
       }
-      const mid = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
-      if (polygonContains(mid, working)) {
-        segments.push([p1, p2]);
+
+      if (!insideBefore && insideAfter) {
+        activeStart = { x: point.x, y: point.y };
+      } else if (insideBefore && !insideAfter) {
+        const segmentStart = activeStart || { x: point.x, y: point.y };
+        if (
+          Math.hypot(segmentStart.x - point.x, segmentStart.y - point.y) >= 1e-6
+        ) {
+          segments.push([
+            { x: segmentStart.x, y: segmentStart.y },
+            { x: point.x, y: point.y },
+          ]);
+        }
+        activeStart = null;
       }
+      state = insideAfter;
     }
   }
 
