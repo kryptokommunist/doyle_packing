@@ -127,7 +127,39 @@ function polygonCentroid(points) {
   return { x: cx * inv, y: cy * inv };
 }
 
+function pointOnSegment(point, a, b, tolerance = 1e-9) {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const cross = (point.y - a.y) * dx - (point.x - a.x) * dy;
+  if (Math.abs(cross) > tolerance) {
+    return false;
+  }
+  const dot = (point.x - a.x) * dx + (point.y - a.y) * dy;
+  if (dot < -tolerance) {
+    return false;
+  }
+  const lenSq = dx * dx + dy * dy;
+  if (dot > lenSq + tolerance) {
+    return false;
+  }
+  return true;
+}
+
+function pointOnPolygonBoundary(point, polygon, tolerance = 1e-9) {
+  for (let i = 0; i < polygon.length; i += 1) {
+    const a = polygon[i];
+    const b = polygon[(i + 1) % polygon.length];
+    if (pointOnSegment(point, a, b, tolerance)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function polygonContains(point, polygon) {
+  if (pointOnPolygonBoundary(point, polygon)) {
+    return true;
+  }
   // Ray-casting algorithm.
   let inside = false;
   for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i, i += 1) {
@@ -137,7 +169,7 @@ function polygonContains(point, polygon) {
     const yj = polygon[j].y;
     const intersect =
       yi > point.y !== yj > point.y &&
-      point.x < ((xj - xi) * (point.y - yi)) / (yj - yi + 1e-12) + xi;
+      point.x <= ((xj - xi) * (point.y - yi)) / (yj - yi + 1e-12) + xi;
     if (intersect) {
       inside = !inside;
     }
@@ -329,7 +361,21 @@ function findLinePolygonIntersections(start, end, polygon) {
     }
   }
   intersections.sort((a, b) => a.t - b.t);
-  return intersections;
+  if (intersections.length <= 1) {
+    return intersections;
+  }
+  const unique = [];
+  const seen = new Set();
+  for (const entry of intersections) {
+    const { point } = entry;
+    const key = `${point.x.toFixed(9)}_${point.y.toFixed(9)}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    unique.push(entry);
+  }
+  return unique;
 }
 
 function linesInPolygon(polygonPoints, spacing, angleDeg, offset = 0) {
@@ -382,6 +428,9 @@ function linesInPolygon(polygonPoints, spacing, angleDeg, offset = 0) {
     for (let j = 0; j < intersections.length - 1; j += 2) {
       const p1 = intersections[j].point;
       const p2 = intersections[j + 1].point;
+      if (Math.hypot(p1.x - p2.x, p1.y - p2.y) < 1e-6) {
+        continue;
+      }
       const mid = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
       if (polygonContains(mid, working)) {
         segments.push([p1, p2]);
