@@ -712,6 +712,7 @@ class ArcGroup {
     this.debugFill = null;
     this.debugStroke = null;
     this.ringIndex = null;
+    this.lineAngle = 0;
     this._outlineCache = null;
   }
 
@@ -847,6 +848,7 @@ class ArcGroup {
     lineSettings = [3, 0],
     drawOutline = true,
     lineOffset = 0,
+    interactive = false,
   } = {}) {
     const outline = this.getClosedOutline();
     if (!outline.length) {
@@ -860,6 +862,16 @@ class ArcGroup {
         stroke,
         strokeWidth: 0.8,
         fillOpacity,
+        className: interactive ? 'arcgroup-shape' : undefined,
+        dataAttributes: interactive
+          ? {
+              'data-arc-group-id': String(this.id),
+              'data-arc-group-name': this.name,
+              'data-ring-index': this.ringIndex !== null && this.ringIndex !== undefined ? String(this.ringIndex) : '',
+              'data-line-angle': String(this.lineAngle || 0),
+            }
+          : undefined,
+        interactive,
       });
       return;
     }
@@ -872,6 +884,16 @@ class ArcGroup {
         linePatternSettings: lineSettings,
         drawOutline,
         lineOffset,
+        className: interactive ? 'arcgroup-shape' : undefined,
+        dataAttributes: interactive
+          ? {
+              'data-arc-group-id': String(this.id),
+              'data-arc-group-name': this.name,
+              'data-ring-index': this.ringIndex !== null && this.ringIndex !== undefined ? String(this.ringIndex) : '',
+              'data-line-angle': String(this.lineAngle || 0),
+            }
+          : undefined,
+        interactive,
       });
       return;
     }
@@ -880,6 +902,16 @@ class ArcGroup {
         fill: null,
         stroke: '#000000',
         strokeWidth: 0.6,
+        className: interactive ? 'arcgroup-shape' : undefined,
+        dataAttributes: interactive
+          ? {
+              'data-arc-group-id': String(this.id),
+              'data-arc-group-name': this.name,
+              'data-ring-index': this.ringIndex !== null && this.ringIndex !== undefined ? String(this.ringIndex) : '',
+              'data-line-angle': String(this.lineAngle || 0),
+            }
+          : undefined,
+        interactive,
       });
     }
   }
@@ -1001,6 +1033,9 @@ class DrawingContext {
     linePatternSettings = [3, 0],
     drawOutline = true,
     lineOffset = 0,
+    className = undefined,
+    dataAttributes = undefined,
+    interactive = false,
   } = {}) {
     if (!points || !points.length) {
       return;
@@ -1009,6 +1044,46 @@ class DrawingContext {
       return;
     }
     const scaled = points.map(pt => this._scaled(pt));
+
+    const applyMeta = element => {
+      if (!element) {
+        return;
+      }
+      if (className) {
+        className
+          .split(/\s+/)
+          .filter(Boolean)
+          .forEach(cls => element.classList.add(cls));
+      }
+      if (dataAttributes) {
+        Object.entries(dataAttributes).forEach(([key, value]) => {
+          if (value !== undefined && value !== null) {
+            element.setAttribute(key, String(value));
+          }
+        });
+      }
+      if (interactive) {
+        element.classList.add('arcgroup-interactive');
+        element.setAttribute('pointer-events', 'auto');
+      }
+    };
+
+    const createHitArea = () => {
+      const hit = document.createElementNS(SVG_NS, 'polygon');
+      hit.setAttribute('points', scaled.map(p => `${p.x.toFixed(4)},${p.y.toFixed(4)}`).join(' '));
+      hit.setAttribute('fill', 'transparent');
+      hit.setAttribute('stroke', 'none');
+      hit.setAttribute('pointer-events', 'all');
+      hit.classList.add('arcgroup-hitarea');
+      if (dataAttributes) {
+        Object.entries(dataAttributes).forEach(([key, value]) => {
+          if (value !== undefined && value !== null) {
+            hit.setAttribute(key, String(value));
+          }
+        });
+      }
+      return hit;
+    };
 
     if (fill === 'pattern') {
       const segments = linesInPolygon(
@@ -1024,6 +1099,7 @@ class DrawingContext {
         polygon.setAttribute('stroke', stroke || 'none');
         polygon.setAttribute('stroke-width', strokeWidth.toString());
         polygon.setAttribute('stroke-linejoin', 'round');
+        applyMeta(polygon);
         this.mainGroup.appendChild(polygon);
       }
       const lineColor = stroke || '#000000';
@@ -1037,6 +1113,10 @@ class DrawingContext {
         line.setAttribute('stroke-width', '0.5');
         line.setAttribute('stroke-linecap', 'round');
         this.mainGroup.appendChild(line);
+      }
+      if (interactive) {
+        const hitArea = createHitArea();
+        this.mainGroup.appendChild(hitArea);
       }
       return;
     }
@@ -1056,7 +1136,13 @@ class DrawingContext {
     } else {
       polygon.setAttribute('stroke', 'none');
     }
+    applyMeta(polygon);
     this.mainGroup.appendChild(polygon);
+
+    if (interactive) {
+      const hitArea = createHitArea();
+      this.mainGroup.appendChild(hitArea);
+    }
   }
 
   toString() {
@@ -1428,6 +1514,8 @@ class DoyleSpiralEngine {
       const group = this.createGroupForCircle(circle, key);
       const ring = radiusToRing.get(Number(circle.radius.toFixed(6)));
       group.ringIndex = ring !== undefined ? ring : null;
+      const ringIndexValue = group.ringIndex !== null && group.ringIndex !== undefined ? group.ringIndex : 0;
+      group.lineAngle = ringIndexValue * this.fillPatternAngle;
       if (debugGroups) {
         group.debugFill = colorFromSeed(circle.id);
         group.debugStroke = '#000000';
@@ -1587,6 +1675,19 @@ class DoyleSpiralEngine {
           lineSettings: [fillPatternSpacing, angle],
           drawOutline: drawGroupOutline,
           lineOffset: fillPatternOffset,
+          interactive: true,
+        });
+      }
+    } else {
+      for (const [key, group] of this.arcGroups.entries()) {
+        if (key.startsWith('outer_')) {
+          continue;
+        }
+        group.toSVGFill(context, {
+          debug: false,
+          patternFill: false,
+          drawOutline: false,
+          interactive: true,
         });
       }
     }
@@ -1673,7 +1774,7 @@ class DoyleSpiralEngine {
       const outline = group.getClosedOutline();
       const outlinePoints = outline.map(pt => [pt.re, pt.im]);
       const ringIdx = group.ringIndex ?? 0;
-      const lineAngle = ringIdx * this.fillPatternAngle;
+      const lineAngle = group.lineAngle !== undefined ? group.lineAngle : ringIdx * this.fillPatternAngle;
       exportData.arcgroups.push({
         id: group.id,
         name: group.name,
