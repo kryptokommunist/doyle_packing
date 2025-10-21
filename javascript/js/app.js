@@ -70,6 +70,7 @@ let frameIdCounter = 0;
 let playbackHandle = null;
 
 const PLAYBACK_INTERVAL_MS = 750;
+const MAX_FRAME_SCALE_MARKERS = 120;
 
 const animationState = {
   frames: [],
@@ -375,14 +376,14 @@ function refreshOverlayHighlights() {
 
     element.classList.add('arc-assigned');
     element.dataset.assignedFrame = String(assignedFrame);
-    let highlight = 0.18;
+    let highlight = 0;
     let state = 'upcoming';
     if (assignedFrame <= activeIndex) {
       const diff = activeIndex - assignedFrame;
       highlight = Math.pow(0.5, diff);
       state = diff === 0 ? 'active' : 'history';
     }
-    const clamped = Math.max(0, Math.min(0.9, highlight));
+    const clamped = Math.max(0, Math.min(1, highlight));
     element.dataset.highlightState = state;
     element.style.setProperty('--arc-highlight', clamped.toFixed(3));
   });
@@ -461,6 +462,71 @@ function resetAnimationState(geometry, preserveLength = false) {
   }
 }
 
+function updateAnimationGroupMapFromGeometry(geometry) {
+  if (!hasGeometry(geometry)) {
+    animationState.geometry = null;
+    animationState.groupMap = new Map();
+    animationState.assignments.clear();
+    animationState.frames.forEach(frame => {
+      frame.groups = [];
+      frame.angle = null;
+    });
+    return;
+  }
+
+  animationState.geometry = geometry;
+  const map = new Map();
+  geometry.arcgroups.forEach(group => {
+    const id = String(group.id);
+    const ringIndex = Number.isFinite(group.ring_index) ? group.ring_index : null;
+    const lineAngleValue = Number(group.line_angle);
+    map.set(id, {
+      id,
+      ring: ringIndex,
+      name: group.name || `Arc ${id}`,
+      lineAngle: Number.isFinite(lineAngleValue) ? lineAngleValue : 0,
+      ref: group,
+    });
+  });
+  animationState.groupMap = map;
+
+  const validIds = new Set(map.keys());
+  const staleIds = [];
+  animationState.assignments.forEach((_, groupId) => {
+    if (!validIds.has(groupId)) {
+      staleIds.push(groupId);
+    }
+  });
+  staleIds.forEach(groupId => animationState.assignments.delete(groupId));
+
+  animationState.frames.forEach(frame => {
+    frame.groups = frame.groups.filter(groupId => validIds.has(groupId));
+    if (!frame.groups.length) {
+      frame.angle = null;
+    }
+  });
+}
+
+function rebuildOverlayForCurrentGeometry() {
+  if (!svgPreview) {
+    return;
+  }
+  const svgElement = svgPreview.querySelector('svg');
+  if (!svgElement || !animationState.geometry) {
+    overlayMap.clear();
+    return;
+  }
+  buildArcGroupOverlay(svgElement, animationState.geometry);
+  const validIds = new Set(animationState.groupMap.keys());
+  animationState.assignments.forEach((frameIndex, groupId) => {
+    if (!validIds.has(groupId)) {
+      return;
+    }
+    markArcGroupSelected(groupId, frameIndex);
+  });
+  refreshOverlayHighlights();
+}
+
 function getFrameContributions(frameIndex) {
   const contributions = [];
   if (!animationState.frames.length) {
@@ -533,13 +599,15 @@ function renderAnimationFrames() {
 
   if (animationFrameScale) {
     animationFrameScale.replaceChildren();
-    for (let idx = 0; idx < frameCount; idx += 1) {
-      const marker = document.createElement('span');
-      marker.textContent = String(idx + 1);
-      if (idx === activeIndex) {
-        marker.classList.add('active');
+    if (frameCount <= MAX_FRAME_SCALE_MARKERS) {
+      for (let idx = 0; idx < frameCount; idx += 1) {
+        const marker = document.createElement('span');
+        marker.textContent = String(idx + 1);
+        if (idx === activeIndex) {
+          marker.classList.add('active');
+        }
+        animationFrameScale.appendChild(marker);
       }
-      animationFrameScale.appendChild(marker);
     }
   }
 
@@ -822,19 +890,12 @@ function applyAnimationToGeometry() {
     toggleFillSettings();
   }
   const angleStep = 180 / framesWithGroups.length;
+  const lineAngles = new Map();
   framesWithGroups.forEach((entry, orderIndex) => {
     const angle = orderIndex * angleStep;
     entry.frame.angle = angle;
     entry.frame.groups.forEach(groupId => {
-      const meta = animationState.groupMap.get(groupId);
-      if (meta && meta.ref) {
-        meta.ref.line_angle = angle;
-        meta.lineAngle = angle;
-      }
-      const overlayElement = overlayMap.get(groupId);
-      if (overlayElement) {
-        overlayElement.dataset.lineAngle = angle.toFixed(2);
-      }
+      lineAngles.set(String(groupId), angle);
     });
   });
   animationState.frames
@@ -843,14 +904,38 @@ function applyAnimationToGeometry() {
       frame.angle = null;
     });
 
-  renderAnimationFrames();
-  updateAnimationStatus('Animation angles applied. Opening 3D view…', 'loading');
-
-  if (lastRender) {
-    lastRender.geometry = animationState.geometry;
+  const params = collectParams();
+  let renderResult;
+  try {
+    renderResult = renderSpiral(params, null, { lineAngles });
+  } catch (error) {
+    console.error(error);
+    updateAnimationStatus('Unable to update spiral for animation.', 'error');
+    return;
   }
 
-  const params = collectParams();
+  if (!renderResult || !renderResult.svg || !hasGeometry(renderResult.geometry)) {
+    updateAnimationStatus('Unable to update spiral for animation.', 'error');
+    return;
+  }
+
+  showSVG(renderResult.svg);
+  lastRender = {
+    params,
+    geometry: renderResult.geometry,
+    mode: params.mode || 'arram_boyle',
+    svgString: renderResult.svgString,
+  };
+
+  updateAnimationGroupMapFromGeometry(renderResult.geometry);
+  rebuildOverlayForCurrentGeometry();
+  renderAnimationFrames();
+  updateStats(renderResult.geometry);
+  if (statMode) {
+    statMode.textContent = params.mode === 'arram_boyle' ? 'Arram-Boyle' : 'Classic Doyle';
+  }
+  updateAnimationStatus('Animation angles applied. Opening 3D view…', 'loading');
+
   if (threeApp) {
     threeApp.useGeometryFromPayload(params, animationState.geometry);
   }
