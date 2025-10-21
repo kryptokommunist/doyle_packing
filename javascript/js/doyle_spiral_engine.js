@@ -547,6 +547,7 @@ class CircleElement {
     this.intersections = [];
     this.neighbours = new Set();
     this._intersectionKeys = null;
+    this._orderedNeighbours = null;
   }
 
   _getIntersectionPoints(other, tol = 1e-6) {
@@ -589,6 +590,7 @@ class CircleElement {
     this.intersections = [];
     this.neighbours.clear();
     this._intersectionKeys = new Set();
+    this._orderedNeighbours = null;
   }
 
   addIntersection(point, other) {
@@ -659,6 +661,17 @@ class CircleElement {
     if (!neighbours.length) {
       return [];
     }
+    const scRe = (spiralCenter && spiralCenter.re) || 0;
+    const scIm = (spiralCenter && spiralCenter.im) || 0;
+    const cacheable =
+      k === null &&
+      clockwise === true &&
+      tieByDistance === true &&
+      Math.abs(scRe) < 1e-9 &&
+      Math.abs(scIm) < 1e-9;
+    if (cacheable && this._orderedNeighbours) {
+      return this._orderedNeighbours;
+    }
     if (k !== null && neighbours.length > k) {
       neighbours.sort((a, b) => {
         const da = Complex.abs(Complex.sub(a.center, this.center));
@@ -688,6 +701,9 @@ class CircleElement {
     });
     if (clockwise) {
       neighbours.reverse();
+    }
+    if (cacheable) {
+      this._orderedNeighbours = neighbours;
     }
     return neighbours;
   }
@@ -1439,74 +1455,97 @@ class DoyleSpiralEngine {
       circle.resetIntersections();
     }
 
-    let maxRadius = 0;
-    let minX = Infinity;
-    let maxX = -Infinity;
-    let minY = Infinity;
-    let maxY = -Infinity;
-    for (const circle of all) {
-      if (circle.radius > maxRadius) {
-        maxRadius = circle.radius;
-      }
-      const x = circle.center.re;
-      const y = circle.center.im;
-      if (x < minX) {
-        minX = x;
-      }
-      if (x > maxX) {
-        maxX = x;
-      }
-      if (y < minY) {
-        minY = y;
-      }
-      if (y > maxY) {
-        maxY = y;
-      }
-    }
-    const spanX = maxX - minX;
-    const spanY = maxY - minY;
-    const extent = Math.max(spanX, spanY);
-    const approxCell = extent > 0 && all.length > 0 ? extent / Math.sqrt(all.length) : maxRadius;
-    const minCell = Math.max(maxRadius * 0.5, 1e-3);
-    const maxCell = Math.max(maxRadius * 4, 1e-3);
-    const cellSize = clamp(approxCell || maxRadius || 1, minCell, maxCell);
-    const cellKey = (x, y) => `${x},${y}`;
-    const cellIndex = new Map();
-    const grid = new Map();
+    const sorted = all
+      .slice()
+      .sort((a, b) => a.center.re - b.center.re);
+    const tolSq = tol * tol;
+    const total = sorted.length;
+    const xs = new Float64Array(total);
+    const ys = new Float64Array(total);
+    const radii = new Float64Array(total);
+    const radiiSq = new Float64Array(total);
+    const suffixMaxRadius = new Float64Array(total);
 
-    for (const circle of all) {
-      const cellX = Math.floor(circle.center.re / cellSize);
-      const cellY = Math.floor(circle.center.im / cellSize);
-      cellIndex.set(circle, { x: cellX, y: cellY });
-      const key = cellKey(cellX, cellY);
-      if (!grid.has(key)) {
-        grid.set(key, []);
+    for (let idx = 0; idx < total; idx += 1) {
+      const entry = sorted[idx];
+      xs[idx] = entry.center.re;
+      ys[idx] = entry.center.im;
+      radii[idx] = entry.radius;
+      radiiSq[idx] = entry.radius * entry.radius;
+    }
+    let runningMax = 0;
+    for (let idx = total - 1; idx >= 0; idx -= 1) {
+      if (radii[idx] > runningMax) {
+        runningMax = radii[idx];
       }
-      grid.get(key).push(circle);
+      suffixMaxRadius[idx] = runningMax;
     }
 
-    for (const circle of all) {
-      const { x: baseX, y: baseY } = cellIndex.get(circle);
-      const range = Math.max(1, Math.ceil((circle.radius + maxRadius) / cellSize));
-      for (let dx = -range; dx <= range; dx += 1) {
-        for (let dy = -range; dy <= range; dy += 1) {
-          const bucket = grid.get(cellKey(baseX + dx, baseY + dy));
-          if (!bucket) {
+    for (let i = 0; i < total; i += 1) {
+      const circle = sorted[i];
+      const x1 = xs[i];
+      const y1 = ys[i];
+      const r1 = radii[i];
+      const r1Sq = r1 * r1;
+      const maxReachBase = r1 + tol;
+
+      for (let j = i + 1; j < total; j += 1) {
+        const other = sorted[j];
+        const dx = xs[j] - x1;
+        const r2 = radii[j];
+        const r2Sq = radiiSq[j];
+        const breakReach = maxReachBase + suffixMaxRadius[j];
+        if (dx > breakReach) {
+          break;
+        }
+        const reach = r1 + r2 + tol;
+        const dy = ys[j] - y1;
+        if (Math.abs(dy) > reach) {
+          continue;
+        }
+
+        const distSq = dx * dx + dy * dy;
+        if (distSq <= tolSq) {
+          continue;
+        }
+
+        const dist = Math.sqrt(distSq);
+        if (dist > reach) {
+          continue;
+        }
+
+        const diffR = Math.abs(r1 - r2);
+        if (dist < diffR - tol) {
+          continue;
+        }
+
+        const a = (r1Sq - r2Sq + distSq) / (2 * dist);
+        let hSq = r1Sq - a * a;
+        if (hSq < 0) {
+          if (hSq < -tol) {
             continue;
           }
-          for (const other of bucket) {
-            if (other === circle || other.id <= circle.id) {
-              continue;
-            }
-            const pts = circle._getIntersectionPoints(other, tol);
-            if (!pts.length) {
-              continue;
-            }
-            for (const pt of pts) {
-              circle.addIntersection(pt, other);
-              other.addIntersection(pt, circle);
-            }
-          }
+          hSq = 0;
+        }
+        const h = hSq === 0 ? 0 : Math.sqrt(hSq);
+
+        const ratio = a / dist;
+        const midX = x1 + dx * ratio;
+        const midY = y1 + dy * ratio;
+        const invD = 1 / dist;
+        const ux = dx * invD;
+        const uy = dy * invD;
+        const perpX = -uy;
+        const perpY = ux;
+
+        const p1 = { re: midX + perpX * h, im: midY + perpY * h };
+        circle.addIntersection(p1, other);
+        other.addIntersection(p1, circle);
+
+        if (h > tol) {
+          const p2 = { re: midX - perpX * h, im: midY - perpY * h };
+          circle.addIntersection(p2, other);
+          other.addIntersection(p2, circle);
         }
       }
     }
