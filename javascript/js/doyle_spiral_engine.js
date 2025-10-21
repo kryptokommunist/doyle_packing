@@ -713,6 +713,7 @@ class ArcGroup {
     this.debugStroke = null;
     this.ringIndex = null;
     this._outlineCache = null;
+    this.currentLineAngle = null;
   }
 
   addArc(arc) {
@@ -1546,6 +1547,7 @@ class DoyleSpiralEngine {
     redOutline = false,
     drawGroupOutline = true,
     fillPatternOffset = 0.0,
+    lineAngleOverrides = null,
   } = {}) {
     this.generateOuterCircles();
     this.computeAllIntersections();
@@ -1574,13 +1576,45 @@ class DoyleSpiralEngine {
       }
     }
 
-    if (addFillPattern) {
-      for (const [key, group] of this.arcGroups.entries()) {
-        if (key.startsWith('outer_')) {
-          continue;
+    let angleOverrideMap = null;
+    if (lineAngleOverrides instanceof Map) {
+      angleOverrideMap = new Map();
+      lineAngleOverrides.forEach((value, key) => {
+        const numeric = Number(value);
+        if (Number.isFinite(numeric)) {
+          angleOverrideMap.set(String(key), numeric);
         }
-        const ringIdx = group.ringIndex ?? 0;
-        const angle = ringIdx * fillPatternAngle;
+      });
+    } else if (lineAngleOverrides && typeof lineAngleOverrides === 'object') {
+      angleOverrideMap = new Map();
+      Object.entries(lineAngleOverrides).forEach(([key, value]) => {
+        const numeric = Number(value);
+        if (Number.isFinite(numeric)) {
+          angleOverrideMap.set(String(key), numeric);
+        }
+      });
+    }
+
+    const patternGroups = [];
+    for (const [key, group] of this.arcGroups.entries()) {
+      if (key.startsWith('outer_')) {
+        continue;
+      }
+      const ringIdx = group.ringIndex ?? 0;
+      const idStr = String(group.id);
+      let angle = ringIdx * fillPatternAngle;
+      if (angleOverrideMap && angleOverrideMap.has(idStr)) {
+        angle = angleOverrideMap.get(idStr);
+      }
+      if (!Number.isFinite(angle)) {
+        angle = ringIdx * fillPatternAngle;
+      }
+      group.currentLineAngle = angle;
+      patternGroups.push({ group, angle });
+    }
+
+    if (addFillPattern) {
+      for (const { group, angle } of patternGroups) {
         group.toSVGFill(context, {
           debug: false,
           patternFill: true,
@@ -1621,6 +1655,7 @@ class DoyleSpiralEngine {
     redOutline = false,
     drawGroupOutline = true,
     fillPatternOffset = 0.0,
+    lineAngleOverrides = null,
   } = {}) {
     if (!this._generated) {
       this.generateCircles();
@@ -1641,6 +1676,7 @@ class DoyleSpiralEngine {
         redOutline,
         drawGroupOutline,
         fillPatternOffset,
+        lineAngleOverrides,
       });
       return {
         svg: context.toElement(),
@@ -1673,7 +1709,10 @@ class DoyleSpiralEngine {
       const outline = group.getClosedOutline();
       const outlinePoints = outline.map(pt => [pt.re, pt.im]);
       const ringIdx = group.ringIndex ?? 0;
-      const lineAngle = ringIdx * this.fillPatternAngle;
+      const angleOverride = Number.isFinite(group.currentLineAngle)
+        ? group.currentLineAngle
+        : null;
+      const lineAngle = angleOverride !== null ? angleOverride : ringIdx * this.fillPatternAngle;
       exportData.arcgroups.push({
         id: group.id,
         name: group.name,
@@ -1711,7 +1750,7 @@ function normaliseParams(params = {}) {
   };
 }
 
-function renderSpiral(params = {}, overrideMode = null) {
+function renderSpiral(params = {}, overrideMode = null, overrides = null) {
   const opts = normaliseParams(params);
   const engine = new DoyleSpiralEngine(opts.p, opts.q, opts.t, {
     maxDistance: opts.max_d,
@@ -1719,6 +1758,7 @@ function renderSpiral(params = {}, overrideMode = null) {
     numGaps: opts.num_gaps,
   });
   const mode = overrideMode || opts.mode;
+  const lineAngleOverrides = overrides && overrides.lineAngles ? overrides.lineAngles : null;
   const result = engine.render(mode, {
     size: opts.size,
     debugGroups: opts.debug_groups,
@@ -1728,6 +1768,7 @@ function renderSpiral(params = {}, overrideMode = null) {
     redOutline: opts.red_outline,
     drawGroupOutline: opts.draw_group_outline,
     fillPatternOffset: opts.fill_pattern_offset,
+    lineAngleOverrides,
   });
   return {
     engine,

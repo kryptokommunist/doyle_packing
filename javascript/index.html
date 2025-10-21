@@ -268,9 +268,80 @@
       position: relative;
     }
 
+    #svgPreview {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
     #svgPreview svg {
       width: 100%;
       height: 100%;
+    }
+
+    .svg-host {
+      flex: 1 1 auto;
+      position: relative;
+    }
+
+    .svg-workspace {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .svg-host::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      border-radius: 1rem;
+    }
+
+    .svg-workspace.animate-mode .svg-host::after {
+      box-shadow: inset 0 0 0 2px rgba(37, 99, 235, 0.2);
+    }
+
+    .svg-preview-wrapper,
+    .svg-empty-wrapper {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .svg-workspace.animate-mode .arcgroup-overlay {
+      pointer-events: auto;
+    }
+
+    .arcgroup-overlay {
+      pointer-events: none;
+    }
+
+    .arcgroup-overlay polygon {
+      --arc-highlight: 0;
+      fill: rgba(255, 215, 0, var(--arc-highlight));
+      stroke: none;
+      cursor: pointer;
+      transition: filter 0.25s ease, fill 0.25s ease;
+    }
+
+    .arcgroup-overlay polygon:hover {
+      filter: brightness(1.15);
+    }
+
+    .arcgroup-overlay polygon.arc-flash {
+      animation: arcFlash 0.9s ease;
+    }
+
+    @keyframes arcFlash {
+      0% { fill: rgba(255, 215, 0, 0.4); }
+      50% { fill: rgba(255, 215, 0, 0.8); }
+      100% { fill: rgba(255, 215, 0, 0.25); }
     }
 
     .empty-state {
@@ -304,6 +375,191 @@
     .three-card {
       padding: 1.5rem;
       gap: 1.25rem;
+    }
+
+    .animate-card {
+      padding: 1.5rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+    }
+
+    .animate-card .svg-host {
+      min-height: 520px;
+    }
+
+    .animation-timeline {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    .animation-toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1rem;
+      align-items: flex-end;
+    }
+
+    .animation-toolbar .field-group {
+      flex: 1 1 240px;
+      min-width: 200px;
+    }
+
+    .animation-toolbar .toolbar-buttons {
+      display: flex;
+      gap: 0.6rem;
+      flex-wrap: wrap;
+    }
+
+    .animation-toolbar .toolbar-buttons button {
+      flex: 0 0 auto;
+    }
+
+    .timeline-controls {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+    }
+
+    .playback-buttons {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.6rem;
+    }
+
+    .playback-buttons button {
+      flex: 0 0 auto;
+    }
+
+    #animationFrameSlider {
+      width: 100%;
+      accent-color: var(--accent);
+    }
+
+    .frame-scale {
+      display: flex;
+      justify-content: space-between;
+      gap: 0.4rem;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      padding: 0 0.25rem;
+    }
+
+    .frame-scale span {
+      position: relative;
+      flex: 1 1 auto;
+      display: flex;
+      justify-content: center;
+      min-width: 1.2rem;
+    }
+
+    .frame-scale span::after {
+      content: '';
+      position: absolute;
+      top: -0.55rem;
+      width: 2px;
+      height: 0.45rem;
+      background: rgba(148, 163, 184, 0.4);
+    }
+
+    .frame-scale span.active {
+      color: var(--accent);
+      font-weight: 600;
+    }
+
+    .frame-scale span.active::after {
+      background: rgba(37, 99, 235, 0.6);
+      height: 0.6rem;
+    }
+
+    #animationFrameLabel {
+      font-size: 0.82rem;
+      color: var(--text-muted);
+      font-weight: 600;
+    }
+
+    .frame-summary {
+      display: flex;
+      flex-direction: column;
+      gap: 0.6rem;
+      background: rgba(255, 255, 255, 0.78);
+      border-radius: 1.1rem;
+      border: 1px solid rgba(148, 163, 184, 0.25);
+      padding: 0.9rem 1rem;
+      min-height: 110px;
+    }
+
+    .frame-summary .frame-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.82rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-muted);
+    }
+
+    .frame-summary .frame-groups {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+
+    .frame-summary .frame-group {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.35rem 0.65rem;
+      border-radius: 999px;
+      background: rgba(255, 215, 0, 0.6);
+      color: #5b4000;
+      font-size: 0.8rem;
+      line-height: 1;
+      transition: opacity 0.2s ease;
+    }
+
+    .frame-summary .frame-group.ghost {
+      background: rgba(255, 215, 0, 0.35);
+    }
+
+    .frame-summary .frame-group button {
+      background: none;
+      border: none;
+      font-size: 0.8rem;
+      color: inherit;
+      cursor: pointer;
+      padding: 0;
+      width: 1.1rem;
+      height: 1.1rem;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 999px;
+    }
+
+    .frame-summary .status {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+    }
+
+    .frame-footer {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      display: flex;
+      justify-content: space-between;
+    }
+
+    .animation-actions {
+      display: flex;
+      flex-direction: column;
+      gap: 0.6rem;
+    }
+
+    .animation-actions button {
+      width: 100%;
     }
 
     .three-top {
@@ -423,6 +679,9 @@
       }
       .three-stage {
         grid-template-columns: 1fr;
+      }
+      .animation-panel {
+        order: -1;
       }
     }
 
@@ -552,10 +811,59 @@
         <div class="view-toggle" role="group" aria-label="Preview mode">
           <button type="button" class="active" data-view="2d" aria-pressed="true">2D SVG</button>
           <button type="button" data-view="3d" aria-pressed="false">3D View</button>
+          <button type="button" data-view="animate" aria-pressed="false">Animate</button>
         </div>
 
         <div class="preview-card" id="view2d">
-          <div id="svgPreview" class="empty-state">Rendering spiral…</div>
+          <div class="svg-host" id="svg2dHost">
+            <div id="svgWorkspace" class="svg-workspace">
+              <div class="svg-preview-wrapper">
+                <div id="svgPreview" class="empty-state">Rendering spiral…</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="preview-card animate-card" id="viewAnimate" hidden>
+          <div class="svg-host" id="svgAnimateHost"></div>
+          <div class="animation-timeline" id="animationTimeline">
+            <div class="animation-toolbar">
+              <div class="field-group">
+                <label for="animationPreset">Preset sequences</label>
+                <select id="animationPreset">
+                  <option value="manual" selected>Manual selection</option>
+                  <option value="alternating_rings">Alternating rings</option>
+                  <option value="spiral_arms">Spiral arms sweep</option>
+                  <option value="ring_wave">Ring wave</option>
+                  <option value="radiant_spokes">Radiant spokes</option>
+                </select>
+              </div>
+              <div class="toolbar-buttons">
+                <button type="button" class="secondary" id="animationAddFrame">Add frame</button>
+                <button type="button" class="secondary" id="animationClear">Clear frames</button>
+              </div>
+            </div>
+            <div class="timeline-controls">
+              <div class="playback-buttons">
+                <button type="button" class="secondary" id="animationPrev">Previous frame</button>
+                <button type="button" class="secondary" id="animationPlay">Play</button>
+                <button type="button" class="secondary" id="animationPause" disabled>Pause</button>
+                <button type="button" class="secondary" id="animationNext">Next frame</button>
+              </div>
+              <div id="animationFrameLabel">Frame 1 of 1</div>
+            </div>
+            <input type="range" id="animationFrameSlider" min="1" max="1" step="1" value="1" />
+            <div class="frame-scale" id="animationFrameScale">
+              <span class="active">1</span>
+            </div>
+            <div class="frame-summary" id="animationFrameSummary">
+              <div class="status">Select a frame and click an arc to build the sequence.</div>
+            </div>
+            <div class="animation-actions">
+              <button type="button" id="animationGenerate">Animate selection</button>
+              <div class="status" id="animationStatus">Select a frame and click an arc to build the sequence.</div>
+            </div>
+          </div>
         </div>
 
         <div class="stats" id="stats" hidden>
