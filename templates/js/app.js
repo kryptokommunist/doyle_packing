@@ -84,16 +84,26 @@ function downloadCurrentSvg() {
   }
 
   const blob = new Blob([svgContent], { type: 'image/svg+xml;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
+  let url = '';
+  let revoke = () => {};
+  if (typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function') {
+    url = URL.createObjectURL(blob);
+    revoke = () => URL.revokeObjectURL(url);
+  } else {
+    url = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgContent)}`;
+  }
   const filename = getExportFileName();
   const link = document.createElement('a');
   link.href = url;
   link.download = filename;
   document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
-  setStatus(`SVG downloaded as ${filename}.`);
+  requestAnimationFrame(() => {
+    link.click();
+    document.body.removeChild(link);
+    // Safari cancels downloads if the blob URL is revoked synchronously.
+    setTimeout(() => revoke(), 100);
+    setStatus(`SVG downloaded as ${filename}.`);
+  });
 }
 
 function hasGeometry(geometry) {
