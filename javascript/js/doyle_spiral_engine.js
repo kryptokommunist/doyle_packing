@@ -1060,17 +1060,31 @@ class ArcGroup {
     }
     let normalizedSegments = template.patternCache.get(key) || null;
     if (!normalizedSegments) {
-      const polygon = [];
-      for (let idx = 0; idx < normalized.length; idx += 2) {
-        polygon.push({ x: normalized[idx], y: normalized[idx + 1] });
-      }
+      const transformRadius = transform.radius || baseRadius;
       const spacingNorm = spacing / baseRadius;
-      const offsetNorm = offset / baseRadius;
-      if (!Number.isFinite(spacingNorm) || Math.abs(spacingNorm) < 1e-9) {
+      const offsetClamped = Math.max(0, offset);
+
+      if (
+        !Number.isFinite(transformRadius)
+        || transformRadius <= 1e-9
+        || !Number.isFinite(spacingNorm)
+        || Math.abs(spacingNorm) < 1e-9
+      ) {
         normalizedSegments = [];
       } else {
-        normalizedSegments = linesInPolygon(polygon, spacingNorm, angleDeg, offsetNorm);
+        const insetRadius = transformRadius - offsetClamped;
+        if (insetRadius <= 1e-9) {
+          normalizedSegments = [];
+        } else {
+          const scale = insetRadius / transformRadius;
+          const polygon = [];
+          for (let idx = 0; idx < normalized.length; idx += 2) {
+            polygon.push({ x: normalized[idx] * scale, y: normalized[idx + 1] * scale });
+          }
+          normalizedSegments = linesInPolygon(polygon, spacingNorm, angleDeg, 0);
+        }
       }
+
       template.patternCache.set(key, normalizedSegments);
     }
     if (!normalizedSegments || !normalizedSegments.length) {
