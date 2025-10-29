@@ -263,34 +263,29 @@ function handleRenderSuccess(result) {
   if (!svgElement) {
     throw new Error('Renderer produced no SVG content');
   }
-  try {
-    const result = renderSpiral(params);
-    showSVG(svgElement);
 
-    const params = result.params || collectParams();
-    const geometry = hasGeometry(result.geometry) ? result.geometry : null;
-    const mode = (result.mode || params?.mode || DEFAULTS.mode);
+  showSVG(svgElement);
 
-    lastRender = { params, geometry, mode };
+  const params = result.params || collectParams();
+  const geometry = hasGeometry(result.geometry) ? result.geometry : null;
+  const mode = result.mode || params?.mode || DEFAULTS.mode;
+  const svgString = typeof result.svgString === 'string' && result.svgString.trim().length
+    ? result.svgString
+    : new XMLSerializer().serializeToString(svgElement);
 
-    updateStats(geometry);
-    statMode.textContent = mode === 'arram_boyle' ? 'Arram-Boyle' : 'Classic Doyle';
-    setStatus('Spiral updated. Switch views to explore it in 3D.');
-    updateExportAvailability(true);
+  lastRender = { params, geometry, mode, svgString };
 
-    if (threeApp) {
-      if (geometry) {
-        threeApp.useGeometryFromPayload(params, geometry);
-      } else {
-        threeApp.queueGeometryUpdate(params, true);
-      }
-  } catch (error) {
-    console.error(error);
-    svgPreview.innerHTML = '<div class="empty-state">Unable to render spiral.</div>';
-    svgPreview.classList.add('empty-state');
-    setStatus(error.message || 'Unexpected error', 'error');
-    lastRender = null;
-    updateExportAvailability(false);
+  updateStats(geometry);
+  statMode.textContent = mode === 'arram_boyle' ? 'Arram-Boyle' : 'Classic Doyle';
+  setStatus('Spiral updated. Switch views to explore it in 3D.');
+  updateExportAvailability(true);
+
+  if (threeApp) {
+    if (geometry) {
+      threeApp.useGeometryFromPayload(params, geometry);
+    } else {
+      threeApp.queueGeometryUpdate(params, true);
+    }
   }
 }
 
@@ -298,6 +293,8 @@ function handleRenderFailure(message) {
   svgPreview.innerHTML = '<div class="empty-state">Unable to render spiral.</div>';
   svgPreview.classList.add('empty-state');
   setStatus(message || 'Unexpected error', 'error');
+  lastRender = null;
+  updateExportAvailability(false);
 }
 
 function startRenderJob(params, showLoading) {
