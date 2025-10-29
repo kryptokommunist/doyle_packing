@@ -12,6 +12,8 @@ const tRange = document.getElementById('inputT');
 const tValue = document.getElementById('tValue');
 const fillToggle = document.getElementById('togglePattern');
 const fillSettings = document.getElementById('fillSettings');
+const fillPatternTypeSelect = document.getElementById('fillPatternType');
+const fillRectWidthGroup = document.getElementById('rectWidthGroup');
 const outlineToggle = document.getElementById('toggleOutline');
 const redToggle = document.getElementById('toggleRed');
 const viewButtons = Array.from(document.querySelectorAll('[data-view]'));
@@ -39,6 +41,8 @@ const DEFAULTS = {
   fill_pattern_spacing: 5,
   fill_pattern_angle: 0,
   fill_pattern_offset: 0,
+  fill_pattern_type: 'lines',
+  fill_pattern_rect_width: 2,
 };
 
 let activeView = '2d';
@@ -111,6 +115,7 @@ function updateTValue() {
 
 function toggleFillSettings() {
   fillSettings.hidden = !fillToggle.checked;
+  updatePatternTypeVisibility();
 }
 
 function setStatus(message, state = 'idle') {
@@ -164,6 +169,14 @@ function debounce(fn, delay) {
     clearTimeout(timer);
     timer = setTimeout(() => fn(...args), delay);
   };
+}
+
+function updatePatternTypeVisibility() {
+  if (!fillPatternTypeSelect || !fillRectWidthGroup) {
+    return;
+  }
+  const showRectangles = fillPatternTypeSelect.value === 'rectangles';
+  fillRectWidthGroup.hidden = !showRectangles;
 }
 
 function pulseSettingsButton() {
@@ -369,6 +382,9 @@ form.addEventListener('input', event => {
   if (event.target === fillToggle) {
     toggleFillSettings();
   }
+  if (event.target === fillPatternTypeSelect) {
+    updatePatternTypeVisibility();
+  }
   debouncedRender();
   if (threeApp) {
     threeApp.queueGeometryUpdate(collectParams());
@@ -426,6 +442,10 @@ if (threeSettingsToggle) {
 
 if (exportButton) {
   exportButton.addEventListener('click', downloadCurrentSvg);
+}
+
+if (fillPatternTypeSelect) {
+  fillPatternTypeSelect.addEventListener('change', updatePatternTypeVisibility);
 }
 
 updateExportAvailability(false);
