@@ -245,17 +245,7 @@ function sanitisePolygonPoints(points, tolerance = 1e-9) {
   return result;
 }
 
-function insetPolygon(points, offset) {
-  if (!offset || offset <= 0) {
-    return sanitisePolygonPoints(points);
-  }
-
-  const base = sanitisePolygonPoints(points);
-  if (base.length < 3) {
-    return [];
-  }
-
-  const orientation = polygonSignedArea(base) >= 0 ? 1 : -1;
+function buildInsetPolygon(base, offset, orientation) {
   const insetPoints = [];
   const count = base.length;
 
@@ -313,12 +303,50 @@ function insetPolygon(points, offset) {
 
   const cleaned = sanitisePolygonPoints(insetPoints);
   if (cleaned.length < 3) {
-    return [];
+    return null;
   }
   if (Math.abs(polygonSignedArea(cleaned)) < 1e-6) {
-    return [];
+    return null;
   }
   return cleaned;
+}
+
+function insetPolygon(points, offset) {
+  if (!offset || offset <= 0) {
+    return sanitisePolygonPoints(points);
+  }
+
+  const base = sanitisePolygonPoints(points);
+  if (base.length < 3) {
+    return [];
+  }
+
+  const orientation = polygonSignedArea(base) >= 0 ? 1 : -1;
+  const direct = buildInsetPolygon(base, offset, orientation);
+  if (direct) {
+    return direct;
+  }
+
+  let low = 0;
+  let high = offset;
+  let best = null;
+  for (let iter = 0; iter < 16; iter += 1) {
+    if (high - low <= 1e-6) {
+      break;
+    }
+    const mid = (low + high) / 2;
+    if (mid <= 1e-9) {
+      break;
+    }
+    const candidate = buildInsetPolygon(base, mid, orientation);
+    if (candidate) {
+      best = candidate;
+      low = mid;
+    } else {
+      high = mid;
+    }
+  }
+  return best || [];
 }
 
 function estimateArcSteps(circle, start, end) {
