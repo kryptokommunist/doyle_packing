@@ -1171,6 +1171,8 @@ class DrawingContext {
       this.svg = null;
       this.defs = null;
       this.mainGroup = null;
+      this._virtualDefs = [];
+      this._virtualMain = [];
     }
   }
 
@@ -1203,15 +1205,33 @@ class DrawingContext {
     };
   }
 
-  drawScaledCircle(circle, { color = '#4CB39B', opacity = 0.8 } = {}) {
-    if (!this.hasDOM) {
+  _pushVirtual(tag, attributes, target = this._virtualMain) {
+    if (!target) {
       return;
     }
+    const attrString = Object.entries(attributes)
+      .filter(([, value]) => value !== null && value !== undefined)
+      .map(([key, value]) => `${key}="${String(value)}"`)
+      .join(' ');
+    target.push(`<${tag}${attrString ? ` ${attrString}` : ''} />`);
+  }
+
+  drawScaledCircle(circle, { color = '#4CB39B', opacity = 0.8 } = {}) {
     if (!circle.visible) {
       return;
     }
     const center = this._scaled(circle.center);
     const radius = circle.radius * this.scaleFactor;
+    if (!this.hasDOM) {
+      this._pushVirtual('circle', {
+        cx: center.x.toFixed(4),
+        cy: center.y.toFixed(4),
+        r: radius.toFixed(4),
+        fill: color,
+        'fill-opacity': opacity.toString(),
+      });
+      return;
+    }
     const element = document.createElementNS(SVG_NS, 'circle');
     element.setAttribute('cx', center.x.toFixed(4));
     element.setAttribute('cy', center.y.toFixed(4));
@@ -1222,9 +1242,6 @@ class DrawingContext {
   }
 
   drawScaledArc(arc, { color = '#000000', width = 1.2 } = {}) {
-    if (!this.hasDOM) {
-      return;
-    }
     if (!arc.visible) {
       return;
     }
@@ -1232,13 +1249,24 @@ class DrawingContext {
     if (!points.length) {
       return;
     }
-    const path = document.createElementNS(SVG_NS, 'path');
     const commands = [];
     points.forEach((pt, idx) => {
       const scaled = this._scaled(pt);
       const prefix = idx === 0 ? 'M' : 'L';
       commands.push(`${prefix}${scaled.x.toFixed(4)},${scaled.y.toFixed(4)}`);
     });
+    if (!this.hasDOM) {
+      this._pushVirtual('path', {
+        d: commands.join(' '),
+        fill: 'none',
+        stroke: color,
+        'stroke-width': width.toString(),
+        'stroke-linecap': 'round',
+        'stroke-linejoin': 'round',
+      });
+      return;
+    }
+    const path = document.createElementNS(SVG_NS, 'path');
     path.setAttribute('d', commands.join(' '));
     path.setAttribute('fill', 'none');
     path.setAttribute('stroke', color);
@@ -1269,9 +1297,6 @@ class DrawingContext {
     if (!points || !points.length) {
       return;
     }
-    if (!this.hasDOM) {
-      return;
-    }
     const scaled = points.map(pt => this._scaled(pt));
 
     if (fill === 'pattern') {
@@ -1290,33 +1315,74 @@ class DrawingContext {
         );
       }
       if (drawOutline) {
-        const polygon = document.createElementNS(SVG_NS, 'polygon');
-        polygon.setAttribute('points', scaled.map(p => `${p.x.toFixed(4)},${p.y.toFixed(4)}`).join(' '));
-        polygon.setAttribute('fill', 'none');
-        polygon.setAttribute('stroke', stroke || 'none');
-        polygon.setAttribute('stroke-width', strokeWidth.toString());
-        polygon.setAttribute('stroke-linejoin', 'round');
-        this.mainGroup.appendChild(polygon);
+        if (!this.hasDOM) {
+          this._pushVirtual('polygon', {
+            points: scaled.map(p => `${p.x.toFixed(4)},${p.y.toFixed(4)}`).join(' '),
+            fill: 'none',
+            stroke: stroke || 'none',
+            'stroke-width': strokeWidth.toString(),
+            'stroke-linejoin': 'round',
+          });
+        } else {
+          const polygon = document.createElementNS(SVG_NS, 'polygon');
+          polygon.setAttribute('points', scaled.map(p => `${p.x.toFixed(4)},${p.y.toFixed(4)}`).join(' '));
+          polygon.setAttribute('fill', 'none');
+          polygon.setAttribute('stroke', stroke || 'none');
+          polygon.setAttribute('stroke-width', strokeWidth.toString());
+          polygon.setAttribute('stroke-linejoin', 'round');
+          this.mainGroup.appendChild(polygon);
+        }
       }
       if (segmentsToDraw && segmentsToDraw.length) {
         const lineColor = stroke || '#000000';
         for (const [p1, p2] of segmentsToDraw) {
-          const line = document.createElementNS(SVG_NS, 'line');
-          line.setAttribute('x1', p1.x.toFixed(4));
-          line.setAttribute('y1', p1.y.toFixed(4));
-          line.setAttribute('x2', p2.x.toFixed(4));
-          line.setAttribute('y2', p2.y.toFixed(4));
-          line.setAttribute('stroke', lineColor);
-          line.setAttribute('stroke-width', '0.5');
-          line.setAttribute('stroke-linecap', 'round');
-          this.mainGroup.appendChild(line);
+          if (!this.hasDOM) {
+            this._pushVirtual('line', {
+              x1: p1.x.toFixed(4),
+              y1: p1.y.toFixed(4),
+              x2: p2.x.toFixed(4),
+              y2: p2.y.toFixed(4),
+              stroke: lineColor,
+              'stroke-width': '0.5',
+              'stroke-linecap': 'round',
+            });
+          } else {
+            const line = document.createElementNS(SVG_NS, 'line');
+            line.setAttribute('x1', p1.x.toFixed(4));
+            line.setAttribute('y1', p1.y.toFixed(4));
+            line.setAttribute('x2', p2.x.toFixed(4));
+            line.setAttribute('y2', p2.y.toFixed(4));
+            line.setAttribute('stroke', lineColor);
+            line.setAttribute('stroke-width', '0.5');
+            line.setAttribute('stroke-linecap', 'round');
+            this.mainGroup.appendChild(line);
+          }
         }
       }
       return;
     }
 
+    const polygonPoints = scaled.map(p => `${p.x.toFixed(4)},${p.y.toFixed(4)}`).join(' ');
+    if (!this.hasDOM) {
+      const attrs = {
+        points: polygonPoints,
+        fill: fill ? fill : 'none',
+      };
+      if (fill) {
+        attrs['fill-opacity'] = fillOpacity.toString();
+      }
+      if (stroke) {
+        attrs.stroke = stroke;
+        attrs['stroke-width'] = strokeWidth.toString();
+        attrs['stroke-linejoin'] = 'round';
+      } else {
+        attrs.stroke = 'none';
+      }
+      this._pushVirtual('polygon', attrs);
+      return;
+    }
     const polygon = document.createElementNS(SVG_NS, 'polygon');
-    polygon.setAttribute('points', scaled.map(p => `${p.x.toFixed(4)},${p.y.toFixed(4)}`).join(' '));
+    polygon.setAttribute('points', polygonPoints);
     if (fill) {
       polygon.setAttribute('fill', fill);
       polygon.setAttribute('fill-opacity', fillOpacity.toString());
@@ -1334,10 +1400,17 @@ class DrawingContext {
   }
 
   toString() {
-    if (!this.hasDOM || !this.svg) {
-      return '';
+    if (this.hasDOM && this.svg) {
+      return new XMLSerializer().serializeToString(this.svg);
     }
-    return new XMLSerializer().serializeToString(this.svg);
+    const viewBox = `${-this.size / 2} ${-this.size / 2} ${this.size} ${this.size}`;
+    const defsContent = this._virtualDefs && this._virtualDefs.length
+      ? `<defs>${this._virtualDefs.join('')}</defs>`
+      : '';
+    const mainContent = this._virtualMain && this._virtualMain.length
+      ? `<g>${this._virtualMain.join('')}</g>`
+      : '<g></g>';
+    return `<svg xmlns="${SVG_NS}" viewBox="${viewBox}" width="${this.size}" height="${this.size}">${defsContent}${mainContent}</svg>`;
   }
 
   toElement() {
