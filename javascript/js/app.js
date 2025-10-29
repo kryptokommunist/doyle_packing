@@ -22,6 +22,8 @@ const threeSettingsToggle = document.getElementById('threeSettingsToggle');
 const threeStage = document.getElementById('threeStage');
 const threeStats = document.getElementById('threeStats');
 const fileInput = document.getElementById('threeFileInput');
+const exportButton = document.getElementById('exportSvgButton');
+const exportFilenameInput = document.getElementById('exportFilename');
 
 const DEFAULTS = {
   p: 16,
@@ -47,6 +49,57 @@ const renderWorkerURL = workerSupported ? new URL('./render_worker.js', import.m
 let renderWorkerHandle = null;
 let currentRenderToken = 0;
 const svgParser = typeof DOMParser !== 'undefined' ? new DOMParser() : null;
+
+function sanitiseFileName(name) {
+  return name.replace(/[\\/:*?"<>|]+/g, '-');
+}
+
+function getExportFileName() {
+  if (!exportFilenameInput) {
+    return 'doyle-spiral.svg';
+  }
+  const raw = exportFilenameInput.value.trim() || 'doyle-spiral';
+  const safe = sanitiseFileName(raw) || 'doyle-spiral';
+  return safe.toLowerCase().endsWith('.svg') ? safe : `${safe}.svg`;
+}
+
+function updateExportAvailability(available) {
+  if (exportButton) {
+    exportButton.disabled = !available;
+  }
+}
+
+function downloadCurrentSvg() {
+  if (!lastRender) {
+    setStatus('Render the spiral before downloading.', 'error');
+    return;
+  }
+
+  let svgContent = lastRender.svgString || '';
+  if (!svgContent) {
+    const svgElement = svgPreview.querySelector('svg');
+    if (svgElement) {
+      svgContent = new XMLSerializer().serializeToString(svgElement);
+    }
+  }
+
+  if (!svgContent) {
+    setStatus('Unable to access the rendered SVG for download.', 'error');
+    return;
+  }
+
+  const blob = new Blob([svgContent], { type: 'image/svg+xml;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const filename = getExportFileName();
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+  setStatus(`SVG downloaded as ${filename}.`);
+}
 
 function hasGeometry(geometry) {
   return Boolean(geometry && Array.isArray(geometry.arcgroups));
@@ -210,24 +263,34 @@ function handleRenderSuccess(result) {
   if (!svgElement) {
     throw new Error('Renderer produced no SVG content');
   }
-  showSVG(svgElement);
+  try {
+    const result = renderSpiral(params);
+    showSVG(svgElement);
 
-  const params = result.params || collectParams();
-  const geometry = hasGeometry(result.geometry) ? result.geometry : null;
-  const mode = (result.mode || params?.mode || DEFAULTS.mode);
+    const params = result.params || collectParams();
+    const geometry = hasGeometry(result.geometry) ? result.geometry : null;
+    const mode = (result.mode || params?.mode || DEFAULTS.mode);
 
-  lastRender = { params, geometry, mode };
+    lastRender = { params, geometry, mode };
 
-  updateStats(geometry);
-  statMode.textContent = mode === 'arram_boyle' ? 'Arram-Boyle' : 'Classic Doyle';
-  setStatus('Spiral updated. Switch views to explore it in 3D.');
+    updateStats(geometry);
+    statMode.textContent = mode === 'arram_boyle' ? 'Arram-Boyle' : 'Classic Doyle';
+    setStatus('Spiral updated. Switch views to explore it in 3D.');
+    updateExportAvailability(true);
 
-  if (threeApp) {
-    if (geometry) {
-      threeApp.useGeometryFromPayload(params, geometry);
-    } else {
-      threeApp.queueGeometryUpdate(params, true);
-    }
+    if (threeApp) {
+      if (geometry) {
+        threeApp.useGeometryFromPayload(params, geometry);
+      } else {
+        threeApp.queueGeometryUpdate(params, true);
+      }
+  } catch (error) {
+    console.error(error);
+    svgPreview.innerHTML = '<div class="empty-state">Unable to render spiral.</div>';
+    svgPreview.classList.add('empty-state');
+    setStatus(error.message || 'Unexpected error', 'error');
+    lastRender = null;
+    updateExportAvailability(false);
   }
 }
 
@@ -364,6 +427,11 @@ if (threeSettingsToggle) {
   });
 }
 
+if (exportButton) {
+  exportButton.addEventListener('click', downloadCurrentSvg);
+}
+
+updateExportAvailability(false);
 toggleFillSettings();
 updateTValue();
 renderCurrentSpiral(true);
