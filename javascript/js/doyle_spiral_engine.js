@@ -1108,6 +1108,8 @@ class ArcGroup {
     lineSettings = [3, 0],
     drawOutline = true,
     lineOffset = 0,
+    patternStyle = 'lines',
+    rectangleWidth = 3,
   } = {}) {
     const outline = this.getClosedOutline();
     if (!outline.length) {
@@ -1135,6 +1137,8 @@ class ArcGroup {
         drawOutline,
         lineOffset,
         patternSegments: segments,
+        patternStyle,
+        rectangleWidth,
       });
       return;
     }
@@ -1293,6 +1297,8 @@ class DrawingContext {
     drawOutline = true,
     lineOffset = 0,
     patternSegments = null,
+    patternStyle = 'lines',
+    rectangleWidth = 3,
   } = {}) {
     if (!points || !points.length) {
       return;
@@ -1333,8 +1339,56 @@ class DrawingContext {
           this.mainGroup.appendChild(polygon);
         }
       }
-      if (segmentsToDraw && segmentsToDraw.length) {
-        const lineColor = stroke || '#000000';
+      if (!segmentsToDraw || !segmentsToDraw.length) {
+        return;
+      }
+      let renderStyle = String(patternStyle || 'lines').toLowerCase();
+      if (renderStyle !== 'rectangles') {
+        renderStyle = 'lines';
+      }
+      const lineColor = stroke || '#000000';
+      if (renderStyle === 'rectangles') {
+        const widthValue = Math.abs(Number(rectangleWidth));
+        const widthScaled = widthValue * this.scaleFactor;
+        if (Number.isFinite(widthScaled) && widthScaled >= 1e-6) {
+          const halfWidth = widthScaled / 2;
+          for (const [p1, p2] of segmentsToDraw) {
+            const dx = p2.x - p1.x;
+            const dy = p2.y - p1.y;
+            const length = Math.hypot(dx, dy);
+            if (!Number.isFinite(length) || length < 1e-9) {
+              continue;
+            }
+            const nx = -dy / length;
+            const ny = dx / length;
+            const corners = [
+              { x: p1.x + nx * halfWidth, y: p1.y + ny * halfWidth },
+              { x: p2.x + nx * halfWidth, y: p2.y + ny * halfWidth },
+              { x: p2.x - nx * halfWidth, y: p2.y - ny * halfWidth },
+              { x: p1.x - nx * halfWidth, y: p1.y - ny * halfWidth },
+            ];
+            const pointsString = corners
+              .map(pt => `${pt.x.toFixed(4)},${pt.y.toFixed(4)}`)
+              .join(' ');
+            if (!this.hasDOM) {
+              this._pushVirtual('polygon', {
+                points: pointsString,
+                fill: lineColor,
+                stroke: 'none',
+              });
+            } else {
+              const polygon = document.createElementNS(SVG_NS, 'polygon');
+              polygon.setAttribute('points', pointsString);
+              polygon.setAttribute('fill', lineColor);
+              polygon.setAttribute('stroke', 'none');
+              this.mainGroup.appendChild(polygon);
+            }
+          }
+          return;
+        }
+        renderStyle = 'lines';
+      }
+      if (renderStyle === 'lines') {
         for (const [p1, p2] of segmentsToDraw) {
           if (!this.hasDOM) {
             this._pushVirtual('line', {
@@ -2150,6 +2204,8 @@ class DoyleSpiralEngine {
     redOutline = false,
     drawGroupOutline = true,
     fillPatternOffset = 0.0,
+    fillPatternStyle = 'lines',
+    fillPatternRectWidth = 3.0,
   } = {}) {
     this.generateOuterCircles();
     this.computeAllIntersections();
@@ -2193,6 +2249,8 @@ class DoyleSpiralEngine {
           lineSettings: [fillPatternSpacing, angle],
           drawOutline: drawGroupOutline,
           lineOffset: fillPatternOffset,
+          patternStyle: fillPatternStyle,
+          rectangleWidth: fillPatternRectWidth,
         });
       }
     }
@@ -2227,6 +2285,8 @@ class DoyleSpiralEngine {
     redOutline = false,
     drawGroupOutline = true,
     fillPatternOffset = 0.0,
+    fillPatternStyle = 'lines',
+    fillPatternRectWidth = 3.0,
   } = {}) {
     if (!this._generated) {
       this.generateCircles();
@@ -2247,6 +2307,8 @@ class DoyleSpiralEngine {
         redOutline,
         drawGroupOutline,
         fillPatternOffset,
+        fillPatternStyle,
+        fillPatternRectWidth,
       });
       return {
         svg: context.toElement(),
@@ -2311,6 +2373,11 @@ function normaliseParams(params = {}) {
     fill_pattern_spacing: Number(params.fill_pattern_spacing ?? 5),
     fill_pattern_angle: Number(params.fill_pattern_angle ?? 0),
     fill_pattern_offset: Number(params.fill_pattern_offset ?? 0),
+    fill_pattern_style:
+      String(params.fill_pattern_style || 'lines').toLowerCase() === 'rectangles'
+        ? 'rectangles'
+        : 'lines',
+    fill_pattern_rect_width: Math.max(0, Number(params.fill_pattern_rect_width ?? 3)),
     red_outline: Boolean(params.red_outline ?? false),
     draw_group_outline: params.draw_group_outline !== undefined ? Boolean(params.draw_group_outline) : true,
     max_d: Number(params.max_d ?? 2000),
@@ -2334,6 +2401,8 @@ function renderSpiral(params = {}, overrideMode = null) {
     redOutline: opts.red_outline,
     drawGroupOutline: opts.draw_group_outline,
     fillPatternOffset: opts.fill_pattern_offset,
+    fillPatternStyle: opts.fill_pattern_style,
+    fillPatternRectWidth: opts.fill_pattern_rect_width,
   });
   return {
     engine,
