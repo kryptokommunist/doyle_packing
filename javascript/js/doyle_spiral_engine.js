@@ -1369,14 +1369,16 @@ class DrawingContext {
               if (!this.hasDOM) {
                 this._pushVirtual('polygon', {
                   points: rectPointString,
-                  fill: lineColor,
-                  stroke: 'none',
+                  fill: 'none',
+                  stroke: '#ff0000',
+                  'stroke-width': '0.5',
                 });
               } else {
                 const polygon = document.createElementNS(SVG_NS, 'polygon');
                 polygon.setAttribute('points', rectPointString);
-                polygon.setAttribute('fill', lineColor);
-                polygon.setAttribute('stroke', 'none');
+                polygon.setAttribute('fill', 'none');
+                polygon.setAttribute('stroke', '#ff0000');
+                polygon.setAttribute('stroke-width', '0.5');
                 this.mainGroup.appendChild(polygon);
               }
             }
