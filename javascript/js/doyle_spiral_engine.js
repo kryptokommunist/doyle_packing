@@ -245,6 +245,36 @@ function sanitisePolygonPoints(points, tolerance = 1e-9) {
   return result;
 }
 
+function pointToEdgeSignedDistance(point, start, end, orientation) {
+  const dir = { x: end.x - start.x, y: end.y - start.y };
+  const unit = normaliseVector(dir);
+  if (!unit) {
+    return Infinity;
+  }
+  const normal = inwardNormal(unit, orientation);
+  return (point.x - start.x) * normal.x + (point.y - start.y) * normal.y;
+}
+
+function minimumInsetDistance(insetPoints, basePolygon, orientation) {
+  if (!Array.isArray(insetPoints) || insetPoints.length === 0) {
+    return Infinity;
+  }
+  let minSigned = Infinity;
+  const count = basePolygon.length;
+  const EPS = 1e-9;
+  for (const pt of insetPoints) {
+    for (let i = 0; i < count; i += 1) {
+      const start = basePolygon[i];
+      const end = basePolygon[(i + 1) % count];
+      const signed = pointToEdgeSignedDistance(pt, start, end, orientation);
+      if (signed >= -EPS && signed < minSigned) {
+        minSigned = signed;
+      }
+    }
+  }
+  return minSigned;
+}
+
 function insetPolygon(points, offset) {
   if (!offset || offset <= 0) {
     return sanitisePolygonPoints(points);
@@ -316,6 +346,11 @@ function insetPolygon(points, offset) {
     return [];
   }
   if (Math.abs(polygonSignedArea(cleaned)) < 1e-6) {
+    return [];
+  }
+  const minInset = minimumInsetDistance(cleaned, base, orientation);
+  const tolerance = Math.max(1e-6, Math.abs(offset) * 1e-6);
+  if (Number.isFinite(minInset) && minInset + tolerance < offset) {
     return [];
   }
   return cleaned;
