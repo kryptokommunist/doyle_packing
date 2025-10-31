@@ -14,6 +14,9 @@ const fillToggle = document.getElementById('togglePattern');
 const fillSettings = document.getElementById('fillSettings');
 const outlineToggle = document.getElementById('toggleOutline');
 const redToggle = document.getElementById('toggleRed');
+const fillPatternTypeSelect = document.getElementById('fillPatternType');
+const fillPatternAnimationSelect = document.getElementById('fillPatternAnimation');
+const fillPatternFramesInput = document.getElementById('fillPatternFrames');
 const viewButtons = Array.from(document.querySelectorAll('[data-view]'));
 const view2d = document.getElementById('view2d');
 const view3d = document.getElementById('view3d');
@@ -39,6 +42,9 @@ const DEFAULTS = {
   fill_pattern_spacing: 5,
   fill_pattern_angle: 0,
   fill_pattern_offset: 0,
+  fill_pattern_type: 'lines',
+  fill_pattern_animation: 'ring',
+  fill_pattern_frames: 180,
 };
 
 let activeView = '2d';

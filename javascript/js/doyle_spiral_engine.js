@@ -534,6 +534,263 @@ function linesInPolygon(polygonPoints, spacing, angleDeg, offset = 0) {
   return segments;
 }
 
+const PATTERN_ANIMATIONS = {
+  RING: 'ring',
+  LOG_SPIRAL: 'log_spiral',
+  CURVATURE: 'curvature',
+  GOLDEN_SECTOR: 'golden_sector',
+  RIPPLE: 'ripple',
+  ARM_INTERLEAVING: 'arm_interleaving',
+  QUASI_MOIRE: 'quasi_moire',
+};
+
+function wrapAngle(angle) {
+  let value = angle % (2 * Math.PI);
+  if (value < 0) {
+    value += 2 * Math.PI;
+  }
+  return value;
+}
+
+function balancedAssignments(entries, frameCount) {
+  const assignments = new Map();
+  const total = entries.length;
+  if (!total) {
+    return assignments;
+  }
+  const frames = Math.max(1, frameCount | 0);
+  const baseSize = Math.trunc(total / frames);
+  const remainder = total % frames;
+  let index = 0;
+  for (let frame = 0; frame < frames; frame += 1) {
+    const size = baseSize + (frame < remainder ? 1 : 0);
+    for (let i = 0; i < size && index < total; i += 1, index += 1) {
+      assignments.set(entries[index].id, frame);
+    }
+  }
+  while (index < total) {
+    assignments.set(entries[index].id, frames - 1);
+    index += 1;
+  }
+  return assignments;
+}
+
+function computeCircleStats(circles) {
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  let maxRadius = 0;
+  let sumX = 0;
+  let sumY = 0;
+  for (const circle of circles) {
+    minX = Math.min(minX, circle.x - circle.r);
+    maxX = Math.max(maxX, circle.x + circle.r);
+    minY = Math.min(minY, circle.y - circle.r);
+    maxY = Math.max(maxY, circle.y + circle.r);
+    const d = Math.hypot(circle.x, circle.y);
+    if (Number.isFinite(d)) {
+      maxRadius = Math.max(maxRadius, d + circle.r);
+    }
+    sumX += circle.x;
+    sumY += circle.y;
+  }
+  const count = circles.length || 1;
+  return {
+    minX,
+    maxX,
+    minY,
+    maxY,
+    maxRadius: Math.max(maxRadius, 1e-6),
+    centerX: sumX / count,
+    centerY: sumY / count,
+  };
+}
+
+function computeRingAssignments(circles) {
+  const assignments = new Map();
+  let maxRing = 0;
+  for (const circle of circles) {
+    const ring = Math.max(0, circle.ringIndex ?? 0);
+    assignments.set(circle.id, ring);
+    if (ring > maxRing) {
+      maxRing = ring;
+    }
+  }
+  return { assignments, frameCount: Math.max(1, maxRing + 1) };
+}
+
+function computeLogSpiralAssignments(circles, frameCount, stats, beta = 1.0) {
+  const frames = Math.max(1, frameCount | 0);
+  const scored = circles.map(circle => {
+    const relX = circle.x - stats.centerX;
+    const relY = circle.y - stats.centerY;
+    const rho = Math.max(Math.hypot(relX, relY), 1e-9);
+    const theta = Math.atan2(relY, relX);
+    const phi = wrapAngle(theta - beta * Math.log(rho));
+    return { score: phi, id: circle.id };
+  });
+  scored.sort((a, b) => a.score - b.score);
+  return { assignments: balancedAssignments(scored, frames), frameCount: frames };
+}
+
+function computeCurvatureAssignments(circles, frameCount) {
+  const frames = Math.max(1, frameCount | 0);
+  const scored = circles.map(circle => {
+    const kappa = 1 / Math.max(circle.r, 1e-9);
+    const score = Math.log(kappa);
+    return { score, id: circle.id };
+  });
+  scored.sort((a, b) => a.score - b.score);
+  return { assignments: balancedAssignments(scored, frames), frameCount: frames };
+}
+
+function computeGoldenSectorAssignments(circles, frameCount, stats, spokes = null) {
+  const frames = Math.max(1, frameCount | 0);
+  const phi = (1 + Math.sqrt(5)) / 2;
+  const scored = circles.map(circle => {
+    const relX = circle.x - stats.centerX;
+    const relY = circle.y - stats.centerY;
+    let theta = Math.atan2(relY, relX) % (2 * Math.PI);
+    if (theta < 0) {
+      theta += 2 * Math.PI;
+    }
+    let u = theta / (2 * Math.PI);
+    if (spokes && Number.isFinite(spokes) && spokes > 0) {
+      u = (u * spokes) % 1;
+    }
+    const h = (u * phi) % 1;
+    return { score: h, id: circle.id };
+  });
+  scored.sort((a, b) => a.score - b.score);
+  return { assignments: balancedAssignments(scored, frames), frameCount: frames };
+}
+
+function computeRippleAssignments(circles, frameCount, stats) {
+  const frames = Math.max(1, frameCount | 0);
+  if (frames === 1) {
+    const assignments = new Map();
+    circles.forEach(circle => assignments.set(circle.id, 0));
+    return { assignments, frameCount: 1 };
+  }
+  const wavelength = stats.maxRadius / frames;
+  const assignments = new Map();
+  for (const circle of circles) {
+    const relX = circle.x - stats.centerX;
+    const relY = circle.y - stats.centerY;
+    const distance = Math.hypot(relX, relY);
+    if (!Number.isFinite(distance) || distance <= 1e-9) {
+      assignments.set(circle.id, 0);
+      continue;
+    }
+    const lambda = Math.max(wavelength, 1e-6);
+    const phase = (distance / lambda) % 1;
+    const frame = Math.min(frames - 1, Math.floor(phase * frames));
+    assignments.set(circle.id, frame);
+  }
+  return { assignments, frameCount: frames };
+}
+
+function gcdInteger(a, b) {
+  let x = Math.abs(a | 0);
+  let y = Math.abs(b | 0);
+  while (y !== 0) {
+    const temp = x % y;
+    x = y;
+    y = temp;
+  }
+  return x;
+}
+
+function findCoprimeMultiplier(frameCount) {
+  const frames = Math.max(1, frameCount | 0);
+  if (frames === 1) {
+    return 1;
+  }
+  for (let candidate = frames - 1; candidate >= 1; candidate -= 1) {
+    if (gcdInteger(candidate, frames) === 1) {
+      return candidate;
+    }
+  }
+  return 1;
+}
+
+function computeArmInterleavingAssignments(circles, frameCount, stats, beta = 1.0) {
+  const frames = Math.max(1, frameCount | 0);
+  const arms = new Map();
+  for (const circle of circles) {
+    const relX = circle.x - stats.centerX;
+    const relY = circle.y - stats.centerY;
+    const rho = Math.max(Math.hypot(relX, relY), 1e-9);
+    const theta = Math.atan2(relY, relX);
+    const armId = Math.round((theta - beta * Math.log(rho)) / (2 * Math.PI));
+    if (!arms.has(armId)) {
+      arms.set(armId, []);
+    }
+    arms.get(armId).push({ circle, rho });
+  }
+  const a = findCoprimeMultiplier(frames);
+  const assignments = new Map();
+  for (const [armId, entries] of arms.entries()) {
+    entries.sort((lhs, rhs) => rhs.rho - lhs.rho);
+    entries.forEach((entry, order) => {
+      const frame = frames === 1
+        ? 0
+        : ((a * order + armId) % frames + frames) % frames;
+      assignments.set(entry.circle.id, frame);
+    });
+  }
+  return { assignments, frameCount: frames };
+}
+
+function computeQuasiMoireAssignments(circles, frameCount, stats, rotateDeg = 18) {
+  const frames = Math.max(1, frameCount | 0);
+  const width = Math.max(stats.maxX - stats.minX, 1e-6);
+  const height = Math.max(stats.maxY - stats.minY, 1e-6);
+  const sigmaX = width / Math.max(Math.sqrt(frames), 1);
+  const sigmaY = height / Math.max(Math.sqrt(frames) * 1.3, 1);
+  const gamma = Math.sqrt(2);
+  const angle = degToRad(rotateDeg);
+  const cosA = Math.cos(angle);
+  const sinA = Math.sin(angle);
+  const assignments = new Map();
+  for (const circle of circles) {
+    const relX = circle.x - stats.centerX;
+    const relY = circle.y - stats.centerY;
+    const xr = relX * cosA - relY * sinA;
+    const yr = relX * sinA + relY * cosA;
+    const u = ((xr / sigmaX) % 1 + 1) % 1;
+    const v = ((yr / sigmaY) % 1 + 1) % 1;
+    const hash = (u + gamma * v) % 1;
+    const frame = Math.min(frames - 1, Math.floor(hash * frames));
+    assignments.set(circle.id, frame);
+  }
+  return { assignments, frameCount: frames };
+}
+
+function computePatternFrameAssignments(circles, options = {}) {
+  const modeRaw = typeof options.mode === 'string' ? options.mode.toLowerCase() : PATTERN_ANIMATIONS.RING;
+  const requestedFrames = Number.isFinite(options.frames) ? Math.round(options.frames) : circles.length;
+  const stats = computeCircleStats(circles);
+  switch (modeRaw) {
+    case PATTERN_ANIMATIONS.LOG_SPIRAL:
+      return computeLogSpiralAssignments(circles, requestedFrames, stats, options.beta ?? 1.0);
+    case PATTERN_ANIMATIONS.CURVATURE:
+      return computeCurvatureAssignments(circles, requestedFrames);
+    case PATTERN_ANIMATIONS.GOLDEN_SECTOR:
+      return computeGoldenSectorAssignments(circles, requestedFrames, stats, options.spokes ?? null);
+    case PATTERN_ANIMATIONS.RIPPLE:
+      return computeRippleAssignments(circles, requestedFrames, stats);
+    case PATTERN_ANIMATIONS.ARM_INTERLEAVING:
+      return computeArmInterleavingAssignments(circles, requestedFrames, stats, options.beta ?? 1.0);
+    case PATTERN_ANIMATIONS.QUASI_MOIRE:
+      return computeQuasiMoireAssignments(circles, requestedFrames, stats, options.rotateDeg ?? 18);
+    case PATTERN_ANIMATIONS.RING:
+    default:
+      return computeRingAssignments(circles);
+  }
+}
+
 // ------------------------------------------------------------
 // Geometry primitives
 // ------------------------------------------------------------
@@ -863,6 +1120,8 @@ class ArcGroup {
     this._patternSegmentsCache = new Map();
     this.template = null;
     this.templateTransform = null;
+    this.patternFrame = null;
+    this.currentLineAngle = 0;
   }
 
   addArc(arc) {
@@ -1720,6 +1979,8 @@ class DoyleSpiralEngine {
     this._generated = false;
     this.arcGroups = new Map();
     this.fillPatternAngle = 0;
+    this.fillPatternFrameCount = 1;
+    this.fillPatternAnimation = PATTERN_ANIMATIONS.RING;
     this._ringTemplates = new Map();
   }
 
@@ -2216,11 +2477,15 @@ class DoyleSpiralEngine {
     fillPatternOffset = 0.0,
     fillPatternType = 'lines',
     fillPatternRectWidth = 2.0,
+    fillPatternAnimation = PATTERN_ANIMATIONS.RING,
+    fillPatternFrames = 180,
   } = {}) {
     this.generateOuterCircles();
     this.computeAllIntersections();
     context.setNormalizationScale(this.circles.concat(this.outerCircles));
     this.fillPatternAngle = fillPatternAngle;
+    this.fillPatternAnimation = fillPatternAnimation;
+    this.fillPatternFrameCount = Math.max(1, Math.round(fillPatternFrames || 1));
     this.arcGroups.clear();
     this._ringTemplates = new Map();
 
@@ -2231,6 +2496,53 @@ class DoyleSpiralEngine {
     this._drawOuterClosureArcs(spiralCenter, debugGroups, redOutline, addFillPattern, drawGroupOutline, context);
     this._extendGroupsWithNeighbours(spiralCenter);
     this._finalizeRingTemplates();
+
+    for (const group of this.arcGroups.values()) {
+      group.patternFrame = 0;
+      group.currentLineAngle = 0;
+    }
+
+    const circleGroups = [];
+    for (const [key, group] of this.arcGroups.entries()) {
+      if (!key.startsWith('circle_')) {
+        continue;
+      }
+      const circle = group.baseCircle || group.arcs[0]?.circle || null;
+      if (!circle) {
+        continue;
+      }
+      circleGroups.push({
+        id: circle.id,
+        x: circle.center.re,
+        y: circle.center.im,
+        r: circle.radius,
+        ringIndex: group.ringIndex ?? 0,
+        group,
+      });
+    }
+
+    const circleInfo = circleGroups.map(({ id, x, y, r, ringIndex }) => ({ id, x, y, r, ringIndex }));
+    const patternPlan = computePatternFrameAssignments(circleInfo, {
+      mode: fillPatternAnimation,
+      frames: fillPatternFrames,
+    });
+    const assignmentMap = patternPlan.assignments || new Map();
+    const frameCount = Math.max(1, patternPlan.frameCount || this.fillPatternFrameCount || 1);
+    this.fillPatternFrameCount = frameCount;
+    let angleStep = Number.isFinite(fillPatternAngle) ? fillPatternAngle : 0;
+    if (Math.abs(angleStep) < 1e-9) {
+      angleStep = 360 / frameCount;
+    }
+    this.fillPatternAngle = angleStep;
+
+    for (const entry of circleGroups) {
+      const assignedFrame = assignmentMap.get(entry.id);
+      const fallbackFrame = Math.max(0, entry.group.ringIndex ?? 0);
+      const frameIndexRaw = Number.isFinite(assignedFrame) ? assignedFrame : fallbackFrame;
+      const frameIndex = Math.max(0, Math.min(frameCount - 1, Math.round(frameIndexRaw)));
+      entry.group.patternFrame = frameIndex;
+      entry.group.currentLineAngle = frameIndex * angleStep;
+    }
 
     const ringIndices = Array.from(this.arcGroups.values())
       .filter(group => group.ringIndex !== null && group.ringIndex !== undefined)
@@ -2251,8 +2563,7 @@ class DoyleSpiralEngine {
         if (key.startsWith('outer_')) {
           continue;
         }
-        const ringIdx = group.ringIndex ?? 0;
-        const angle = ringIdx * fillPatternAngle;
+        const angle = group.currentLineAngle || 0;
         group.toSVGFill(context, {
           debug: false,
           patternFill: true,
@@ -2297,6 +2608,8 @@ class DoyleSpiralEngine {
     fillPatternOffset = 0.0,
     fillPatternType = 'lines',
     fillPatternRectWidth = 2.0,
+    fillPatternAnimation = PATTERN_ANIMATIONS.RING,
+    fillPatternFrames = 180,
   } = {}) {
     if (!this._generated) {
       this.generateCircles();
@@ -2319,6 +2632,8 @@ class DoyleSpiralEngine {
         fillPatternOffset,
         fillPatternType,
         fillPatternRectWidth,
+        fillPatternAnimation,
+        fillPatternFrames,
       });
       return {
         svg: context.toElement(),
@@ -2343,6 +2658,9 @@ class DoyleSpiralEngine {
         num_gaps: this.numGaps,
       },
       arcgroups: [],
+      pattern_animation: this.fillPatternAnimation,
+      pattern_frame_count: this.fillPatternFrameCount,
+      pattern_angle_step: this.fillPatternAngle,
     };
     for (const [key, group] of this.arcGroups.entries()) {
       if (key.startsWith('outer_')) {
@@ -2351,12 +2669,15 @@ class DoyleSpiralEngine {
       const outline = group.getClosedOutline();
       const outlinePoints = outline.map(pt => [pt.re, pt.im]);
       const ringIdx = group.ringIndex ?? 0;
-      const lineAngle = ringIdx * this.fillPatternAngle;
+      const lineAngle = Number.isFinite(group.currentLineAngle)
+        ? group.currentLineAngle
+        : ringIdx * this.fillPatternAngle;
       exportData.arcgroups.push({
         id: group.id,
         name: group.name,
         ring_index: group.ringIndex,
         line_angle: lineAngle,
+        pattern_frame: Number.isFinite(group.patternFrame) ? group.patternFrame : null,
         outline: outlinePoints,
         arc_count: group.arcs.length,
       });
@@ -2375,6 +2696,14 @@ function normaliseParams(params = {}) {
     : 'lines';
   const fillPatternType = patternTypeRaw === 'rectangles' ? 'rectangles' : 'lines';
   const rectWidthValue = Number(params.fill_pattern_rect_width ?? 2);
+  const animationRaw = typeof params.fill_pattern_animation === 'string'
+    ? params.fill_pattern_animation.toLowerCase()
+    : PATTERN_ANIMATIONS.RING;
+  const allowedAnimations = new Set(Object.values(PATTERN_ANIMATIONS));
+  const fillPatternAnimation = allowedAnimations.has(animationRaw)
+    ? animationRaw
+    : PATTERN_ANIMATIONS.RING;
+  const frameValue = Number(params.fill_pattern_frames ?? 0);
   return {
     p: Number(params.p ?? 16),
     q: Number(params.q ?? 16),
@@ -2390,6 +2719,8 @@ function normaliseParams(params = {}) {
     fill_pattern_offset: Number(params.fill_pattern_offset ?? 0),
     fill_pattern_type: fillPatternType,
     fill_pattern_rect_width: Math.max(0, Number.isFinite(rectWidthValue) ? rectWidthValue : 2),
+    fill_pattern_animation: fillPatternAnimation,
+    fill_pattern_frames: Math.max(1, Number.isFinite(frameValue) ? Math.round(frameValue) : 1),
     red_outline: Boolean(params.red_outline ?? false),
     draw_group_outline: params.draw_group_outline !== undefined ? Boolean(params.draw_group_outline) : true,
     max_d: Number(params.max_d ?? 2000),
@@ -2415,6 +2746,8 @@ function renderSpiral(params = {}, overrideMode = null) {
     fillPatternOffset: opts.fill_pattern_offset,
     fillPatternType: opts.fill_pattern_type,
     fillPatternRectWidth: opts.fill_pattern_rect_width,
+    fillPatternAnimation: opts.fill_pattern_animation,
+    fillPatternFrames: opts.fill_pattern_frames,
   });
   return {
     engine,

@@ -515,12 +515,43 @@
 
           <div class="fill-settings" id="fillSettings" hidden>
             <div class="field-group">
+              <label for="fillPatternType">Pattern style</label>
+              <select id="fillPatternType" name="fill_pattern_type">
+                <option value="lines" selected>Lines</option>
+                <option value="rectangles">Rectangles</option>
+              </select>
+            </div>
+            <div class="field-group">
+              <label for="fillPatternAnimation">Pattern animation</label>
+              <select id="fillPatternAnimation" name="fill_pattern_animation">
+                <option value="ring" selected>Ring progression</option>
+                <option value="log_spiral">Log-spiral sweep</option>
+                <option value="curvature">Curvature cascade</option>
+                <option value="golden_sector">Golden sector starburst</option>
+                <option value="ripple">Ripple from focus</option>
+                <option value="arm_interleaving">Arm interleaving</option>
+                <option value="quasi_moire">Quasi-moiré stripe scan</option>
+              </select>
+            </div>
+            <div class="field-group">
               <label for="fillSpacing">Line spacing</label>
               <input id="fillSpacing" name="fill_pattern_spacing" type="number" min="0.5" step="0.5" value="5" />
             </div>
             <div class="field-group">
-              <label for="fillAngle">Angle shift</label>
-              <input id="fillAngle" name="fill_pattern_angle" type="number" min="-180" max="180" step="1" value="0" />
+              <label for="fillAngle">Angle per frame</label>
+              <input id="fillAngle" name="fill_pattern_angle" type="number" min="-360" max="360" step="0.5" value="0" />
+            </div>
+            <div class="field-group">
+              <label for="fillPatternFrames">Pattern frames</label>
+              <input
+                id="fillPatternFrames"
+                name="fill_pattern_frames"
+                type="number"
+                min="1"
+                max="720"
+                step="1"
+                value="180"
+              />
             </div>
             <div class="field-group">
               <label for="fillOffset">Inset</label>
