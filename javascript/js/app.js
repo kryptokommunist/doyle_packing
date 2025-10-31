@@ -13,6 +13,7 @@ const tValue = document.getElementById('tValue');
 const fillToggle = document.getElementById('togglePattern');
 const fillSettings = document.getElementById('fillSettings');
 const fillPatternTypeSelect = document.getElementById('fillPatternType');
+const fillPatternAnimationSelect = document.getElementById('fillPatternAnimation');
 const fillRectWidthGroup = document.getElementById('rectWidthGroup');
 const outlineToggle = document.getElementById('toggleOutline');
 const redToggle = document.getElementById('toggleRed');
@@ -43,6 +44,7 @@ const DEFAULTS = {
   fill_pattern_offset: 0,
   fill_pattern_type: 'lines',
   fill_pattern_rect_width: 2,
+  fill_pattern_animation: 'ring',
 };
 
 let activeView = '2d';

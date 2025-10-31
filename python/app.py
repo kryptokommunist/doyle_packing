@@ -25,6 +25,7 @@ DEFAULT_PARAMS: Dict[str, Any] = {
     "fill_pattern_spacing": 5.0,
     "fill_pattern_angle": 0.0,
     "fill_pattern_offset": 0.0,
+    "fill_pattern_animation": "ring",
     "red_outline": False,
     "draw_group_outline": True,
 }
@@ -38,6 +39,23 @@ ALLOWED_ARC_MODES = {
     "random",
     "symmetric",
     "angular",
+}
+
+ALLOWED_PATTERN_ANIMATIONS = {
+    "ring",
+    "rings",
+    "log_spiral",
+    "log-spiral sweep",
+    "curvature_cascade",
+    "curvature cascade",
+    "golden_sector",
+    "golden sector starburst",
+    "ripple_focus",
+    "ripple from focus",
+    "arm_interleaving",
+    "arm interleaving",
+    "quasi_moire",
+    "quasi-moiré stripe scan",
 }
 
 
@@ -91,6 +109,8 @@ def _parse_params(source: Mapping[str, Any]) -> Dict[str, Any]:
     params["fill_pattern_spacing"] = max(0.1, as_float("fill_pattern_spacing", DEFAULT_PARAMS["fill_pattern_spacing"]))
     params["fill_pattern_angle"] = as_float("fill_pattern_angle", DEFAULT_PARAMS["fill_pattern_angle"])
     params["fill_pattern_offset"] = max(0.0, as_float("fill_pattern_offset", DEFAULT_PARAMS["fill_pattern_offset"]))
+    raw_animation = str(_get_value(source, "fill_pattern_animation", DEFAULT_PARAMS["fill_pattern_animation"])).strip().lower()
+    params["fill_pattern_animation"] = raw_animation if raw_animation in ALLOWED_PATTERN_ANIMATIONS else DEFAULT_PARAMS["fill_pattern_animation"]
     params["red_outline"] = _parse_bool(source, "red_outline", DEFAULT_PARAMS["red_outline"])
     params["draw_group_outline"] = _parse_bool(source, "draw_group_outline", DEFAULT_PARAMS["draw_group_outline"])
 
@@ -109,6 +129,7 @@ def _render_spiral(spiral: DoyleSpiral, params: Mapping[str, Any], *, mode: str 
         red_outline=params["red_outline"],
         draw_group_outline=params["draw_group_outline"],
         fill_pattern_offset=params["fill_pattern_offset"],
+        fill_pattern_animation=params["fill_pattern_animation"],
     )
 
     geometry = None
