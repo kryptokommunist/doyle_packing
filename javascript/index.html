@@ -521,6 +521,31 @@
               </select>
             </div>
             <div class="field-group">
+              <label for="fillAnimationPattern">Animation pattern</label>
+              <select id="fillAnimationPattern" name="fill_pattern_animation">
+                <option value="ring" selected>Ring sweep</option>
+                <option value="log_spiral">Log spiral sweep</option>
+                <option value="curvature_cascade">Curvature cascade</option>
+                <option value="golden_starburst">Golden sector starburst</option>
+                <option value="ripple_focus">Ripple from focus</option>
+                <option value="arm_interleaving">Arm interleaving</option>
+                <option value="quasi_moire">Quasi-moiré stripe scan</option>
+              </select>
+            </div>
+            <div class="field-group">
+              <label for="fillPatternFrames">Pattern frames</label>
+              <input
+                id="fillPatternFrames"
+                name="fill_pattern_frames"
+                type="number"
+                min="1"
+                max="720"
+                step="1"
+                value="0"
+                title="0 = automatic based on spiral"
+              />
+            </div>
+            <div class="field-group">
               <label for="fillSpacing">Line spacing</label>
               <input id="fillSpacing" name="fill_pattern_spacing" type="number" min="0.5" step="0.5" value="5" />
             </div>
