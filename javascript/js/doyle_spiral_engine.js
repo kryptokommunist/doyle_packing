@@ -198,6 +198,301 @@ function normaliseVector(vec) {
   return { x: vec.x / length, y: vec.y / length };
 }
 
+function wrapAngle(angle) {
+  if (!Number.isFinite(angle)) {
+    return 0;
+  }
+  let wrapped = angle % (2 * Math.PI);
+  if (wrapped < 0) {
+    wrapped += 2 * Math.PI;
+  }
+  return wrapped;
+}
+
+function positiveModulo(value, modulus) {
+  if (!Number.isFinite(value) || !Number.isFinite(modulus) || modulus === 0) {
+    return 0;
+  }
+  let result = value % modulus;
+  if (result < 0) {
+    result += modulus;
+  }
+  return result;
+}
+
+function fractionalPart(value) {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+  let frac = value - Math.floor(value);
+  if (frac < 0) {
+    frac += 1;
+  }
+  return frac;
+}
+
+function balancedFrameAssignment(sortedItems, frameCount, assign) {
+  const total = sortedItems.length;
+  if (!total) {
+    return;
+  }
+  const frames = Math.max(1, frameCount);
+  const base = Math.floor(total / frames);
+  const remainder = total % frames;
+  let index = 0;
+  for (let frame = 0; frame < frames; frame += 1) {
+    const size = base + (frame < remainder ? 1 : 0);
+    for (let i = 0; i < size && index < total; i += 1, index += 1) {
+      assign(sortedItems[index].info, frame);
+    }
+  }
+  while (index < total) {
+    assign(sortedItems[index].info, frames - 1);
+    index += 1;
+  }
+}
+
+function computeCircleSummary(circleInfos) {
+  if (!circleInfos.length) {
+    return {
+      minX: 0,
+      maxX: 0,
+      minY: 0,
+      maxY: 0,
+      width: 0,
+      height: 0,
+      centerX: 0,
+      centerY: 0,
+      avgRadius: 0,
+      maxRadius: 0,
+    };
+  }
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  let radiusSum = 0;
+  let maxRadius = 0;
+  for (const info of circleInfos) {
+    if (info.x < minX) {
+      minX = info.x;
+    }
+    if (info.x > maxX) {
+      maxX = info.x;
+    }
+    if (info.y < minY) {
+      minY = info.y;
+    }
+    if (info.y > maxY) {
+      maxY = info.y;
+    }
+    radiusSum += info.r;
+    if (info.r > maxRadius) {
+      maxRadius = info.r;
+    }
+  }
+  const width = maxX - minX;
+  const height = maxY - minY;
+  const centerX = (minX + maxX) / 2;
+  const centerY = (minY + maxY) / 2;
+  const avgRadius = radiusSum / circleInfos.length;
+  return { minX, maxX, minY, maxY, width, height, centerX, centerY, avgRadius, maxRadius };
+}
+
+function computeRingOrder(circleInfos) {
+  const unique = Array.from(
+    new Set(circleInfos.map(info => (info.ringIndex !== null && info.ringIndex !== undefined ? info.ringIndex : 0))),
+  ).sort((a, b) => a - b);
+  const mapping = new Map();
+  unique.forEach((value, idx) => mapping.set(value, idx));
+  return mapping;
+}
+
+function assignRingFrames(circleInfos, frames, assign, assignments) {
+  const ringOrder = computeRingOrder(circleInfos);
+  if (!ringOrder.size) {
+    circleInfos.forEach((info, idx) => {
+      if (!assignments.has(info.group)) {
+        assign(info, idx);
+      }
+    });
+    return;
+  }
+  circleInfos.forEach(info => {
+    if (assignments.has(info.group)) {
+      return;
+    }
+    const base = ringOrder.get(info.ringIndex);
+    const frame = base !== undefined ? base : 0;
+    assign(info, frame);
+  });
+}
+
+function assignPatternFrames(circleInfos, {
+  mode = 'ring',
+  frames: requestedFrames = null,
+  logSpiralBeta = 1.0,
+  goldenSpokes = null,
+  rippleFocus = null,
+  rippleWavelength = null,
+  armBeta = 1.0,
+  armACoeff = null,
+  armBCoeff = 1,
+  moireSigmaX = null,
+  moireSigmaY = null,
+  moireRotateDeg = 17,
+} = {}) {
+  const assignments = new Map();
+  if (!circleInfos || !circleInfos.length) {
+    return assignments;
+  }
+  const frames = Math.max(1, Math.floor(Number.isFinite(requestedFrames) ? requestedFrames : circleInfos.length));
+  const summary = computeCircleSummary(circleInfos);
+  const assignFrame = (info, rawFrame) => {
+    const value = Number.isFinite(rawFrame) ? Math.floor(rawFrame) : 0;
+    const normalized = positiveModulo(value, frames);
+    assignments.set(info.group, normalized);
+  };
+
+  const normalizedMode = typeof mode === 'string' ? mode.toLowerCase() : 'ring';
+
+  if (normalizedMode === 'log_spiral_sweep') {
+    const beta = Number.isFinite(logSpiralBeta) ? logSpiralBeta : 1.0;
+    const scored = circleInfos.map(info => {
+      const rho = Math.hypot(info.x, info.y);
+      const safeRho = Math.max(rho, 1e-9);
+      const theta = Math.atan2(info.y, info.x);
+      const phi = wrapAngle(theta - beta * Math.log(safeRho));
+      return { score: phi, info };
+    }).sort((a, b) => a.score - b.score);
+    balancedFrameAssignment(scored, frames, assignFrame);
+  } else if (normalizedMode === 'curvature_cascade') {
+    const scored = circleInfos.map(info => {
+      const radius = Math.max(info.r, 1e-9);
+      const kappa = 1 / radius;
+      const value = Math.log(kappa);
+      return { score: value, info };
+    }).sort((a, b) => a.score - b.score);
+    balancedFrameAssignment(scored, frames, assignFrame);
+  } else if (normalizedMode === 'golden_sector_starburst') {
+    const phiConst = (1 + Math.sqrt(5)) / 2;
+    const spokesCount = Number.isFinite(goldenSpokes) && goldenSpokes > 0 ? Math.floor(goldenSpokes) : null;
+    const scored = circleInfos.map(info => {
+      const theta = Math.atan2(info.y, info.x);
+      let u = fractionalPart(theta / (2 * Math.PI));
+      if (spokesCount) {
+        u = fractionalPart(u * spokesCount);
+      }
+      const h = fractionalPart(u * phiConst);
+      return { score: h, info };
+    }).sort((a, b) => a.score - b.score);
+    balancedFrameAssignment(scored, frames, assignFrame);
+  } else if (normalizedMode === 'ripple_focus') {
+    const focusX = rippleFocus && Number.isFinite(rippleFocus.x) ? rippleFocus.x : summary.centerX;
+    const focusY = rippleFocus && Number.isFinite(rippleFocus.y) ? rippleFocus.y : summary.centerY;
+    let wavelength = Number.isFinite(rippleWavelength) ? rippleWavelength : NaN;
+    if (!Number.isFinite(wavelength) || wavelength <= 1e-6) {
+      let maxDistance = 0;
+      for (const info of circleInfos) {
+        const d = Math.hypot(info.x - focusX, info.y - focusY);
+        if (d > maxDistance) {
+          maxDistance = d;
+        }
+      }
+      const avgRadius = summary.avgRadius || 1;
+      const defaultScale = maxDistance / Math.max(frames, 1);
+      wavelength = Math.max(defaultScale, avgRadius * 1.5, 1e-3);
+    }
+    circleInfos.forEach(info => {
+      const d = Math.hypot(info.x - focusX, info.y - focusY);
+      const phase = fractionalPart(d / wavelength);
+      const frame = Math.min(frames - 1, Math.floor(phase * frames));
+      assignFrame(info, frame);
+    });
+  } else if (normalizedMode === 'arm_interleaving') {
+    const beta = Number.isFinite(armBeta) ? armBeta : 1.0;
+    const arms = new Map();
+    circleInfos.forEach(info => {
+      const rho = Math.max(Math.hypot(info.x, info.y), 1e-9);
+      const theta = Math.atan2(info.y, info.x);
+      const armId = Math.round((theta - beta * Math.log(rho)) / (2 * Math.PI));
+      if (!arms.has(armId)) {
+        arms.set(armId, []);
+      }
+      arms.get(armId).push(info);
+    });
+    const uniqueArms = Array.from(arms.keys()).sort((a, b) => a - b);
+    const armIndexMap = new Map(uniqueArms.map((value, idx) => [value, idx]));
+    arms.forEach(list => {
+      list.sort((a, b) => Math.hypot(b.x, b.y) - Math.hypot(a.x, a.y));
+    });
+    const gcd = (a, b) => {
+      let x = Math.abs(a);
+      let y = Math.abs(b);
+      while (y) {
+        const temp = y;
+        y = x % y;
+        x = temp;
+      }
+      return x || 1;
+    };
+    let aCoeff = Number.isFinite(armACoeff) ? Math.floor(armACoeff) : null;
+    if (!aCoeff || gcd(aCoeff, frames) !== 1) {
+      aCoeff = 1;
+      for (let candidate = 1; candidate < frames; candidate += 1) {
+        if (gcd(candidate, frames) === 1) {
+          aCoeff = candidate;
+          break;
+        }
+      }
+    }
+    const bCoeff = Number.isFinite(armBCoeff) ? Math.floor(armBCoeff) : 1;
+    uniqueArms.forEach(armId => {
+      const list = arms.get(armId) || [];
+      const armIndex = armIndexMap.get(armId) ?? 0;
+      list.forEach((info, order) => {
+        const raw = aCoeff * order + bCoeff * armIndex;
+        assignFrame(info, raw);
+      });
+    });
+  } else if (normalizedMode === 'quasi_moire_scan') {
+    const rotate = Number.isFinite(moireRotateDeg) ? moireRotateDeg : 17;
+    const angle = degToRad(rotate);
+    const cosA = Math.cos(angle);
+    const sinA = Math.sin(angle);
+    let sigmaX = Number.isFinite(moireSigmaX) ? moireSigmaX : NaN;
+    let sigmaY = Number.isFinite(moireSigmaY) ? moireSigmaY : NaN;
+    if (!Number.isFinite(sigmaX) || sigmaX <= 1e-6) {
+      sigmaX = (summary.width || summary.height || 1) / Math.max(Math.sqrt(frames), 1);
+      if (!Number.isFinite(sigmaX) || sigmaX <= 1e-6) {
+        sigmaX = summary.avgRadius || 1;
+      }
+    }
+    if (!Number.isFinite(sigmaY) || sigmaY <= 1e-6) {
+      sigmaY = (summary.height || summary.width || 1) / Math.max(Math.sqrt(frames * 1.2), 1);
+      if (!Number.isFinite(sigmaY) || sigmaY <= 1e-6) {
+        sigmaY = summary.avgRadius || 1;
+      }
+    }
+    const gamma = Math.SQRT2;
+    circleInfos.forEach(info => {
+      const xr = cosA * info.x - sinA * info.y;
+      const yr = sinA * info.x + cosA * info.y;
+      const u = fractionalPart(xr / sigmaX);
+      const v = fractionalPart(yr / sigmaY);
+      const h = fractionalPart(u + gamma * v);
+      const frame = Math.min(frames - 1, Math.floor(h * frames));
+      assignFrame(info, frame);
+    });
+  }
+
+  if (assignments.size !== circleInfos.length) {
+    assignRingFrames(circleInfos, frames, assignFrame, assignments);
+  }
+
+  return assignments;
+}
+
 function inwardNormal(direction, orientationSign) {
   if (orientationSign >= 0) {
     return { x: -direction.y, y: direction.x };
@@ -307,6 +602,53 @@ function insetPolygon(points, offset) {
           x: curr.x + avg.x * offset,
           y: curr.y + avg.y * offset,
         });
+      }
+    }
+  }
+
+  _assignPatternAnglesToGroups(angleStep, animationMode, frameCount) {
+    const circleInfos = [];
+    for (const [key, group] of this.arcGroups.entries()) {
+      if (!key.startsWith('circle_')) {
+        continue;
+      }
+      const circle = group.baseCircle || group.arcs[0]?.circle || null;
+      if (!circle) {
+        continue;
+      }
+      circleInfos.push({
+        group,
+        circle,
+        x: circle.center.re,
+        y: circle.center.im,
+        r: Math.max(circle.radius, 1e-9),
+        ringIndex: group.ringIndex ?? 0,
+      });
+    }
+
+    const frames = Math.max(1, Math.floor(Number.isFinite(frameCount) ? frameCount : circleInfos.length || 1));
+    const assignments = assignPatternFrames(circleInfos, {
+      mode: animationMode,
+      frames,
+    });
+
+    for (const info of circleInfos) {
+      let frame = assignments.get(info.group);
+      if (!Number.isFinite(frame)) {
+        const fallback = info.ringIndex ?? 0;
+        frame = positiveModulo(fallback, frames);
+      }
+      const normalizedFrame = positiveModulo(Math.floor(frame), frames);
+      info.group.patternFrame = normalizedFrame;
+      info.group.patternAngle = angleStep * normalizedFrame;
+    }
+
+    for (const group of this.arcGroups.values()) {
+      if (group.patternFrame === undefined || group.patternFrame === null) {
+        group.patternFrame = 0;
+      }
+      if (group.patternAngle === undefined || group.patternAngle === null) {
+        group.patternAngle = angleStep * group.patternFrame;
       }
     }
   }
@@ -863,6 +1205,8 @@ class ArcGroup {
     this._patternSegmentsCache = new Map();
     this.template = null;
     this.templateTransform = null;
+    this.patternFrame = 0;
+    this.patternAngle = 0;
   }
 
   addArc(arc) {
@@ -1720,6 +2064,8 @@ class DoyleSpiralEngine {
     this._generated = false;
     this.arcGroups = new Map();
     this.fillPatternAngle = 0;
+    this.fillPatternAnimation = 'ring';
+    this.fillPatternFrames = 0;
     this._ringTemplates = new Map();
   }
 
@@ -2216,11 +2562,15 @@ class DoyleSpiralEngine {
     fillPatternOffset = 0.0,
     fillPatternType = 'lines',
     fillPatternRectWidth = 2.0,
+    fillPatternAnimation = 'ring',
+    fillPatternFrames = 0,
   } = {}) {
     this.generateOuterCircles();
     this.computeAllIntersections();
     context.setNormalizationScale(this.circles.concat(this.outerCircles));
     this.fillPatternAngle = fillPatternAngle;
+    this.fillPatternAnimation = fillPatternAnimation;
+    this.fillPatternFrames = Math.max(1, Math.floor(Number.isFinite(fillPatternFrames) ? fillPatternFrames : 1));
     this.arcGroups.clear();
     this._ringTemplates = new Map();
 
@@ -2231,6 +2581,7 @@ class DoyleSpiralEngine {
     this._drawOuterClosureArcs(spiralCenter, debugGroups, redOutline, addFillPattern, drawGroupOutline, context);
     this._extendGroupsWithNeighbours(spiralCenter);
     this._finalizeRingTemplates();
+    this._assignPatternAnglesToGroups(fillPatternAngle, fillPatternAnimation, this.fillPatternFrames);
 
     const ringIndices = Array.from(this.arcGroups.values())
       .filter(group => group.ringIndex !== null && group.ringIndex !== undefined)
@@ -2252,11 +2603,13 @@ class DoyleSpiralEngine {
           continue;
         }
         const ringIdx = group.ringIndex ?? 0;
-        const angle = ringIdx * fillPatternAngle;
+        const patternAngle = Number.isFinite(group.patternAngle)
+          ? group.patternAngle
+          : ringIdx * fillPatternAngle;
         group.toSVGFill(context, {
           debug: false,
           patternFill: true,
-          lineSettings: [fillPatternSpacing, angle],
+          lineSettings: [fillPatternSpacing, patternAngle],
           drawOutline: drawGroupOutline,
           lineOffset: fillPatternOffset,
           patternType: fillPatternType,
@@ -2297,6 +2650,8 @@ class DoyleSpiralEngine {
     fillPatternOffset = 0.0,
     fillPatternType = 'lines',
     fillPatternRectWidth = 2.0,
+    fillPatternAnimation = 'ring',
+    fillPatternFrames = 0,
   } = {}) {
     if (!this._generated) {
       this.generateCircles();
@@ -2319,6 +2674,8 @@ class DoyleSpiralEngine {
         fillPatternOffset,
         fillPatternType,
         fillPatternRectWidth,
+        fillPatternAnimation,
+        fillPatternFrames,
       });
       return {
         svg: context.toElement(),
@@ -2343,6 +2700,11 @@ class DoyleSpiralEngine {
         num_gaps: this.numGaps,
       },
       arcgroups: [],
+      animation: {
+        mode: this.fillPatternAnimation,
+        frames: this.fillPatternFrames,
+        angle_step: this.fillPatternAngle,
+      },
     };
     for (const [key, group] of this.arcGroups.entries()) {
       if (key.startsWith('outer_')) {
@@ -2351,12 +2713,16 @@ class DoyleSpiralEngine {
       const outline = group.getClosedOutline();
       const outlinePoints = outline.map(pt => [pt.re, pt.im]);
       const ringIdx = group.ringIndex ?? 0;
-      const lineAngle = ringIdx * this.fillPatternAngle;
+      const frame = Number.isFinite(group.patternFrame) ? group.patternFrame : ringIdx;
+      const lineAngle = Number.isFinite(group.patternAngle)
+        ? group.patternAngle
+        : frame * this.fillPatternAngle;
       exportData.arcgroups.push({
         id: group.id,
         name: group.name,
         ring_index: group.ringIndex,
         line_angle: lineAngle,
+        animation_frame: frame,
         outline: outlinePoints,
         arc_count: group.arcs.length,
       });
@@ -2375,6 +2741,21 @@ function normaliseParams(params = {}) {
     : 'lines';
   const fillPatternType = patternTypeRaw === 'rectangles' ? 'rectangles' : 'lines';
   const rectWidthValue = Number(params.fill_pattern_rect_width ?? 2);
+  const animationRaw = typeof params.fill_pattern_animation === 'string'
+    ? params.fill_pattern_animation.toLowerCase()
+    : 'ring';
+  const allowedAnimations = new Set([
+    'ring',
+    'log_spiral_sweep',
+    'curvature_cascade',
+    'golden_sector_starburst',
+    'ripple_focus',
+    'arm_interleaving',
+    'quasi_moire_scan',
+  ]);
+  const fillPatternAnimation = allowedAnimations.has(animationRaw) ? animationRaw : 'ring';
+  const frameCountRaw = Number(params.fill_pattern_frames ?? 0);
+  const fillPatternFrames = Math.max(1, Number.isFinite(frameCountRaw) ? Math.floor(frameCountRaw) : 1);
   return {
     p: Number(params.p ?? 16),
     q: Number(params.q ?? 16),
@@ -2388,6 +2769,8 @@ function normaliseParams(params = {}) {
     fill_pattern_spacing: Number(params.fill_pattern_spacing ?? 5),
     fill_pattern_angle: Number(params.fill_pattern_angle ?? 0),
     fill_pattern_offset: Number(params.fill_pattern_offset ?? 0),
+    fill_pattern_animation: fillPatternAnimation,
+    fill_pattern_frames: fillPatternFrames,
     fill_pattern_type: fillPatternType,
     fill_pattern_rect_width: Math.max(0, Number.isFinite(rectWidthValue) ? rectWidthValue : 2),
     red_outline: Boolean(params.red_outline ?? false),
@@ -2415,6 +2798,8 @@ function renderSpiral(params = {}, overrideMode = null) {
     fillPatternOffset: opts.fill_pattern_offset,
     fillPatternType: opts.fill_pattern_type,
     fillPatternRectWidth: opts.fill_pattern_rect_width,
+    fillPatternAnimation: opts.fill_pattern_animation,
+    fillPatternFrames: opts.fill_pattern_frames,
   });
   return {
     engine,

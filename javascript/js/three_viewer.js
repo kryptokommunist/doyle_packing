@@ -117,7 +117,7 @@ function createThreeViewer({
     spiralContainer.scale.set(1, 1, 1);
   }
 
-  function createPolygonMesh(outline, ringIndex = 0, lineAngle = 0) {
+  function createPolygonMesh(outline, ringIndex = 0, lineAngle = 0, animationFrame = 0) {
     if (!outline || outline.length < 3) {
       return null;
     }
@@ -145,6 +145,7 @@ function createThreeViewer({
     mesh.userData = {
       ringIndex,
       lineAngle: lineAngle || 0,
+      animationFrame: Number.isFinite(animationFrame) ? animationFrame : 0,
       isPulsing: false,
       wasInRange: false,
       pulseStart: 0,
@@ -158,7 +159,12 @@ function createThreeViewer({
     }
     clearSpiral();
     data.arcgroups.forEach(group => {
-      const mesh = createPolygonMesh(group.outline || [], group.ring_index, group.line_angle);
+      const mesh = createPolygonMesh(
+        group.outline || [],
+        group.ring_index,
+        group.line_angle,
+        group.animation_frame,
+      );
       if (mesh) {
         spiralContainer.add(mesh);
       }
