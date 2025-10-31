@@ -117,7 +117,7 @@ function createThreeViewer({
     spiralContainer.scale.set(1, 1, 1);
   }
 
-  function createPolygonMesh(outline, ringIndex = 0, lineAngle = 0) {
+  function createPolygonMesh(outline, ringIndex = 0, lineAngle = 0, patternFrame = null) {
     if (!outline || outline.length < 3) {
       return null;
     }
@@ -145,6 +145,7 @@ function createThreeViewer({
     mesh.userData = {
       ringIndex,
       lineAngle: lineAngle || 0,
+      patternFrame: Number.isFinite(patternFrame) ? patternFrame : null,
       isPulsing: false,
       wasInRange: false,
       pulseStart: 0,
@@ -157,8 +158,19 @@ function createThreeViewer({
       throw new Error('Invalid geometry payload');
     }
     clearSpiral();
+    const frameCount = Number.isFinite(data.pattern_frame_count) ? data.pattern_frame_count : null;
+    if (Number.isFinite(frameCount)) {
+      spiralContainer.userData.patternFrameCount = frameCount;
+    } else {
+      delete spiralContainer.userData.patternFrameCount;
+    }
     data.arcgroups.forEach(group => {
-      const mesh = createPolygonMesh(group.outline || [], group.ring_index, group.line_angle);
+      const mesh = createPolygonMesh(
+        group.outline || [],
+        group.ring_index,
+        group.line_angle,
+        group.pattern_frame,
+      );
       if (mesh) {
         spiralContainer.add(mesh);
       }
