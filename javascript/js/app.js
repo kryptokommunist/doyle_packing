@@ -41,6 +41,8 @@ const DEFAULTS = {
   fill_pattern_spacing: 5,
   fill_pattern_angle: 0,
   fill_pattern_offset: 0,
+  fill_pattern_animation: 'ring',
+  fill_pattern_frames: 180,
   fill_pattern_type: 'lines',
   fill_pattern_rect_width: 2,
 };
