@@ -1061,6 +1061,265 @@ class ArcElement(Shape):
         return dwg.path(d=" ".join(path_data), fill="none", stroke=color, stroke_width=width)
 
 # ============================================
+# Animation helpers for pattern assignments
+# ============================================
+
+GOLDEN_RATIO = (1 + math.sqrt(5)) / 2
+
+
+def wrap_angle(angle: float) -> float:
+    tau = 2 * math.pi
+    result = angle % tau
+    return result + tau if result < 0 else result
+
+
+def mod1(value: float) -> float:
+    result = value % 1.0
+    return result + 1.0 if result < 0 else result
+
+
+def balanced_groups_from_sorted(scored: List[Tuple[float, int]], frame_count: int) -> List[List[int]]:
+    groups: List[List[int]] = [[] for _ in range(max(frame_count, 0))]
+    if frame_count <= 0 or not scored:
+        return groups
+    total = len(scored)
+    base_size = total // frame_count
+    remainder = total % frame_count
+    cursor = 0
+    for frame in range(frame_count):
+        size = base_size + (1 if frame < remainder else 0)
+        for _ in range(size):
+            if cursor >= total:
+                break
+            groups[frame].append(scored[cursor][1])
+            cursor += 1
+    if cursor < total:
+        last_group = groups[-1]
+        while cursor < total:
+            last_group.append(scored[cursor][1])
+            cursor += 1
+    return groups
+
+
+def derive_frame_count(item_count: int, angle_step: float) -> int:
+    if item_count <= 0:
+        return 0
+    step = abs(angle_step)
+    if not math.isfinite(step) or step <= 1e-6:
+        return item_count
+    approx = round(360 / step)
+    if approx <= 0 or not math.isfinite(approx):
+        return item_count
+    return max(1, min(item_count, approx))
+
+
+def sequential_frame_map(item_count: int, frame_count: int) -> Dict[int, int]:
+    assignments: Dict[int, int] = {}
+    if item_count <= 0 or frame_count <= 0:
+        return assignments
+    for idx in range(item_count):
+        frame = min(frame_count - 1, int((idx * frame_count) / item_count))
+        assignments[idx] = frame
+    return assignments
+
+
+def groups_to_frame_map(grouped: Optional[List[List[int]]], item_count: int, frame_count: int) -> Dict[int, int]:
+    assignments: Dict[int, int] = {}
+    if frame_count <= 0 or not grouped:
+        return assignments
+    for frame, members in enumerate(grouped):
+        if not members:
+            continue
+        clamped = min(frame_count - 1, max(0, frame))
+        for idx in members:
+            if 0 <= idx < item_count and idx not in assignments:
+                assignments[idx] = clamped
+    if len(assignments) == item_count:
+        return assignments
+    missing = [idx for idx in range(item_count) if idx not in assignments]
+    if not missing:
+        return assignments
+    for order, idx in enumerate(missing):
+        frame = min(frame_count - 1, int((order * frame_count) / len(missing)))
+        assignments[idx] = frame
+    return assignments
+
+
+def compute_log_spiral_groups(items: List[Dict[str, float]], frame_count: int, beta: float = 1.0) -> List[List[int]]:
+    scored: List[Tuple[float, int]] = []
+    for idx, item in enumerate(items):
+        rho = math.hypot(item.get('x', 0.0), item.get('y', 0.0))
+        safe_rho = max(rho, 1e-9)
+        theta = math.atan2(item.get('y', 0.0), item.get('x', 0.0))
+        phi = wrap_angle(theta - beta * math.log(safe_rho))
+        scored.append((phi, idx))
+    scored.sort(key=lambda pair: pair[0])
+    return balanced_groups_from_sorted(scored, frame_count)
+
+
+def compute_curvature_cascade_groups(items: List[Dict[str, float]], frame_count: int) -> List[List[int]]:
+    scored = [(item.get('r', 0.0), idx) for idx, item in enumerate(items)]
+    scored.sort(key=lambda pair: pair[0], reverse=True)
+    return balanced_groups_from_sorted(scored, frame_count)
+
+
+def compute_golden_sector_groups(items: List[Dict[str, float]], frame_count: int) -> List[List[int]]:
+    scored: List[Tuple[float, int]] = []
+    for idx, item in enumerate(items):
+        theta = math.atan2(item.get('y', 0.0), item.get('x', 0.0))
+        u = mod1(theta / (2 * math.pi))
+        h = mod1(u * GOLDEN_RATIO)
+        scored.append((h, idx))
+    scored.sort(key=lambda pair: pair[0])
+    return balanced_groups_from_sorted(scored, frame_count)
+
+
+def compute_ripple_focus_groups(items: List[Dict[str, float]], frame_count: int, focus: Tuple[float, float]) -> List[List[int]]:
+    if frame_count <= 0 or not items:
+        return [[] for _ in range(max(frame_count, 0))]
+    fx, fy = focus
+    groups = [[] for _ in range(frame_count)]
+    distances: List[float] = []
+    max_dist = 0.0
+    for item in items:
+        dx = item.get('x', 0.0) - fx
+        dy = item.get('y', 0.0) - fy
+        dist = math.hypot(dx, dy)
+        distances.append(dist)
+        if dist > max_dist:
+            max_dist = dist
+    wavelength = max_dist / max(1, frame_count) if max_dist > 0 else 1.0
+    fallback: List[Tuple[float, int]] = []
+    for idx, dist in enumerate(distances):
+        phase = mod1(dist / max(1e-6, wavelength))
+        frame = min(frame_count - 1, int(math.floor(phase * frame_count)))
+        groups[frame].append(idx)
+        fallback.append((phase, idx))
+    if any(len(group) == 0 for group in groups):
+        fallback.sort(key=lambda pair: pair[0])
+        return balanced_groups_from_sorted(fallback, frame_count)
+    return groups
+
+
+def compute_arm_interleaving_groups(items: List[Dict[str, float]], frame_count: int, beta: float = 1.0) -> List[List[int]]:
+    groups = [[] for _ in range(max(frame_count, 0))]
+    if frame_count <= 0 or not items:
+        return groups
+    arms: Dict[int, List[Tuple[int, float]]] = {}
+    for idx, item in enumerate(items):
+        rho = math.hypot(item.get('x', 0.0), item.get('y', 0.0))
+        safe_rho = max(rho, 1e-9)
+        theta = math.atan2(item.get('y', 0.0), item.get('x', 0.0))
+        u = (theta - beta * math.log(safe_rho)) / (2 * math.pi)
+        arm_id = int(round(u))
+        arms.setdefault(arm_id, []).append((idx, rho))
+    coprime = 1
+    if frame_count > 1:
+        for candidate in range(1, frame_count):
+            if math.gcd(candidate, frame_count) == 1:
+                coprime = candidate
+                break
+    for arm_id, entries in arms.items():
+        entries.sort(key=lambda pair: pair[1], reverse=True)
+        for order, (idx, _) in enumerate(entries):
+            if frame_count == 1:
+                groups[0].append(idx)
+            else:
+                frame = (coprime * order + arm_id) % frame_count
+                groups[frame].append(idx)
+    if any(len(group) == 0 for group in groups):
+        scored: List[Tuple[float, int]] = []
+        for entries in arms.values():
+            for order, (idx, _) in enumerate(entries):
+                scored.append((float(order), idx))
+        scored.sort(key=lambda pair: pair[0])
+        return balanced_groups_from_sorted(scored, frame_count)
+    return groups
+
+
+def compute_quasi_moire_groups(items: List[Dict[str, float]], frame_count: int, rotate_deg: float = 18.0,
+                               sigx: Optional[float] = None, sigy: Optional[float] = None) -> List[List[int]]:
+    if frame_count <= 0 or not items:
+        return [[] for _ in range(max(frame_count, 0))]
+    xs = [item.get('x', 0.0) for item in items]
+    ys = [item.get('y', 0.0) for item in items]
+    span_x = max(1e-6, max(xs) - min(xs)) if xs else 1.0
+    span_y = max(1e-6, max(ys) - min(ys)) if ys else 1.0
+    avg_spacing = max((span_x + span_y) / (2 * math.sqrt(len(items) or 1)), 1e-6)
+    sigma_x = sigx if sigx and sigx > 0 else span_x / max(2, math.sqrt(frame_count))
+    sigma_y = sigy if sigy and sigy > 0 else span_y / max(2, math.sqrt(frame_count))
+    ca = math.cos(math.radians(rotate_deg))
+    sa = math.sin(math.radians(rotate_deg))
+    groups = [[] for _ in range(frame_count)]
+    scored: List[Tuple[float, int]] = []
+    for idx, item in enumerate(items):
+        x = item.get('x', 0.0)
+        y = item.get('y', 0.0)
+        xr = ca * x - sa * y
+        yr = sa * x + ca * y
+        u = mod1(xr / max(sigma_x, avg_spacing))
+        v = mod1(yr / max(sigma_y, avg_spacing))
+        h = mod1(u + math.sqrt(2) * v)
+        frame = min(frame_count - 1, int(math.floor(h * frame_count)))
+        groups[frame].append(idx)
+        scored.append((h, idx))
+    if any(len(group) == 0 for group in groups):
+        scored.sort(key=lambda pair: pair[0])
+        return balanced_groups_from_sorted(scored, frame_count)
+    return groups
+
+
+def compute_animation_frame_assignments(
+    items: List[Dict[str, float]],
+    angle_step: float,
+    pattern_name: str,
+    *,
+    spiral_center: Optional[Tuple[float, float]] = None,
+) -> Tuple[int, Dict[int, int]]:
+    item_count = len(items)
+    frame_count = derive_frame_count(item_count, angle_step)
+    if item_count == 0 or frame_count <= 0:
+        return max(0, frame_count), {}
+
+    pattern = (pattern_name or 'ring').lower()
+    normalized = [
+        {
+            'x': float(item.get('x', 0.0)),
+            'y': float(item.get('y', 0.0)),
+            'r': float(item.get('r', 0.0)),
+            'ring_index': int(item.get('ring_index', 0)),
+        }
+        for item in items
+    ]
+
+    grouped: Optional[List[List[int]]] = None
+    if pattern in {'ring', 'rings'}:
+        grouped = [[] for _ in range(frame_count)]
+        for idx, item in enumerate(normalized):
+            ring_index = item['ring_index']
+            frame = (ring_index % frame_count + frame_count) % frame_count
+            grouped[frame].append(idx)
+    elif pattern in {'log_spiral', 'log-spiral sweep'}:
+        grouped = compute_log_spiral_groups(normalized, frame_count)
+    elif pattern in {'curvature_cascade', 'curvature cascade'}:
+        grouped = compute_curvature_cascade_groups(normalized, frame_count)
+    elif pattern in {'golden_sector', 'golden sector starburst'}:
+        grouped = compute_golden_sector_groups(normalized, frame_count)
+    elif pattern in {'ripple_focus', 'ripple from focus'}:
+        focus = spiral_center if spiral_center is not None else (0.0, 0.0)
+        grouped = compute_ripple_focus_groups(normalized, frame_count, focus)
+    elif pattern in {'arm_interleaving', 'arm interleaving'}:
+        grouped = compute_arm_interleaving_groups(normalized, frame_count)
+    elif pattern in {'quasi_moire', 'quasi-moiré stripe scan'}:
+        grouped = compute_quasi_moire_groups(normalized, frame_count)
+
+    assignments = groups_to_frame_map(grouped, item_count, frame_count)
+    if not assignments:
+        return frame_count, sequential_frame_map(item_count, frame_count)
+    return frame_count, assignments
+
+
+# ============================================
 # ARC GROUP
 # Groups of arcs for outline rendering
 # ============================================
@@ -1092,6 +1351,9 @@ class ArcGroup:
         self.debug_stroke: Optional[str] = None
         # public: ring layer index within the Doyle spiral (0-based from smallest radius)
         self.ring_index: Optional[int] = None
+        self.base_circle: Optional[CircleElement] = None
+        self.animation_frame: Optional[int] = None
+        self.line_angle: float = 0.0
 
     def add_arc(self, arc: ArcElement):
         """
@@ -1461,6 +1723,7 @@ class DoyleSpiral:
         """
         key = name or f"circle_{circle.id}"
         group = ArcGroup(name=key)
+        group.base_circle = circle
         self.arc_groups[key] = group
         return group
 
@@ -1561,10 +1824,11 @@ class DoyleSpiral:
     
     # ---- Rendering ----
 
-    def _render_arram_boyle(self, context: DrawingContext, debug_groups: bool = False, 
-                           add_fill_pattern: bool = False, fill_pattern_spacing: float = 5.0, 
-                           fill_pattern_angle: float = 0.0, red_outline: bool = False, 
-                           draw_group_outline: bool = True, fill_pattern_offset: float = 0):
+    def _render_arram_boyle(self, context: DrawingContext, debug_groups: bool = False,
+                           add_fill_pattern: bool = False, fill_pattern_spacing: float = 5.0,
+                           fill_pattern_angle: float = 0.0, red_outline: bool = False,
+                           draw_group_outline: bool = True, fill_pattern_offset: float = 0,
+                           fill_pattern_animation: str = "ring"):
         """Render spiral in Arram-Boyle mode with arc groups.
         
         Creates arc groups for each circle, draws closure arcs, and optionally
@@ -1576,6 +1840,7 @@ class DoyleSpiral:
         context.set_normalization_scale(self.circles + self.outer_circles)
 
         self.fill_pattern_angle = fill_pattern_angle
+        self.fill_pattern_animation = fill_pattern_animation
         
         spiral_center = 0 + 0j
         self.arc_groups.clear()
@@ -1647,6 +1912,52 @@ class DoyleSpiral:
                 # render group fill/outline
                 group.to_svg_fill(context, debug=True, fill_opacity=0.25)
 
+        # Prepare animation assignments for fill rotation and playback
+        active_entries = []
+        for key, group in self.arc_groups.items():
+            if "outer" in key:
+                continue
+            base_circle = group.base_circle
+            if base_circle is None and group.arcs:
+                base_circle = group.arcs[0].circle
+            if base_circle is None:
+                continue
+            center = base_circle.center
+            active_entries.append({
+                'group': group,
+                'ring_index': group.ring_index if group.ring_index is not None else 0,
+                'x': center.real,
+                'y': center.imag,
+                'r': base_circle.radius,
+            })
+
+        animation_items = [
+            {
+                'x': entry['x'],
+                'y': entry['y'],
+                'r': entry['r'],
+                'ring_index': entry['ring_index'],
+            }
+            for entry in active_entries
+        ]
+        frame_count, assignments = compute_animation_frame_assignments(
+            animation_items,
+            fill_pattern_angle,
+            fill_pattern_animation,
+            spiral_center=(0.0, 0.0),
+        )
+        safe_frame_count = max(1, frame_count)
+        self.animation_frame_count = safe_frame_count
+
+        for idx, entry in enumerate(active_entries):
+            group = entry['group']
+            fallback_frame = (entry['ring_index'] % safe_frame_count + safe_frame_count) % safe_frame_count
+            assigned_frame = assignments.get(idx)
+            frame = assigned_frame if isinstance(assigned_frame, int) else fallback_frame
+            angle = frame * fill_pattern_angle
+            group.animation_frame = frame
+            group.line_angle = angle
+
         #"""
         # After drawing all arcs, render line fillings
         if add_fill_pattern:
@@ -1657,7 +1968,8 @@ class DoyleSpiral:
                 #group.to_svg_fill(context, debug=True, fill_opacity=0.25)
                 # Interpret fill_pattern_angle as per-ring angle offset (degrees)
                 ring_idx = group.ring_index if group.ring_index is not None else 0
-                line_settings = (fill_pattern_spacing, ring_idx * fill_pattern_angle)
+                line_angle = group.line_angle if isinstance(group.line_angle, (int, float)) else ring_idx * fill_pattern_angle
+                line_settings = (fill_pattern_spacing, line_angle)
                 group.to_svg_fill(context, debug=False, fill_opacity=0.25, pattern_fill=True, line_settings=line_settings, draw_outline=draw_group_outline, line_offset=fill_pattern_offset)
 
         #draw red outline if option is set
@@ -1682,7 +1994,9 @@ class DoyleSpiral:
             context.draw_scaled(c)  # Use default circle color
 
 
-    def to_svg(self, mode: str = "doyle", size: int = 800, debug_groups: bool = False, add_fill_pattern: bool = False, fill_pattern_spacing: float = 5.0, fill_pattern_angle: float = 0.0, red_outline: bool = False, draw_group_outline: bool = True, fill_pattern_offset: float = 0) -> str:
+    def to_svg(self, mode: str = "doyle", size: int = 800, debug_groups: bool = False, add_fill_pattern: bool = False,
+               fill_pattern_spacing: float = 5.0, fill_pattern_angle: float = 0.0, red_outline: bool = False,
+               draw_group_outline: bool = True, fill_pattern_offset: float = 0, fill_pattern_animation: str = "ring") -> str:
         """
         Generates the SVG representation of the spiral in the specified mode.
 
@@ -1696,6 +2010,7 @@ class DoyleSpiral:
             red_outline: If True, draw red outline on specific arcs.
             draw_group_outline: If True, draw the arc group polygon outlines (default: True).
             fill_pattern_offset: Inset distance from polygon edge for line clipping (positive = shrink inward).
+            fill_pattern_animation: Name of the animation pattern used to assign frame/angle offsets.
 
         Returns:
             A string containing the SVG representation of the spiral.
@@ -1714,7 +2029,17 @@ class DoyleSpiral:
         if mode == "doyle":
             self._render_doyle(context)
         elif mode == "arram_boyle":
-            self._render_arram_boyle(context, debug_groups=debug_groups, add_fill_pattern=add_fill_pattern, fill_pattern_spacing=fill_pattern_spacing, fill_pattern_angle=fill_pattern_angle, red_outline=red_outline, draw_group_outline=draw_group_outline, fill_pattern_offset=fill_pattern_offset)
+            self._render_arram_boyle(
+                context,
+                debug_groups=debug_groups,
+                add_fill_pattern=add_fill_pattern,
+                fill_pattern_spacing=fill_pattern_spacing,
+                fill_pattern_angle=fill_pattern_angle,
+                red_outline=red_outline,
+                draw_group_outline=draw_group_outline,
+                fill_pattern_offset=fill_pattern_offset,
+                fill_pattern_animation=fill_pattern_animation,
+            )
         else:
             raise ValueError(f"Unknown rendering mode: {mode}")
 
@@ -1748,6 +2073,10 @@ class DoyleSpiral:
                 "num_gaps": self.num_gaps,
             },
             "arcgroups": [],
+            "animation": {
+                "pattern": getattr(self, "fill_pattern_animation", "ring"),
+                "frame_count": getattr(self, "animation_frame_count", 0),
+            },
         }
 
         for group_key, group in self.arc_groups.items():
@@ -1764,7 +2093,8 @@ class DoyleSpiral:
             outline_points = [[p.real, p.imag] for p in outline] if outline else []
 
             ring_index = group.ring_index if group.ring_index is not None else 0
-            line_angle = ring_index * self.fill_pattern_angle
+            line_angle = group.line_angle if isinstance(group.line_angle, (int, float)) else ring_index * self.fill_pattern_angle
+            animation_frame = group.animation_frame if isinstance(group.animation_frame, int) else None
 
             export_data["arcgroups"].append({
                 "id": group.id,
@@ -1773,6 +2103,7 @@ class DoyleSpiral:
                 "line_angle": line_angle,
                 "outline": outline_points,
                 "arc_count": len(group.arcs),
+                "animation_frame": animation_frame,
             })
 
         return export_data

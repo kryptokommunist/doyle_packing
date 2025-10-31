@@ -503,6 +503,361 @@ function linesInPolygon(polygonPoints, spacing, angleDeg, offset = 0) {
   return segments;
 }
 
+const GOLDEN_RATIO = (1 + 5 ** 0.5) / 2;
+
+function wrapAngle(angle) {
+  const tau = 2 * Math.PI;
+  let result = angle % tau;
+  if (result < 0) {
+    result += tau;
+  }
+  return result;
+}
+
+function mod1(value) {
+  let result = value % 1;
+  if (result < 0) {
+    result += 1;
+  }
+  return result;
+}
+
+function balancedGroupsFromSorted(scored, frameCount) {
+  const groups = Array.from({ length: frameCount }, () => []);
+  if (!Array.isArray(scored) || !scored.length || frameCount <= 0) {
+    return groups;
+  }
+  const total = scored.length;
+  const baseSize = Math.floor(total / frameCount);
+  const remainder = total % frameCount;
+  let cursor = 0;
+  for (let frame = 0; frame < frameCount; frame += 1) {
+    const size = baseSize + (frame < remainder ? 1 : 0);
+    for (let n = 0; n < size && cursor < total; n += 1) {
+      groups[frame].push(scored[cursor].index);
+      cursor += 1;
+    }
+  }
+  if (cursor < total) {
+    const lastGroup = groups[Math.max(0, frameCount - 1)];
+    while (cursor < total) {
+      lastGroup.push(scored[cursor].index);
+      cursor += 1;
+    }
+  }
+  return groups;
+}
+
+function deriveFrameCount(itemCount, angleStep) {
+  if (!Number.isFinite(itemCount) || itemCount <= 0) {
+    return 0;
+  }
+  const step = Math.abs(angleStep);
+  if (!Number.isFinite(step) || step <= 1e-6) {
+    return itemCount;
+  }
+  const approx = Math.round(360 / step);
+  if (!Number.isFinite(approx) || approx <= 0) {
+    return itemCount;
+  }
+  return Math.max(1, Math.min(itemCount, approx));
+}
+
+function sequentialFrameMap(itemCount, frameCount) {
+  const assignments = new Map();
+  if (!Number.isFinite(itemCount) || itemCount <= 0 || frameCount <= 0) {
+    return assignments;
+  }
+  for (let idx = 0; idx < itemCount; idx += 1) {
+    const frame = Math.min(frameCount - 1, Math.floor((idx * frameCount) / itemCount));
+    assignments.set(idx, frame);
+  }
+  return assignments;
+}
+
+function groupsToFrameMap(grouped, itemCount, frameCount) {
+  const assignments = new Map();
+  if (!frameCount || frameCount <= 0) {
+    return assignments;
+  }
+  if (!Array.isArray(grouped) || !grouped.length) {
+    return assignments;
+  }
+  for (let frame = 0; frame < grouped.length; frame += 1) {
+    const members = grouped[frame];
+    if (!Array.isArray(members) || !members.length) {
+      continue;
+    }
+    const clampedFrame = Math.min(frameCount - 1, Math.max(0, frame));
+    for (const idx of members) {
+      if (idx >= 0 && idx < itemCount && !assignments.has(idx)) {
+        assignments.set(idx, clampedFrame);
+      }
+    }
+  }
+  if (assignments.size === itemCount) {
+    return assignments;
+  }
+  const missing = [];
+  for (let idx = 0; idx < itemCount; idx += 1) {
+    if (!assignments.has(idx)) {
+      missing.push(idx);
+    }
+  }
+  if (!missing.length) {
+    return assignments;
+  }
+  missing.forEach((idx, order) => {
+    const frame = Math.min(frameCount - 1, Math.floor((order * frameCount) / missing.length));
+    assignments.set(idx, frame);
+  });
+  return assignments;
+}
+
+function computeLogSpiralGroups(items, frameCount, { beta = 1.0 } = {}) {
+  const scored = [];
+  for (let idx = 0; idx < items.length; idx += 1) {
+    const item = items[idx];
+    const rho = Math.hypot(item.x, item.y);
+    const safeRho = Math.max(rho, 1e-9);
+    const theta = Math.atan2(item.y, item.x);
+    const phi = wrapAngle(theta - beta * Math.log(safeRho));
+    scored.push({ score: phi, index: idx });
+  }
+  scored.sort((a, b) => a.score - b.score);
+  return balancedGroupsFromSorted(scored, frameCount);
+}
+
+function computeCurvatureCascadeGroups(items, frameCount) {
+  const scored = [];
+  for (let idx = 0; idx < items.length; idx += 1) {
+    scored.push({ score: items[idx].r, index: idx });
+  }
+  scored.sort((a, b) => b.score - a.score);
+  return balancedGroupsFromSorted(scored, frameCount);
+}
+
+function computeGoldenSectorGroups(items, frameCount, { spokes = null } = {}) {
+  const scored = [];
+  for (let idx = 0; idx < items.length; idx += 1) {
+    const item = items[idx];
+    let theta = Math.atan2(item.y, item.x);
+    if (!Number.isFinite(theta)) {
+      theta = 0;
+    }
+    let u = mod1(theta / (2 * Math.PI));
+    if (spokes && Number.isFinite(spokes) && spokes > 0) {
+      u = mod1(u * spokes);
+    }
+    const h = mod1(u * GOLDEN_RATIO);
+    scored.push({ score: h, index: idx });
+  }
+  scored.sort((a, b) => a.score - b.score);
+  return balancedGroupsFromSorted(scored, frameCount);
+}
+
+function computeRippleFocusGroups(items, frameCount, { focus = { x: 0, y: 0 } } = {}) {
+  if (!items.length || frameCount <= 0) {
+    return Array.from({ length: frameCount }, () => []);
+  }
+  const groups = Array.from({ length: frameCount }, () => []);
+  const distances = [];
+  let maxDist = 0;
+  for (let idx = 0; idx < items.length; idx += 1) {
+    const item = items[idx];
+    const dx = item.x - focus.x;
+    const dy = item.y - focus.y;
+    const dist = Math.hypot(dx, dy);
+    distances.push(dist);
+    if (dist > maxDist) {
+      maxDist = dist;
+    }
+  }
+  const wavelength = maxDist > 0 ? maxDist / Math.max(1, frameCount) : 1;
+  const fallback = [];
+  for (let idx = 0; idx < items.length; idx += 1) {
+    const dist = distances[idx];
+    const phase = mod1(dist / Math.max(1e-6, wavelength));
+    let frame = Math.floor(phase * frameCount);
+    if (frame >= frameCount) {
+      frame = frameCount - 1;
+    }
+    groups[frame].push(idx);
+    fallback.push({ score: phase, index: idx });
+  }
+  if (groups.some(group => group.length === 0)) {
+    fallback.sort((a, b) => a.score - b.score);
+    return balancedGroupsFromSorted(fallback, frameCount);
+  }
+  return groups;
+}
+
+function gcd(a, b) {
+  let x = Math.abs(a);
+  let y = Math.abs(b);
+  while (y) {
+    const t = y;
+    y = x % y;
+    x = t;
+  }
+  return x;
+}
+
+function findCoprime(frameCount) {
+  if (frameCount <= 1) {
+    return 1;
+  }
+  for (let candidate = 1; candidate < frameCount; candidate += 1) {
+    if (gcd(candidate, frameCount) === 1) {
+      return candidate;
+    }
+  }
+  return 1;
+}
+
+function computeArmInterleavingGroups(items, frameCount, { beta = 1.0 } = {}) {
+  const groups = Array.from({ length: frameCount }, () => []);
+  if (!items.length || frameCount <= 0) {
+    return groups;
+  }
+  const arms = new Map();
+  for (let idx = 0; idx < items.length; idx += 1) {
+    const item = items[idx];
+    const rho = Math.hypot(item.x, item.y);
+    const safeRho = Math.max(rho, 1e-9);
+    const theta = Math.atan2(item.y, item.x);
+    const u = (theta - beta * Math.log(safeRho)) / (2 * Math.PI);
+    const armId = Math.round(u);
+    if (!arms.has(armId)) {
+      arms.set(armId, []);
+    }
+    arms.get(armId).push({ index: idx, rho });
+  }
+  const coprime = findCoprime(frameCount);
+  const b = 1;
+  arms.forEach((entries, armId) => {
+    entries.sort((a, bEntry) => bEntry.rho - a.rho);
+    entries.forEach((entry, order) => {
+      if (frameCount === 1) {
+        groups[0].push(entry.index);
+      } else {
+        let frame = (coprime * order + b * armId) % frameCount;
+        if (frame < 0) {
+          frame += frameCount;
+        }
+        groups[frame].push(entry.index);
+      }
+    });
+  });
+  if (groups.some(group => group.length === 0)) {
+    const scored = [];
+    arms.forEach(entries => {
+      entries.forEach((entry, order) => {
+        scored.push({ score: order, index: entry.index });
+      });
+    });
+    scored.sort((a, bEntry) => a.score - bEntry.score);
+    return balancedGroupsFromSorted(scored, frameCount);
+  }
+  return groups;
+}
+
+function computeQuasiMoireGroups(items, frameCount, {
+  rotateDeg = 18,
+  sigx = null,
+  sigy = null,
+} = {}) {
+  if (!items.length || frameCount <= 0) {
+    return Array.from({ length: frameCount }, () => []);
+  }
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (const item of items) {
+    if (item.x < minX) minX = item.x;
+    if (item.x > maxX) maxX = item.x;
+    if (item.y < minY) minY = item.y;
+    if (item.y > maxY) maxY = item.y;
+  }
+  const spanX = Math.max(1e-6, maxX - minX);
+  const spanY = Math.max(1e-6, maxY - minY);
+  const avgSpacing = Math.max((spanX + spanY) / (2 * Math.sqrt(items.length || 1)), 1e-6);
+  const sigmaX = sigx && sigx > 0 ? sigx : spanX / Math.max(2, Math.sqrt(frameCount));
+  const sigmaY = sigy && sigy > 0 ? sigy : spanY / Math.max(2, Math.sqrt(frameCount));
+  const ca = Math.cos((rotateDeg * Math.PI) / 180);
+  const sa = Math.sin((rotateDeg * Math.PI) / 180);
+  const groups = Array.from({ length: frameCount }, () => []);
+  const scored = [];
+  for (let idx = 0; idx < items.length; idx += 1) {
+    const item = items[idx];
+    const xr = ca * item.x - sa * item.y;
+    const yr = sa * item.x + ca * item.y;
+    const u = mod1(xr / Math.max(sigmaX, avgSpacing));
+    const v = mod1(yr / Math.max(sigmaY, avgSpacing));
+    const hash = mod1(u + Math.SQRT2 * v);
+    let frame = Math.floor(hash * frameCount);
+    if (frame >= frameCount) {
+      frame = frameCount - 1;
+    }
+    groups[frame].push(idx);
+    scored.push({ score: hash, index: idx });
+  }
+  if (groups.some(group => group.length === 0)) {
+    scored.sort((a, b) => a.score - b.score);
+    return balancedGroupsFromSorted(scored, frameCount);
+  }
+  return groups;
+}
+
+function computeAnimationFrameAssignments(items, angleStep, patternName, options = {}) {
+  const itemCount = items.length;
+  const frameCount = deriveFrameCount(itemCount, angleStep);
+  const assignments = new Map();
+  if (!itemCount || frameCount <= 0) {
+    return { frameCount: Math.max(0, frameCount), assignments };
+  }
+  const pattern = typeof patternName === 'string' ? patternName.toLowerCase() : 'ring';
+  const normalizedItems = items.map(item => ({
+    x: Number.isFinite(item.x) ? item.x : 0,
+    y: Number.isFinite(item.y) ? item.y : 0,
+    r: Number.isFinite(item.r) ? item.r : 0,
+    ringIndex: Number.isFinite(item.ringIndex) ? item.ringIndex : 0,
+  }));
+
+  let grouped = null;
+  if (pattern === 'ring' || pattern === 'rings') {
+    grouped = Array.from({ length: frameCount }, () => []);
+    for (let idx = 0; idx < normalizedItems.length; idx += 1) {
+      const ringIndex = normalizedItems[idx].ringIndex || 0;
+      const frame = ((ringIndex % frameCount) + frameCount) % frameCount;
+      grouped[frame].push(idx);
+    }
+  } else if (pattern === 'log_spiral' || pattern === 'log-spiral sweep') {
+    grouped = computeLogSpiralGroups(normalizedItems, frameCount, options);
+  } else if (pattern === 'curvature_cascade' || pattern === 'curvature cascade') {
+    grouped = computeCurvatureCascadeGroups(normalizedItems, frameCount);
+  } else if (pattern === 'golden_sector' || pattern === 'golden sector starburst') {
+    grouped = computeGoldenSectorGroups(normalizedItems, frameCount, options);
+  } else if (pattern === 'ripple_focus' || pattern === 'ripple from focus') {
+    const focus = options.spiralCenter || { x: 0, y: 0 };
+    grouped = computeRippleFocusGroups(normalizedItems, frameCount, { focus });
+  } else if (pattern === 'arm_interleaving' || pattern === 'arm interleaving') {
+    grouped = computeArmInterleavingGroups(normalizedItems, frameCount, options);
+  } else if (pattern === 'quasi_moire' || pattern === 'quasi-moiré stripe scan') {
+    grouped = computeQuasiMoireGroups(normalizedItems, frameCount, options);
+  }
+
+  const frameAssignments = groupsToFrameMap(grouped, itemCount, frameCount);
+  if (!frameAssignments.size) {
+    return {
+      frameCount,
+      assignments: sequentialFrameMap(itemCount, frameCount),
+    };
+  }
+  return { frameCount, assignments: frameAssignments };
+}
+
 // ------------------------------------------------------------
 // Geometry primitives
 // ------------------------------------------------------------
@@ -713,6 +1068,9 @@ class ArcGroup {
     this.debugStroke = null;
     this.ringIndex = null;
     this._outlineCache = null;
+    this.baseCircle = null;
+    this.animationFrame = null;
+    this.lineAngle = 0;
   }
 
   addArc(arc) {
@@ -1309,6 +1667,8 @@ class DoyleSpiralEngine {
     this._generated = false;
     this.arcGroups = new Map();
     this.fillPatternAngle = 0;
+    this.fillPatternAnimation = 'ring';
+    this.animationFrameCount = 0;
   }
 
   generateCircles() {
@@ -1396,6 +1756,7 @@ class DoyleSpiralEngine {
   createGroupForCircle(circle, name = null) {
     const key = name || `circle_${circle.id}`;
     const group = new ArcGroup(key);
+    group.baseCircle = circle;
     this.arcGroups.set(key, group);
     return group;
   }
@@ -1546,11 +1907,13 @@ class DoyleSpiralEngine {
     redOutline = false,
     drawGroupOutline = true,
     fillPatternOffset = 0.0,
+    fillPatternAnimation = 'ring',
   } = {}) {
     this.generateOuterCircles();
     this.computeAllIntersections();
     context.setNormalizationScale(this.circles.concat(this.outerCircles));
     this.fillPatternAngle = fillPatternAngle;
+    this.fillPatternAnimation = fillPatternAnimation;
     this.arcGroups.clear();
 
     const spiralCenter = Complex.ZERO;
@@ -1559,6 +1922,50 @@ class DoyleSpiralEngine {
     this._createArcGroupsForCircles(radiusToRing, spiralCenter, debugGroups, addFillPattern, drawGroupOutline, context);
     this._drawOuterClosureArcs(spiralCenter, debugGroups, redOutline, addFillPattern, drawGroupOutline, context);
     this._extendGroupsWithNeighbours(spiralCenter);
+
+    const activeEntries = [];
+    for (const [key, group] of this.arcGroups.entries()) {
+      if (key.startsWith('outer_')) {
+        continue;
+      }
+      const baseCircle = group.baseCircle || (group.arcs.length ? group.arcs[0].circle : null);
+      if (!baseCircle) {
+        continue;
+      }
+      const center = baseCircle.center || Complex.ZERO;
+      activeEntries.push({
+        key,
+        group,
+        ringIndex: group.ringIndex ?? 0,
+        x: center.re,
+        y: center.im,
+        r: baseCircle.radius,
+      });
+    }
+
+    const animationItems = activeEntries.map(entry => ({
+      x: entry.x,
+      y: entry.y,
+      r: entry.r,
+      ringIndex: entry.ringIndex,
+    }));
+    const { frameCount, assignments } = computeAnimationFrameAssignments(
+      animationItems,
+      fillPatternAngle,
+      fillPatternAnimation,
+      { spiralCenter: { x: spiralCenter.re, y: spiralCenter.im } },
+    );
+    const safeFrameCount = Math.max(1, frameCount || 0);
+    this.animationFrameCount = safeFrameCount;
+
+    activeEntries.forEach((entry, idx) => {
+      const fallbackFrame = ((entry.ringIndex % safeFrameCount) + safeFrameCount) % safeFrameCount;
+      const assignedFrame = assignments.get(idx);
+      const frame = Number.isFinite(assignedFrame) ? assignedFrame : fallbackFrame;
+      const angle = frame * fillPatternAngle;
+      entry.group.animationFrame = frame;
+      entry.group.lineAngle = angle;
+    });
 
     const ringIndices = Array.from(this.arcGroups.values())
       .filter(group => group.ringIndex !== null && group.ringIndex !== undefined)
@@ -1580,7 +1987,9 @@ class DoyleSpiralEngine {
           continue;
         }
         const ringIdx = group.ringIndex ?? 0;
-        const angle = ringIdx * fillPatternAngle;
+        const angle = typeof group.lineAngle === 'number' && Number.isFinite(group.lineAngle)
+          ? group.lineAngle
+          : ringIdx * fillPatternAngle;
         group.toSVGFill(context, {
           debug: false,
           patternFill: true,
@@ -1621,6 +2030,7 @@ class DoyleSpiralEngine {
     redOutline = false,
     drawGroupOutline = true,
     fillPatternOffset = 0.0,
+    fillPatternAnimation = 'ring',
   } = {}) {
     if (!this._generated) {
       this.generateCircles();
@@ -1641,6 +2051,7 @@ class DoyleSpiralEngine {
         redOutline,
         drawGroupOutline,
         fillPatternOffset,
+        fillPatternAnimation,
       });
       return {
         svg: context.toElement(),
@@ -1666,6 +2077,10 @@ class DoyleSpiralEngine {
       },
       arcgroups: [],
     };
+    exportData.animation = {
+      pattern: this.fillPatternAnimation || 'ring',
+      frame_count: this.animationFrameCount || 0,
+    };
     for (const [key, group] of this.arcGroups.entries()) {
       if (key.startsWith('outer_')) {
         continue;
@@ -1673,7 +2088,12 @@ class DoyleSpiralEngine {
       const outline = group.getClosedOutline();
       const outlinePoints = outline.map(pt => [pt.re, pt.im]);
       const ringIdx = group.ringIndex ?? 0;
-      const lineAngle = ringIdx * this.fillPatternAngle;
+      const lineAngle = Number.isFinite(group.lineAngle)
+        ? group.lineAngle
+        : ringIdx * this.fillPatternAngle;
+      const animationFrame = Number.isFinite(group.animationFrame)
+        ? group.animationFrame
+        : null;
       exportData.arcgroups.push({
         id: group.id,
         name: group.name,
@@ -1681,6 +2101,7 @@ class DoyleSpiralEngine {
         line_angle: lineAngle,
         outline: outlinePoints,
         arc_count: group.arcs.length,
+        animation_frame: animationFrame,
       });
     }
     return exportData;
@@ -1692,6 +2113,26 @@ class DoyleSpiralEngine {
 // ------------------------------------------------------------
 
 function normaliseParams(params = {}) {
+  const animationRaw = typeof params.fill_pattern_animation === 'string'
+    ? params.fill_pattern_animation.toLowerCase()
+    : 'ring';
+  const allowedAnimations = new Set([
+    'ring',
+    'rings',
+    'log_spiral',
+    'log-spiral sweep',
+    'curvature_cascade',
+    'curvature cascade',
+    'golden_sector',
+    'golden sector starburst',
+    'ripple_focus',
+    'ripple from focus',
+    'arm_interleaving',
+    'arm interleaving',
+    'quasi_moire',
+    'quasi-moiré stripe scan',
+  ]);
+  const fillPatternAnimation = allowedAnimations.has(animationRaw) ? animationRaw : 'ring';
   return {
     p: Number(params.p ?? 16),
     q: Number(params.q ?? 16),
@@ -1705,6 +2146,7 @@ function normaliseParams(params = {}) {
     fill_pattern_spacing: Number(params.fill_pattern_spacing ?? 5),
     fill_pattern_angle: Number(params.fill_pattern_angle ?? 0),
     fill_pattern_offset: Number(params.fill_pattern_offset ?? 0),
+    fill_pattern_animation: fillPatternAnimation,
     red_outline: Boolean(params.red_outline ?? false),
     draw_group_outline: params.draw_group_outline !== undefined ? Boolean(params.draw_group_outline) : true,
     max_d: Number(params.max_d ?? 2000),
@@ -1728,6 +2170,7 @@ function renderSpiral(params = {}, overrideMode = null) {
     redOutline: opts.red_outline,
     drawGroupOutline: opts.draw_group_outline,
     fillPatternOffset: opts.fill_pattern_offset,
+    fillPatternAnimation: opts.fill_pattern_animation,
   });
   return {
     engine,
