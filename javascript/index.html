@@ -268,6 +268,228 @@
       position: relative;
     }
 
+    .animation-card {
+      padding: 1.6rem;
+      gap: 1.5rem;
+    }
+
+    .animation-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 1.5rem;
+      flex-wrap: wrap;
+    }
+
+    .animation-header p {
+      color: var(--text-muted);
+      max-width: 40ch;
+      line-height: 1.4;
+      font-size: 0.9rem;
+    }
+
+    .animation-grid {
+      display: grid;
+      gap: 1.5rem;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      align-items: flex-start;
+    }
+
+    .animation-section {
+      display: grid;
+      gap: 1rem;
+    }
+
+    .animation-section h3 {
+      font-size: 0.95rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+    }
+
+    .hex-host {
+      display: flex;
+      justify-content: center;
+      padding: 0.75rem;
+    }
+
+    .hex-diagram {
+      width: 220px;
+      height: 220px;
+    }
+
+    .hex-diagram polygon {
+      fill: rgba(148, 163, 184, 0.22);
+      stroke: rgba(100, 116, 139, 0.5);
+      stroke-width: 1.4;
+      cursor: pointer;
+      transition: fill 0.2s ease, stroke 0.2s ease, transform 0.2s ease;
+    }
+
+    .hex-diagram polygon:hover {
+      transform: scale(1.02);
+    }
+
+    .hex-diagram polygon.is-active {
+      fill: rgba(37, 99, 235, 0.45);
+      stroke: rgba(37, 99, 235, 0.85);
+    }
+
+    .hex-diagram polygon.is-high {
+      fill: rgba(245, 158, 11, 0.55);
+      stroke: rgba(217, 119, 6, 0.9);
+    }
+
+    .frame-toolbar {
+      display: flex;
+      gap: 0.6rem;
+      flex-wrap: wrap;
+    }
+
+    .frame-list {
+      display: grid;
+      gap: 0.9rem;
+    }
+
+    .frame-card {
+      background: rgba(255, 255, 255, 0.7);
+      border-radius: 1rem;
+      border: 1px solid rgba(148, 163, 184, 0.26);
+      padding: 1rem 1.1rem;
+      display: grid;
+      gap: 0.9rem;
+      transition: box-shadow 0.2s ease, border 0.2s ease;
+    }
+
+    .frame-card.active {
+      border-color: rgba(37, 99, 235, 0.55);
+      box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+    }
+
+    .frame-card header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .frame-card header h4 {
+      font-size: 0.95rem;
+      font-weight: 600;
+    }
+
+    .frame-meta {
+      display: grid;
+      gap: 0.65rem;
+    }
+
+    .frame-meta label {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.85rem;
+      color: var(--text-muted);
+    }
+
+    .frame-meta input[type="number"] {
+      width: 100%;
+      padding: 0.45rem 0.6rem;
+      border-radius: 0.6rem;
+      border: 1px solid rgba(148, 163, 184, 0.35);
+      font-size: 0.85rem;
+    }
+
+    .neighbor-toggle-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 0.45rem;
+    }
+
+    .neighbor-toggle {
+      appearance: none;
+      border: none;
+      border-radius: 0.75rem;
+      padding: 0.5rem 0.6rem;
+      font-size: 0.75rem;
+      font-weight: 600;
+      background: rgba(148, 163, 184, 0.18);
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: background 0.2s ease, color 0.2s ease;
+    }
+
+    .neighbor-toggle.active {
+      background: rgba(37, 99, 235, 0.18);
+      color: var(--accent);
+    }
+
+    .neighbor-toggle.high {
+      background: rgba(245, 158, 11, 0.2);
+      color: #b45309;
+    }
+
+    .selection-buttons,
+    .selection-helpers {
+      display: grid;
+      gap: 0.6rem;
+    }
+
+    .selection-helpers {
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      align-items: end;
+    }
+
+    .selection-helpers label {
+      display: grid;
+      gap: 0.35rem;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+    }
+
+    .selection-helpers input {
+      width: 100%;
+      padding: 0.55rem 0.6rem;
+      border-radius: 0.65rem;
+      border: 1px solid rgba(148, 163, 184, 0.35);
+      font-size: 0.85rem;
+    }
+
+    .selection-summary {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      background: rgba(148, 163, 184, 0.12);
+      border-radius: 0.9rem;
+      padding: 0.75rem 1rem;
+    }
+
+    .arcgroup-hit {
+      fill: rgba(37, 99, 235, 0);
+      stroke: rgba(37, 99, 235, 0);
+      stroke-width: 1.2;
+      cursor: pointer;
+      pointer-events: auto;
+      transition: fill 0.2s ease, stroke 0.2s ease;
+    }
+
+    .arcgroup-hit:hover {
+      fill: rgba(37, 99, 235, 0.08);
+    }
+
+    .arcgroup-hit.state-selected {
+      fill: rgba(59, 130, 246, 0.3);
+      stroke: rgba(37, 99, 235, 0.75);
+    }
+
+    .arcgroup-hit.state-active {
+      fill: rgba(245, 158, 11, 0.34);
+      stroke: rgba(217, 119, 6, 0.8);
+    }
+
+    .arcgroup-hit.frame-active {
+      fill: rgba(236, 72, 153, 0.32);
+      stroke: rgba(219, 39, 119, 0.82);
+    }
+
     #svgPreview svg {
       width: 100%;
       height: 100%;
@@ -570,10 +792,57 @@
         <div class="view-toggle" role="group" aria-label="Preview mode">
           <button type="button" class="active" data-view="2d" aria-pressed="true">2D SVG</button>
           <button type="button" data-view="3d" aria-pressed="false">3D View</button>
+          <button type="button" data-view="animation" aria-pressed="false">Animation</button>
         </div>
 
         <div class="preview-card" id="view2d">
           <div id="svgPreview" class="empty-state">Rendering spiral…</div>
+        </div>
+
+        <div class="preview-card animation-card" id="animationPanel" hidden>
+          <div class="animation-header">
+            <div>
+              <h2>Animation Designer</h2>
+              <p>
+                Compose frame transitions for a generic arcgroup and map them onto the spiral. Click cells in the SVG to cycle
+                between no selection, selection (blue), and selection with activation (gold).
+              </p>
+            </div>
+            <div class="status" id="animationStatus">Select arcgroups to begin.</div>
+          </div>
+          <div class="animation-grid">
+            <section class="animation-section">
+              <h3>Frame sequence</h3>
+              <div class="hex-host" id="animationHexHost"></div>
+              <div class="frame-toolbar">
+                <button type="button" id="addAnimationFrame">Add frame</button>
+              </div>
+              <div class="frame-list" id="animationFrames"></div>
+            </section>
+            <section class="animation-section">
+              <h3>Apply to SVG</h3>
+              <p class="selection-summary" id="selectionInstructions">
+                Use the SVG preview to choose arcgroups. Selected cells highlight blue; golden cells are marked as high.
+              </p>
+              <div class="selection-buttons">
+                <button type="button" id="selectAllArcgroups">Select all arcgroups</button>
+                <button type="button" class="secondary" id="clearArcgroupSelection">Clear selection</button>
+              </div>
+              <div class="selection-helpers">
+                <label for="radialRepeat">
+                  Repeat every
+                  <input type="number" id="radialRepeat" min="1" value="3" />
+                </label>
+                <label for="radialWidth">
+                  Width (cells)
+                  <input type="number" id="radialWidth" min="1" value="1" />
+                </label>
+                <button type="button" class="secondary" id="applyRadialSelection">Apply radial selection</button>
+              </div>
+              <div class="selection-summary" id="selectionStats">No arcgroups selected.</div>
+              <button type="button" id="runAnimation">Animate sequence</button>
+            </section>
+          </div>
         </div>
 
         <div class="stats" id="stats" hidden>
