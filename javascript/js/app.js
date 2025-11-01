@@ -26,6 +26,18 @@ const threeStats = document.getElementById('threeStats');
 const fileInput = document.getElementById('threeFileInput');
 const exportButton = document.getElementById('exportSvgButton');
 const exportFilenameInput = document.getElementById('exportFilename');
+const animationPanel = document.getElementById('animationPanel');
+const animationStatus = document.getElementById('animationStatus');
+const animationHexHost = document.getElementById('animationHexHost');
+const animationFramesContainer = document.getElementById('animationFrames');
+const addAnimationFrameButton = document.getElementById('addAnimationFrame');
+const selectAllArcgroupsButton = document.getElementById('selectAllArcgroups');
+const clearArcgroupSelectionButton = document.getElementById('clearArcgroupSelection');
+const applyRadialSelectionButton = document.getElementById('applyRadialSelection');
+const radialRepeatInput = document.getElementById('radialRepeat');
+const radialWidthInput = document.getElementById('radialWidth');
+const runAnimationButton = document.getElementById('runAnimation');
+const selectionStatsElement = document.getElementById('selectionStats');
 
 const DEFAULTS = {
   p: 16,
@@ -53,6 +65,19 @@ const renderWorkerURL = workerSupported ? new URL('./render_worker.js', import.m
 let renderWorkerHandle = null;
 let currentRenderToken = 0;
 const svgParser = typeof DOMParser !== 'undefined' ? new DOMParser() : null;
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+let selectionState = new Map();
+let overlayElements = new Map();
+let arcgroupMetadata = { byId: new Map(), rings: new Map() };
+let frameIdCounter = 0;
+let animationFrames = [];
+let selectedFrameId = null;
+let hexDiagram = null;
+let animationTimer = null;
+let animationRunning = false;
+let currentFrameActive = new Set();
+let currentAnimationFrameIndex = 0;
 
 function sanitiseFileName(name) {
   return name.replace(/[\\/:*?"<>|]+/g, '-');
@@ -189,6 +214,711 @@ function pulseSettingsButton() {
   setTimeout(() => threeSettingsToggle.classList.remove('pulse'), 1200);
 }
 
+function setAnimationStatus(message, state = 'idle') {
+  if (!animationStatus) {
+    return;
+  }
+  animationStatus.textContent = message;
+  animationStatus.classList.remove('loading', 'error');
+  if (state !== 'idle') {
+    animationStatus.classList.add(state);
+  }
+}
+
+function computeCentroid(outline) {
+  if (!Array.isArray(outline) || !outline.length) {
+    return { x: 0, y: 0 };
+  }
+  let sumX = 0;
+  let sumY = 0;
+  let count = 0;
+  for (const point of outline) {
+    if (!Array.isArray(point) || point.length < 2) {
+      continue;
+    }
+    const x = Number(point[0]) || 0;
+    const y = Number(point[1]) || 0;
+    sumX += x;
+    sumY += y;
+    count += 1;
+  }
+  if (!count) {
+    return { x: 0, y: 0 };
+  }
+  return { x: sumX / count, y: sumY / count };
+}
+
+function pathDataFromOutline(outline) {
+  if (!Array.isArray(outline) || !outline.length) {
+    return '';
+  }
+  const commands = [];
+  outline.forEach((point, index) => {
+    if (!Array.isArray(point) || point.length < 2) {
+      return;
+    }
+    const x = Number(point[0]) || 0;
+    const y = Number(point[1]) || 0;
+    commands.push(`${index === 0 ? 'M' : 'L'}${x.toFixed(4)},${y.toFixed(4)}`);
+  });
+  commands.push('Z');
+  return commands.join(' ');
+}
+
+function createHexPoints(cx, cy, radius) {
+  const points = [];
+  for (let i = 0; i < 6; i += 1) {
+    const angle = (Math.PI / 180) * (60 * i - 30);
+    const x = cx + radius * Math.cos(angle);
+    const y = cy + radius * Math.sin(angle);
+    points.push(`${x.toFixed(2)},${y.toFixed(2)}`);
+  }
+  return points.join(' ');
+}
+
+function buildHexDiagram() {
+  if (!animationHexHost) {
+    return;
+  }
+  animationHexHost.innerHTML = '';
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('viewBox', '-80 -80 160 160');
+  svg.setAttribute('class', 'hex-diagram');
+  const radius = 20;
+  const offsetX = Math.sqrt(3) * radius;
+  const offsetY = 1.5 * radius;
+  const cells = [
+    { node: 'center', cx: 0, cy: 0 },
+    { node: '0', cx: offsetX, cy: 0 },
+    { node: '1', cx: offsetX / 2, cy: offsetY },
+    { node: '2', cx: -offsetX / 2, cy: offsetY },
+    { node: '3', cx: -offsetX, cy: 0 },
+    { node: '4', cx: -offsetX / 2, cy: -offsetY },
+    { node: '5', cx: offsetX / 2, cy: -offsetY },
+  ];
+  cells.forEach(cell => {
+    const polygon = document.createElementNS(SVG_NS, 'polygon');
+    polygon.setAttribute('points', createHexPoints(cell.cx, cell.cy, radius));
+    polygon.dataset.node = cell.node;
+    polygon.addEventListener('click', handleHexCellClick);
+    svg.appendChild(polygon);
+  });
+  animationHexHost.appendChild(svg);
+  hexDiagram = svg;
+  updateHexDiagram();
+}
+
+function updateHexDiagram() {
+  if (!hexDiagram) {
+    return;
+  }
+  const frame = getSelectedFrame();
+  hexDiagram.querySelectorAll('polygon').forEach(polygon => {
+    polygon.classList.remove('is-active', 'is-high');
+    if (!frame) {
+      return;
+    }
+    const node = polygon.dataset.node || '';
+    if (node === 'center') {
+      if (frame.centerActive) {
+        polygon.classList.add('is-high');
+      }
+      return;
+    }
+    const idx = Number(node);
+    if (Number.isInteger(idx) && frame.neighbours[idx]) {
+      polygon.classList.add('is-active');
+    }
+  });
+}
+
+function createFrame({ centerActive = false, neighbours = null, duration = 600 } = {}) {
+  const baseNeighbours = Array.isArray(neighbours) ? neighbours.slice(0, 6) : [];
+  while (baseNeighbours.length < 6) {
+    baseNeighbours.push(false);
+  }
+  frameIdCounter += 1;
+  return {
+    id: frameIdCounter,
+    centerActive: Boolean(centerActive),
+    neighbours: baseNeighbours.map(value => Boolean(value)),
+    duration: Math.max(50, Number(duration) || 600),
+  };
+}
+
+function getSelectedFrame() {
+  if (!selectedFrameId) {
+    return null;
+  }
+  return animationFrames.find(frame => frame.id === selectedFrameId) || null;
+}
+
+function renderFrameList() {
+  if (!animationFramesContainer) {
+    return;
+  }
+  animationFramesContainer.innerHTML = '';
+  animationFrames.forEach((frame, index) => {
+    const card = document.createElement('div');
+    card.className = 'frame-card';
+    card.dataset.frameId = String(frame.id);
+    if (frame.id === selectedFrameId) {
+      card.classList.add('active');
+    }
+
+    const header = document.createElement('header');
+    const title = document.createElement('h4');
+    title.textContent = `Frame ${index + 1}`;
+    header.appendChild(title);
+    const removeButton = document.createElement('button');
+    removeButton.type = 'button';
+    removeButton.className = 'secondary';
+    removeButton.dataset.action = 'remove-frame';
+    removeButton.dataset.frameId = String(frame.id);
+    removeButton.textContent = 'Remove';
+    removeButton.disabled = animationFrames.length <= 1;
+    header.appendChild(removeButton);
+    card.appendChild(header);
+
+    const meta = document.createElement('div');
+    meta.className = 'frame-meta';
+
+    const centerLabel = document.createElement('label');
+    const centerToggle = document.createElement('input');
+    centerToggle.type = 'checkbox';
+    centerToggle.className = 'frame-center-toggle';
+    centerToggle.dataset.frameId = String(frame.id);
+    centerToggle.checked = frame.centerActive;
+    centerLabel.appendChild(centerToggle);
+    centerLabel.appendChild(document.createTextNode('Center active'));
+    meta.appendChild(centerLabel);
+
+    const neighbourGrid = document.createElement('div');
+    neighbourGrid.className = 'neighbor-toggle-grid';
+    frame.neighbours.forEach((value, idx) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'neighbor-toggle';
+      if (value) {
+        btn.classList.add('active');
+      }
+      btn.dataset.frameId = String(frame.id);
+      btn.dataset.neighbourIndex = String(idx);
+      btn.textContent = `N${idx + 1}`;
+      neighbourGrid.appendChild(btn);
+    });
+    meta.appendChild(neighbourGrid);
+
+    const durationLabel = document.createElement('label');
+    durationLabel.textContent = 'Duration (ms)';
+    const durationInput = document.createElement('input');
+    durationInput.type = 'number';
+    durationInput.min = '50';
+    durationInput.step = '10';
+    durationInput.value = String(frame.duration);
+    durationInput.dataset.frameId = String(frame.id);
+    durationInput.className = 'frame-duration';
+    durationLabel.appendChild(durationInput);
+    meta.appendChild(durationLabel);
+
+    card.appendChild(meta);
+    animationFramesContainer.appendChild(card);
+  });
+}
+
+function selectFrame(frameId) {
+  if (!Number.isInteger(frameId)) {
+    return;
+  }
+  if (!animationFrames.some(frame => frame.id === frameId)) {
+    return;
+  }
+  selectedFrameId = frameId;
+  renderFrameList();
+  updateHexDiagram();
+}
+
+function addNewFrame() {
+  const template = getSelectedFrame() || animationFrames[animationFrames.length - 1] || null;
+  const frame = createFrame({
+    centerActive: template ? template.centerActive : false,
+    neighbours: template ? template.neighbours : Array(6).fill(false),
+    duration: template ? template.duration : 600,
+  });
+  animationFrames.push(frame);
+  selectedFrameId = frame.id;
+  renderFrameList();
+  updateHexDiagram();
+  stopAnimationLoop();
+}
+
+function removeFrame(frameId) {
+  if (animationFrames.length <= 1) {
+    return;
+  }
+  const index = animationFrames.findIndex(frame => frame.id === frameId);
+  if (index === -1) {
+    return;
+  }
+  animationFrames.splice(index, 1);
+  if (selectedFrameId === frameId) {
+    const fallback = animationFrames[Math.max(0, index - 1)] || animationFrames[0] || null;
+    selectedFrameId = fallback ? fallback.id : null;
+  }
+  renderFrameList();
+  updateHexDiagram();
+  stopAnimationLoop();
+}
+
+function handleFrameListClick(event) {
+  const target = event.target;
+  if (!target) {
+    return;
+  }
+  if (target.dataset.action === 'remove-frame') {
+    const frameId = Number(target.dataset.frameId);
+    if (Number.isInteger(frameId)) {
+      removeFrame(frameId);
+    }
+    return;
+  }
+  if (target.classList.contains('neighbor-toggle')) {
+    const frameId = Number(target.dataset.frameId);
+    const neighbourIndex = Number(target.dataset.neighbourIndex);
+    const frame = animationFrames.find(item => item.id === frameId);
+    if (frame && Number.isInteger(neighbourIndex) && neighbourIndex >= 0 && neighbourIndex < frame.neighbours.length) {
+      frame.neighbours[neighbourIndex] = !frame.neighbours[neighbourIndex];
+      selectedFrameId = frameId;
+      stopAnimationLoop();
+      renderFrameList();
+      updateHexDiagram();
+    }
+    return;
+  }
+  const card = target.closest('.frame-card');
+  if (card) {
+    const frameId = Number(card.dataset.frameId);
+    if (Number.isInteger(frameId) && frameId !== selectedFrameId) {
+      selectFrame(frameId);
+    }
+  }
+}
+
+function handleFrameListInput(event) {
+  const target = event.target;
+  if (!target) {
+    return;
+  }
+  const frameId = Number(target.dataset.frameId);
+  const frame = animationFrames.find(item => item.id === frameId);
+  if (!frame) {
+    return;
+  }
+  if (target.classList.contains('frame-duration')) {
+    const value = Math.max(50, Number(target.value) || 600);
+    frame.duration = value;
+  } else if (target.classList.contains('frame-center-toggle')) {
+    frame.centerActive = target.checked;
+  }
+  selectedFrameId = frameId;
+  stopAnimationLoop();
+  renderFrameList();
+  updateHexDiagram();
+}
+
+function handleHexCellClick(event) {
+  event.preventDefault();
+  const target = event.currentTarget;
+  if (!target) {
+    return;
+  }
+  const frame = getSelectedFrame();
+  if (!frame) {
+    return;
+  }
+  const node = target.dataset.node || '';
+  stopAnimationLoop();
+  if (node === 'center') {
+    frame.centerActive = !frame.centerActive;
+  } else {
+    const index = Number(node);
+    if (Number.isInteger(index) && index >= 0 && index < frame.neighbours.length) {
+      frame.neighbours[index] = !frame.neighbours[index];
+    }
+  }
+  renderFrameList();
+  updateHexDiagram();
+}
+
+function computeArcgroupMetadata(geometry) {
+  const metadata = { byId: new Map(), rings: new Map() };
+  if (!geometry || !Array.isArray(geometry.arcgroups)) {
+    return metadata;
+  }
+  const ringBuckets = new Map();
+  geometry.arcgroups.forEach(group => {
+    const outline = Array.isArray(group.outline) ? group.outline : [];
+    const centroid = computeCentroid(outline);
+    const angle = Math.atan2(centroid.y, centroid.x);
+    const ringIndex = Number.isFinite(group.ring_index) ? group.ring_index : 0;
+    const entry = {
+      id: group.id,
+      ringIndex,
+      centroid,
+      angle,
+      neighbours: Array.isArray(group.neighbours) ? group.neighbours.map(Number) : [],
+      angularIndex: 0,
+    };
+    metadata.byId.set(group.id, entry);
+    if (!ringBuckets.has(ringIndex)) {
+      ringBuckets.set(ringIndex, []);
+    }
+    ringBuckets.get(ringIndex).push(entry);
+  });
+  ringBuckets.forEach((entries, ringIndex) => {
+    entries.sort((a, b) => a.angle - b.angle);
+    entries.forEach((entry, index) => {
+      entry.angularIndex = index;
+    });
+    metadata.rings.set(ringIndex, entries.map(entry => entry.id));
+  });
+  return metadata;
+}
+
+function clearOverlayLayer(svgElement) {
+  if (!svgElement) {
+    return;
+  }
+  const existing = svgElement.querySelector('[data-interaction-layer]');
+  if (existing) {
+    existing.remove();
+  }
+}
+
+function handleArcgroupClick(event) {
+  event.preventDefault();
+  const target = event.currentTarget;
+  if (!target) {
+    return;
+  }
+  const id = Number(target.dataset.arcgroupId);
+  if (!Number.isFinite(id)) {
+    return;
+  }
+  cycleSelectionState(id);
+}
+
+function prepareSvgInteractions(svgElement, geometry) {
+  overlayElements.forEach(element => {
+    element.removeEventListener('click', handleArcgroupClick);
+  });
+  overlayElements = new Map();
+  clearOverlayLayer(svgElement);
+  currentFrameActive = new Set();
+
+  if (!svgElement || !geometry || !Array.isArray(geometry.arcgroups) || !geometry.arcgroups.length) {
+    arcgroupMetadata = { byId: new Map(), rings: new Map() };
+    selectionState = new Map();
+    updateSelectionHighlights();
+    updateSelectionStats();
+    pushSelectionStateToViewer();
+    pushFrameActiveToViewer(currentFrameActive);
+    setAnimationStatus('Animation controls require Arram-Boyle arcgroups.', 'error');
+    setOverlayInteractivity(false);
+    return;
+  }
+
+  stopAnimationLoop();
+  arcgroupMetadata = computeArcgroupMetadata(geometry);
+  const nextSelection = new Map();
+  arcgroupMetadata.byId.forEach((_, id) => {
+    if (selectionState.has(id)) {
+      nextSelection.set(id, selectionState.get(id));
+    }
+  });
+  selectionState = nextSelection;
+
+  const layer = document.createElementNS(SVG_NS, 'g');
+  layer.setAttribute('data-interaction-layer', 'true');
+
+  geometry.arcgroups.forEach(group => {
+    const id = Number(group.id);
+    if (!Number.isFinite(id)) {
+      return;
+    }
+    const pathData = pathDataFromOutline(group.outline || []);
+    if (!pathData) {
+      return;
+    }
+    const path = document.createElementNS(SVG_NS, 'path');
+    path.setAttribute('d', pathData);
+    path.setAttribute('fill', 'transparent');
+    path.setAttribute('stroke', 'transparent');
+    path.setAttribute('class', 'arcgroup-hit');
+    path.dataset.arcgroupId = String(id);
+    path.addEventListener('click', handleArcgroupClick);
+    layer.appendChild(path);
+    overlayElements.set(id, path);
+  });
+
+  svgElement.appendChild(layer);
+  setOverlayInteractivity(activeView === 'animation');
+  updateSelectionHighlights();
+  updateSelectionStats();
+  pushSelectionStateToViewer();
+  pushFrameActiveToViewer(currentFrameActive);
+  setAnimationStatus(selectionState.size ? 'Ready to animate.' : 'Select arcgroups to begin.');
+}
+
+function updateSelectionHighlights(activeSet = currentFrameActive) {
+  overlayElements.forEach((element, id) => {
+    element.classList.remove('state-selected', 'state-active', 'frame-active');
+    const state = selectionState.get(id);
+    if (state === 'selected' || state === 'active') {
+      element.classList.add('state-selected');
+    }
+    if (state === 'active') {
+      element.classList.add('state-active');
+    }
+    if (activeSet && activeSet.has(id)) {
+      element.classList.add('frame-active');
+    }
+  });
+}
+
+function setOverlayInteractivity(enabled) {
+  overlayElements.forEach(element => {
+    element.style.pointerEvents = enabled ? 'auto' : 'none';
+  });
+}
+
+function updateSelectionStats() {
+  if (!selectionStatsElement) {
+    return;
+  }
+  const totalSelected = Array.from(selectionState.values()).filter(value => value === 'selected' || value === 'active').length;
+  const totalActive = Array.from(selectionState.values()).filter(value => value === 'active').length;
+  if (!lastRender || !hasGeometry(lastRender.geometry)) {
+    selectionStatsElement.textContent = 'No arcgroups available.';
+    return;
+  }
+  if (!totalSelected) {
+    selectionStatsElement.textContent = 'No arcgroups selected.';
+    return;
+  }
+  let message = `${totalSelected} arcgroup${totalSelected === 1 ? '' : 's'} selected`;
+  if (totalActive) {
+    message += `, ${totalActive} high`;
+  }
+  selectionStatsElement.textContent = `${message}.`;
+}
+
+function cycleSelectionState(groupId) {
+  if (!Number.isInteger(groupId)) {
+    return;
+  }
+  const current = selectionState.get(groupId) || 'none';
+  let next;
+  if (current === 'none') {
+    next = 'selected';
+  } else if (current === 'selected') {
+    next = 'active';
+  } else {
+    next = 'none';
+  }
+  if (next === 'none') {
+    selectionState.delete(groupId);
+  } else {
+    selectionState.set(groupId, next);
+  }
+  stopAnimationLoop();
+  updateSelectionHighlights();
+  updateSelectionStats();
+  pushSelectionStateToViewer();
+  setAnimationStatus(selectionState.size ? 'Ready to animate.' : 'Select arcgroups to begin.');
+}
+
+function selectAllArcgroups() {
+  if (!arcgroupMetadata || !arcgroupMetadata.byId.size) {
+    return;
+  }
+  arcgroupMetadata.byId.forEach((_, id) => {
+    const current = selectionState.get(id);
+    if (current !== 'active') {
+      selectionState.set(id, 'selected');
+    }
+  });
+  stopAnimationLoop();
+  updateSelectionHighlights();
+  updateSelectionStats();
+  pushSelectionStateToViewer();
+  setAnimationStatus('All arcgroups selected.', 'idle');
+}
+
+function clearArcgroupSelection() {
+  if (!selectionState.size) {
+    return;
+  }
+  selectionState.clear();
+  stopAnimationLoop();
+  updateSelectionHighlights();
+  updateSelectionStats();
+  pushSelectionStateToViewer();
+  setAnimationStatus('Selection cleared.', 'idle');
+}
+
+function applyRadialSelection() {
+  if (!arcgroupMetadata || !arcgroupMetadata.byId.size) {
+    return;
+  }
+  const repeatEvery = Math.max(1, Math.floor(Number(radialRepeatInput?.value) || 1));
+  const width = Math.max(1, Math.floor(Number(radialWidthInput?.value) || 1));
+  arcgroupMetadata.byId.forEach((meta, id) => {
+    const angularIndex = Number.isFinite(meta.angularIndex) ? meta.angularIndex : 0;
+    if (angularIndex % repeatEvery < width) {
+      const current = selectionState.get(id);
+      if (current !== 'active') {
+        selectionState.set(id, 'selected');
+      }
+    }
+  });
+  stopAnimationLoop();
+  updateSelectionHighlights();
+  updateSelectionStats();
+  pushSelectionStateToViewer();
+  setAnimationStatus('Radial selection applied.', 'idle');
+}
+
+function pushSelectionStateToViewer() {
+  if (!threeApp || typeof threeApp.setSelectionState !== 'function') {
+    return;
+  }
+  const payload = {};
+  selectionState.forEach((value, key) => {
+    payload[key] = value;
+  });
+  threeApp.setSelectionState(payload);
+}
+
+function pushFrameActiveToViewer(activeSet) {
+  if (!threeApp || typeof threeApp.applyFrameHighlight !== 'function') {
+    return;
+  }
+  const payload = Array.from(activeSet || [], id => Number(id));
+  threeApp.applyFrameHighlight(payload);
+}
+
+function computeActiveIdsForFrame(frame) {
+  const active = new Set();
+  selectionState.forEach((state, id) => {
+    if (state === 'active') {
+      active.add(id);
+    }
+  });
+  if (!frame) {
+    return active;
+  }
+  if (frame.centerActive) {
+    selectionState.forEach((state, id) => {
+      if (state === 'selected' || state === 'active') {
+        active.add(id);
+      }
+    });
+  }
+  if (Array.isArray(frame.neighbours) && arcgroupMetadata && arcgroupMetadata.byId) {
+    selectionState.forEach((state, id) => {
+      if (state !== 'selected' && state !== 'active') {
+        return;
+      }
+      const meta = arcgroupMetadata.byId.get(id);
+      if (!meta || !Array.isArray(meta.neighbours)) {
+        return;
+      }
+      frame.neighbours.forEach((flag, index) => {
+        if (!flag) {
+          return;
+        }
+        const neighbourId = meta.neighbours[index];
+        if (Number.isFinite(neighbourId)) {
+          active.add(neighbourId);
+        }
+      });
+    });
+  }
+  return active;
+}
+
+function ensureViewerGeometrySync() {
+  if (!lastRender || !hasGeometry(lastRender.geometry)) {
+    return;
+  }
+  const viewer = ensureThreeApp();
+  if (!viewer) {
+    return;
+  }
+  if (typeof viewer.useGeometryFromPayload === 'function') {
+    viewer.useGeometryFromPayload(lastRender.params || collectParams(), lastRender.geometry);
+  }
+  pushSelectionStateToViewer();
+}
+
+function stopAnimationLoop() {
+  if (animationTimer) {
+    clearTimeout(animationTimer);
+    animationTimer = null;
+  }
+  const wasRunning = animationRunning;
+  animationRunning = false;
+  currentFrameActive = new Set();
+  if (runAnimationButton) {
+    runAnimationButton.textContent = 'Animate sequence';
+  }
+  updateSelectionHighlights();
+  pushFrameActiveToViewer(currentFrameActive);
+  const message = selectionState.size ? 'Ready to animate.' : 'Select arcgroups to begin.';
+  if (wasRunning) {
+    setAnimationStatus(selectionState.size ? 'Animation stopped.' : 'Select arcgroups to begin.');
+  } else if (activeView === 'animation') {
+    setAnimationStatus(message);
+  }
+}
+
+function scheduleNextAnimationFrame() {
+  if (!animationRunning) {
+    return;
+  }
+  const frame = animationFrames[currentAnimationFrameIndex] || animationFrames[0] || null;
+  if (!frame) {
+    stopAnimationLoop();
+    return;
+  }
+  currentFrameActive = computeActiveIdsForFrame(frame);
+  updateSelectionHighlights(currentFrameActive);
+  pushFrameActiveToViewer(currentFrameActive);
+  const duration = Math.max(50, Number(frame.duration) || 600);
+  animationTimer = setTimeout(() => {
+    currentAnimationFrameIndex = (currentAnimationFrameIndex + 1) % animationFrames.length;
+    scheduleNextAnimationFrame();
+  }, duration);
+}
+
+function startAnimationLoop() {
+  if (!animationFrames.length) {
+    setAnimationStatus('Add at least one frame to animate.', 'error');
+    return;
+  }
+  if (!selectionState.size) {
+    setAnimationStatus('Select arcgroups before animating.', 'error');
+    return;
+  }
+  ensureViewerGeometrySync();
+  animationRunning = true;
+  currentAnimationFrameIndex = 0;
+  runAnimationButton && (runAnimationButton.textContent = 'Stop animation');
+  setAnimationStatus('Animation running…', 'loading');
+  scheduleNextAnimationFrame();
+}
+
 function ensureThreeApp() {
   if (threeApp) {
     return threeApp;
@@ -288,6 +1018,8 @@ function handleRenderSuccess(result) {
 
   lastRender = { params, geometry, mode, svgString };
 
+  prepareSvgInteractions(svgElement, geometry);
+
   updateStats(geometry);
   statMode.textContent = mode === 'arram_boyle' ? 'Arram-Boyle' : 'Classic Doyle';
   setStatus('Spiral updated. Switch views to explore it in 3D.');
@@ -300,6 +1032,9 @@ function handleRenderSuccess(result) {
       threeApp.queueGeometryUpdate(params, true);
     }
   }
+
+  pushSelectionStateToViewer();
+  pushFrameActiveToViewer(currentFrameActive);
 }
 
 function handleRenderFailure(message) {
@@ -308,6 +1043,7 @@ function handleRenderFailure(message) {
   setStatus(message || 'Unexpected error', 'error');
   lastRender = null;
   updateExportAvailability(false);
+  prepareSvgInteractions(null, null);
 }
 
 function startRenderJob(params, showLoading) {
@@ -413,7 +1149,12 @@ viewButtons.forEach(button => {
     });
 
     const show3d = view === '3d';
-    view2d.hidden = show3d;
+    const showAnimation = view === 'animation';
+    const show2d = view === '2d' || showAnimation;
+    view2d.hidden = !show2d;
+    if (animationPanel) {
+      animationPanel.hidden = !showAnimation;
+    }
     view3d.hidden = !show3d;
     updateStats(lastRender ? lastRender.geometry : null);
 
@@ -428,7 +1169,11 @@ viewButtons.forEach(button => {
           app.queueGeometryUpdate(params, true);
         }
       }
+    } else if (showAnimation) {
+      setAnimationStatus(selectionState.size ? 'Ready to animate.' : 'Select arcgroups to begin.');
+      updateSelectionHighlights();
     }
+    setOverlayInteractivity(showAnimation);
   });
 });
 
@@ -447,6 +1192,51 @@ if (exportButton) {
 if (fillPatternTypeSelect) {
   fillPatternTypeSelect.addEventListener('change', updatePatternTypeVisibility);
 }
+
+if (animationFramesContainer) {
+  animationFramesContainer.addEventListener('click', handleFrameListClick);
+  animationFramesContainer.addEventListener('input', handleFrameListInput);
+}
+
+if (addAnimationFrameButton) {
+  addAnimationFrameButton.addEventListener('click', addNewFrame);
+}
+
+if (selectAllArcgroupsButton) {
+  selectAllArcgroupsButton.addEventListener('click', selectAllArcgroups);
+}
+
+if (clearArcgroupSelectionButton) {
+  clearArcgroupSelectionButton.addEventListener('click', clearArcgroupSelection);
+}
+
+if (applyRadialSelectionButton) {
+  applyRadialSelectionButton.addEventListener('click', applyRadialSelection);
+}
+
+if (runAnimationButton) {
+  runAnimationButton.addEventListener('click', () => {
+    if (animationRunning) {
+      stopAnimationLoop();
+    } else {
+      startAnimationLoop();
+    }
+  });
+}
+
+if (!animationFrames.length) {
+  animationFrames = [
+    createFrame({ centerActive: true }),
+    createFrame({ centerActive: false }),
+  ];
+  selectedFrameId = animationFrames[0].id;
+}
+
+buildHexDiagram();
+renderFrameList();
+updateHexDiagram();
+updateSelectionStats();
+setAnimationStatus('Render the spiral to begin.');
 
 updateExportAvailability(false);
 toggleFillSettings();

@@ -863,6 +863,8 @@ class ArcGroup {
     this._patternSegmentsCache = new Map();
     this.template = null;
     this.templateTransform = null;
+    this.neighbourKeys = new Set();
+    this.neighbourIds = [];
   }
 
   addArc(arc) {
@@ -1153,6 +1155,7 @@ class ArcGroup {
         patternSegments: segments,
         patternType,
         rectWidth,
+        dataId: this.id,
       });
       return;
     }
@@ -1161,6 +1164,7 @@ class ArcGroup {
         fill: null,
         stroke: '#000000',
         strokeWidth: 0.6,
+        dataId: this.id,
       });
     }
   }
@@ -1313,6 +1317,7 @@ class DrawingContext {
     patternSegments = null,
     patternType = 'lines',
     rectWidth = 2,
+    dataId = null,
   } = {}) {
     if (!points || !points.length) {
       return;
@@ -1342,6 +1347,7 @@ class DrawingContext {
             stroke: stroke || 'none',
             'stroke-width': strokeWidth.toString(),
             'stroke-linejoin': 'round',
+            'data-arcgroup-id': dataId !== null && dataId !== undefined ? String(dataId) : undefined,
           });
         } else {
           const polygon = document.createElementNS(SVG_NS, 'polygon');
@@ -1350,6 +1356,9 @@ class DrawingContext {
           polygon.setAttribute('stroke', stroke || 'none');
           polygon.setAttribute('stroke-width', strokeWidth.toString());
           polygon.setAttribute('stroke-linejoin', 'round');
+          if (dataId !== null && dataId !== undefined) {
+            polygon.dataset.arcgroupId = String(dataId);
+          }
           this.mainGroup.appendChild(polygon);
         }
       }
@@ -1431,6 +1440,7 @@ class DrawingContext {
       const attrs = {
         points: polygonPoints,
         fill: fill ? fill : 'none',
+        'data-arcgroup-id': dataId !== null && dataId !== undefined ? String(dataId) : undefined,
       };
       if (fill) {
         attrs['fill-opacity'] = fillOpacity.toString();
@@ -1459,6 +1469,9 @@ class DrawingContext {
       polygon.setAttribute('stroke-linejoin', 'round');
     } else {
       polygon.setAttribute('stroke', 'none');
+    }
+    if (dataId !== null && dataId !== undefined) {
+      polygon.dataset.arcgroupId = String(dataId);
     }
     this.mainGroup.appendChild(polygon);
   }
@@ -1721,6 +1734,7 @@ class DoyleSpiralEngine {
     this.arcGroups = new Map();
     this.fillPatternAngle = 0;
     this._ringTemplates = new Map();
+    this._patternBaseRotation = 0;
   }
 
   generateCircles() {
@@ -2019,6 +2033,12 @@ class DoyleSpiralEngine {
       const ring = radiusToRing.get(Number(circle.radius.toFixed(6)));
       group.ringIndex = ring !== undefined ? ring : null;
       group.baseCircle = circle;
+      const neighbourCircles = circle.getNeighbourCircles(6, spiralCenter, true, true) || [];
+      for (const neighbour of neighbourCircles) {
+        if (neighbour && neighbour !== circle) {
+          group.neighbourKeys.add(`circle_${neighbour.id}`);
+        }
+      }
       if (debugGroups) {
         group.debugFill = colorFromSeed(circle.id);
         group.debugStroke = '#000000';
@@ -2204,6 +2224,34 @@ class DoyleSpiralEngine {
         }
       }
     }
+
+    const idLookup = new Map();
+    for (const [key, group] of this.arcGroups.entries()) {
+      if (!key.startsWith('circle_')) {
+        continue;
+      }
+      idLookup.set(key, group.id);
+    }
+    for (const [key, group] of this.arcGroups.entries()) {
+      if (!key.startsWith('circle_')) {
+        continue;
+      }
+      if (!group.neighbourKeys || !group.neighbourKeys.size) {
+        group.neighbourIds = [];
+        continue;
+      }
+      const ids = new Set();
+      for (const neighbourKey of group.neighbourKeys) {
+        if (!idLookup.has(neighbourKey)) {
+          continue;
+        }
+        const neighbourId = idLookup.get(neighbourKey);
+        if (neighbourId !== undefined && neighbourId !== null) {
+          ids.add(neighbourId);
+        }
+      }
+      group.neighbourIds = Array.from(ids);
+    }
   }
 
   _renderArramBoyle(context, {
@@ -2220,7 +2268,12 @@ class DoyleSpiralEngine {
     this.generateOuterCircles();
     this.computeAllIntersections();
     context.setNormalizationScale(this.circles.concat(this.outerCircles));
-    this.fillPatternAngle = fillPatternAngle;
+    const perRingRotation = Number.isFinite(fillPatternAngle) ? fillPatternAngle : 0;
+    const baseRotationStep = Number.isFinite(this.p) && Math.abs(this.p) > 1e-9
+      ? 360 / this.p
+      : 0;
+    this.fillPatternAngle = perRingRotation;
+    this._patternBaseRotation = baseRotationStep;
     this.arcGroups.clear();
     this._ringTemplates = new Map();
 
@@ -2252,7 +2305,8 @@ class DoyleSpiralEngine {
           continue;
         }
         const ringIdx = group.ringIndex ?? 0;
-        const angle = ringIdx * fillPatternAngle;
+        const rawAngle = ringIdx * perRingRotation + ringIdx * baseRotationStep;
+        const angle = ((rawAngle % 180) + 180) % 180;
         group.toSVGFill(context, {
           debug: false,
           patternFill: true,
@@ -2351,7 +2405,10 @@ class DoyleSpiralEngine {
       const outline = group.getClosedOutline();
       const outlinePoints = outline.map(pt => [pt.re, pt.im]);
       const ringIdx = group.ringIndex ?? 0;
-      const lineAngle = ringIdx * this.fillPatternAngle;
+      const perRingRotation = Number.isFinite(this.fillPatternAngle) ? this.fillPatternAngle : 0;
+      const baseStep = Number.isFinite(this._patternBaseRotation) ? this._patternBaseRotation : 0;
+      const rawAngle = ringIdx * perRingRotation + ringIdx * baseStep;
+      const lineAngle = ((rawAngle % 180) + 180) % 180;
       exportData.arcgroups.push({
         id: group.id,
         name: group.name,
@@ -2359,6 +2416,7 @@ class DoyleSpiralEngine {
         line_angle: lineAngle,
         outline: outlinePoints,
         arc_count: group.arcs.length,
+        neighbours: Array.isArray(group.neighbourIds) ? group.neighbourIds.slice() : [],
       });
     }
     return exportData;

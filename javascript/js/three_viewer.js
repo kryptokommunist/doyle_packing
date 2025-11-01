@@ -88,6 +88,10 @@ function createThreeViewer({
   const spiralContainer = new THREE.Group();
   scene.add(spiralContainer);
 
+  const arcGroupMeshes = new Map();
+  let selectionStateMap = new Map();
+  let frameActiveIds = new Set();
+
   const palette = [
     0xc0c0d0, 0xb0b0c0, 0xa8a8b8, 0x9898a8,
     0xd0d0e0, 0xb8b8c8, 0xa0a0b0, 0xc8c8d8,
@@ -115,9 +119,12 @@ function createThreeViewer({
     spiralContainer.position.set(0, 0, 0);
     spiralContainer.rotation.set(0, 0, 0);
     spiralContainer.scale.set(1, 1, 1);
+    arcGroupMeshes.clear();
+    selectionStateMap = new Map();
+    frameActiveIds = new Set();
   }
 
-  function createPolygonMesh(outline, ringIndex = 0, lineAngle = 0) {
+  function createPolygonMesh(outline, ringIndex = 0, lineAngle = 0, groupId = null) {
     if (!outline || outline.length < 3) {
       return null;
     }
@@ -133,8 +140,9 @@ function createThreeViewer({
       bevelSize: 0.01,
       bevelSegments: 2,
     });
+    const baseColor = getColorForRing(ringIndex);
     const material = new THREE.MeshStandardMaterial({
-      color: getColorForRing(ringIndex),
+      color: baseColor,
       metalness: parseFloat(metalnessSlider ? metalnessSlider.value : '0.4') || 0.4,
       roughness: parseFloat(roughnessSlider ? roughnessSlider.value : '0.5') || 0.5,
       emissive: 0x000000,
@@ -145,11 +153,65 @@ function createThreeViewer({
     mesh.userData = {
       ringIndex,
       lineAngle: lineAngle || 0,
+      arcGroupId: Number.isFinite(groupId) ? groupId : null,
+      baseColor,
+      selectionState: 'none',
+      frameActive: false,
       isPulsing: false,
       wasInRange: false,
       pulseStart: 0,
     };
+    applyMeshHighlight(mesh);
     return mesh;
+  }
+
+  function applyMeshHighlight(mesh) {
+    if (!mesh || !mesh.material) {
+      return;
+    }
+    const id = Number.isFinite(mesh.userData?.arcGroupId) ? mesh.userData.arcGroupId : null;
+    const base = mesh.userData?.baseColor || getColorForRing(mesh.userData?.ringIndex || 0);
+    const color = new THREE.Color(base);
+    const selection = frameActiveIds.has(id) ? 'active' : selectionStateMap.get(id) || 'none';
+    if (selection === 'active') {
+      color.lerp(new THREE.Color(0xf59e0b), 0.6);
+    } else if (selection === 'selected') {
+      color.lerp(new THREE.Color(0x3b82f6), 0.5);
+    }
+    mesh.material.color.copy(color);
+  }
+
+  function refreshMeshHighlights() {
+    arcGroupMeshes.forEach(mesh => applyMeshHighlight(mesh));
+  }
+
+  function setSelectionState(state = {}) {
+    selectionStateMap = new Map();
+    if (state && typeof state === 'object') {
+      Object.entries(state).forEach(([key, value]) => {
+        const id = Number(key);
+        if (!Number.isFinite(id)) {
+          return;
+        }
+        if (value === 'selected' || value === 'active') {
+          selectionStateMap.set(id, value);
+        }
+      });
+    }
+    refreshMeshHighlights();
+  }
+
+  function applyFrameHighlight(ids) {
+    frameActiveIds = new Set();
+    if (Array.isArray(ids) || ids instanceof Set) {
+      ids.forEach(value => {
+        const id = Number(value);
+        if (Number.isFinite(id)) {
+          frameActiveIds.add(id);
+        }
+      });
+    }
+    refreshMeshHighlights();
   }
 
   function loadSpiralFromJSON(data) {
@@ -158,11 +220,16 @@ function createThreeViewer({
     }
     clearSpiral();
     data.arcgroups.forEach(group => {
-      const mesh = createPolygonMesh(group.outline || [], group.ring_index, group.line_angle);
+      const groupId = Number(group.id);
+      const mesh = createPolygonMesh(group.outline || [], group.ring_index, group.line_angle, groupId);
       if (mesh) {
         spiralContainer.add(mesh);
+        if (Number.isFinite(groupId)) {
+          arcGroupMeshes.set(groupId, mesh);
+        }
       }
     });
+    refreshMeshHighlights();
     if (spiralContainer.children.length) {
       const box = new THREE.Box3().setFromObject(spiralContainer);
       const center = box.getCenter(new THREE.Vector3());
@@ -220,6 +287,7 @@ function createThreeViewer({
         }
       }
       mesh.userData.wasInRange = isInRange;
+      applyMeshHighlight(mesh);
     });
   }
 
@@ -454,6 +522,8 @@ function createThreeViewer({
     queueGeometryUpdate,
     loadSpiralFromJSON,
     resetView,
+    setSelectionState,
+    applyFrameHighlight,
   };
 }
 
