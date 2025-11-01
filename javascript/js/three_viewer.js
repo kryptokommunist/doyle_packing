@@ -124,7 +124,7 @@ function createThreeViewer({
     frameActiveIds = new Set();
   }
 
-  function createPolygonMesh(outline, ringIndex = 0, lineAngle = 0, groupId = null) {
+  function createPolygonMesh(outline, ringIndex = 0, lineAngle = 0, groupId = null, baseLineAngle = null) {
     if (!outline || outline.length < 3) {
       return null;
     }
@@ -152,7 +152,12 @@ function createThreeViewer({
     mesh.receiveShadow = true;
     mesh.userData = {
       ringIndex,
-      lineAngle: lineAngle || 0,
+      baseLineAngle: Number.isFinite(baseLineAngle) ? baseLineAngle : (Number.isFinite(lineAngle) ? lineAngle : 0),
+      lineAngle: Number.isFinite(lineAngle)
+        ? lineAngle
+        : Number.isFinite(baseLineAngle)
+          ? baseLineAngle
+          : 0,
       arcGroupId: Number.isFinite(groupId) ? groupId : null,
       baseColor,
       selectionState: 'none',
@@ -214,6 +219,66 @@ function createThreeViewer({
     refreshMeshHighlights();
   }
 
+  function updateLineAngles(overrides = null, baseAngles = null) {
+    const baseMap = new Map();
+    if (baseAngles instanceof Map) {
+      baseAngles.forEach((value, key) => {
+        const id = Number(key);
+        const angle = Number(value);
+        if (Number.isFinite(id) && Number.isFinite(angle)) {
+          baseMap.set(id, angle);
+        }
+      });
+    } else if (baseAngles && typeof baseAngles === 'object') {
+      Object.entries(baseAngles).forEach(([key, value]) => {
+        const id = Number(key);
+        const angle = Number(value);
+        if (Number.isFinite(id) && Number.isFinite(angle)) {
+          baseMap.set(id, angle);
+        }
+      });
+    }
+
+    const overrideMap = new Map();
+    if (overrides instanceof Map) {
+      overrides.forEach((value, key) => {
+        const id = Number(key);
+        const angle = Number(value);
+        if (Number.isFinite(id) && Number.isFinite(angle)) {
+          overrideMap.set(id, angle);
+        }
+      });
+    } else if (overrides && typeof overrides === 'object') {
+      Object.entries(overrides).forEach(([key, value]) => {
+        const id = Number(key);
+        const angle = Number(value);
+        if (Number.isFinite(id) && Number.isFinite(angle)) {
+          overrideMap.set(id, angle);
+        }
+      });
+    }
+
+    arcGroupMeshes.forEach(mesh => {
+      if (!mesh || !mesh.userData) {
+        return;
+      }
+      const id = Number(mesh.userData.arcGroupId);
+      if (!Number.isFinite(id)) {
+        return;
+      }
+      if (baseMap.has(id)) {
+        mesh.userData.baseLineAngle = baseMap.get(id);
+      }
+      const targetAngle = overrideMap.has(id)
+        ? overrideMap.get(id)
+        : mesh.userData.baseLineAngle;
+      if (Number.isFinite(targetAngle)) {
+        mesh.userData.lineAngle = targetAngle;
+      }
+    });
+    refreshMeshHighlights();
+  }
+
   function loadSpiralFromJSON(data) {
     if (!data || !Array.isArray(data.arcgroups)) {
       throw new Error('Invalid geometry payload');
@@ -221,7 +286,13 @@ function createThreeViewer({
     clearSpiral();
     data.arcgroups.forEach(group => {
       const groupId = Number(group.id);
-      const mesh = createPolygonMesh(group.outline || [], group.ring_index, group.line_angle, groupId);
+      const mesh = createPolygonMesh(
+        group.outline || [],
+        group.ring_index,
+        group.line_angle,
+        groupId,
+        group.base_line_angle,
+      );
       if (mesh) {
         spiralContainer.add(mesh);
         if (Number.isFinite(groupId)) {
@@ -524,6 +595,7 @@ function createThreeViewer({
     resetView,
     setSelectionState,
     applyFrameHighlight,
+    updateLineAngles,
   };
 }
 

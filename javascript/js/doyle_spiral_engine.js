@@ -2264,16 +2264,38 @@ class DoyleSpiralEngine {
     fillPatternOffset = 0.0,
     fillPatternType = 'lines',
     fillPatternRectWidth = 2.0,
+    lineAngleOverrides = null,
   } = {}) {
     this.generateOuterCircles();
     this.computeAllIntersections();
     context.setNormalizationScale(this.circles.concat(this.outerCircles));
     const perRingRotation = Number.isFinite(fillPatternAngle) ? fillPatternAngle : 0;
-    const baseRotationStep = Number.isFinite(this.p) && Math.abs(this.p) > 1e-9
-      ? 360 / this.p
-      : 0;
+    const normaliseAngle = value => ((value % 180) + 180) % 180;
+    let overrideMap = null;
+    if (lineAngleOverrides instanceof Map) {
+      overrideMap = new Map();
+      lineAngleOverrides.forEach((value, key) => {
+        const id = Number(key);
+        const angle = Number(value);
+        if (Number.isFinite(id) && Number.isFinite(angle)) {
+          overrideMap.set(id, angle);
+        }
+      });
+    } else if (lineAngleOverrides && typeof lineAngleOverrides === 'object') {
+      overrideMap = new Map();
+      Object.entries(lineAngleOverrides).forEach(([key, value]) => {
+        const id = Number(key);
+        const angle = Number(value);
+        if (Number.isFinite(id) && Number.isFinite(angle)) {
+          overrideMap.set(id, angle);
+        }
+      });
+      if (!overrideMap.size) {
+        overrideMap = null;
+      }
+    }
     this.fillPatternAngle = perRingRotation;
-    this._patternBaseRotation = baseRotationStep;
+    this._patternBaseRotation = 0;
     this.arcGroups.clear();
     this._ringTemplates = new Map();
 
@@ -2299,14 +2321,26 @@ class DoyleSpiralEngine {
       }
     }
 
+    for (const [key, group] of this.arcGroups.entries()) {
+      if (key.startsWith('outer_')) {
+        continue;
+      }
+      const ringIdx = group.ringIndex ?? 0;
+      const baseAngle = normaliseAngle(ringIdx * perRingRotation);
+      let angle = baseAngle;
+      if (overrideMap && overrideMap.has(group.id)) {
+        angle = normaliseAngle(overrideMap.get(group.id));
+      }
+      group.baseLineAngle = baseAngle;
+      group.lineAngle = angle;
+    }
+
     if (addFillPattern) {
       for (const [key, group] of this.arcGroups.entries()) {
         if (key.startsWith('outer_')) {
           continue;
         }
-        const ringIdx = group.ringIndex ?? 0;
-        const rawAngle = ringIdx * perRingRotation + ringIdx * baseRotationStep;
-        const angle = ((rawAngle % 180) + 180) % 180;
+        const angle = Number.isFinite(group.lineAngle) ? group.lineAngle : 0;
         group.toSVGFill(context, {
           debug: false,
           patternFill: true,
@@ -2351,6 +2385,7 @@ class DoyleSpiralEngine {
     fillPatternOffset = 0.0,
     fillPatternType = 'lines',
     fillPatternRectWidth = 2.0,
+    lineAngleOverrides = null,
   } = {}) {
     if (!this._generated) {
       this.generateCircles();
@@ -2373,6 +2408,7 @@ class DoyleSpiralEngine {
         fillPatternOffset,
         fillPatternType,
         fillPatternRectWidth,
+        lineAngleOverrides,
       });
       return {
         svg: context.toElement(),
@@ -2406,14 +2442,16 @@ class DoyleSpiralEngine {
       const outlinePoints = outline.map(pt => [pt.re, pt.im]);
       const ringIdx = group.ringIndex ?? 0;
       const perRingRotation = Number.isFinite(this.fillPatternAngle) ? this.fillPatternAngle : 0;
-      const baseStep = Number.isFinite(this._patternBaseRotation) ? this._patternBaseRotation : 0;
-      const rawAngle = ringIdx * perRingRotation + ringIdx * baseStep;
-      const lineAngle = ((rawAngle % 180) + 180) % 180;
+      const baseAngle = Number.isFinite(group.baseLineAngle)
+        ? group.baseLineAngle
+        : ((ringIdx * perRingRotation) % 180 + 180) % 180;
+      const lineAngle = Number.isFinite(group.lineAngle) ? group.lineAngle : baseAngle;
       exportData.arcgroups.push({
         id: group.id,
         name: group.name,
         ring_index: group.ringIndex,
         line_angle: lineAngle,
+        base_line_angle: baseAngle,
         outline: outlinePoints,
         arc_count: group.arcs.length,
         neighbours: Array.isArray(group.neighbourIds) ? group.neighbourIds.slice() : [],
@@ -2451,6 +2489,9 @@ function normaliseParams(params = {}) {
     red_outline: Boolean(params.red_outline ?? false),
     draw_group_outline: params.draw_group_outline !== undefined ? Boolean(params.draw_group_outline) : true,
     max_d: Number(params.max_d ?? 2000),
+    line_angle_overrides: typeof params.line_angle_overrides === 'object' && params.line_angle_overrides !== null
+      ? params.line_angle_overrides
+      : null,
   };
 }
 
@@ -2473,6 +2514,7 @@ function renderSpiral(params = {}, overrideMode = null) {
     fillPatternOffset: opts.fill_pattern_offset,
     fillPatternType: opts.fill_pattern_type,
     fillPatternRectWidth: opts.fill_pattern_rect_width,
+    lineAngleOverrides: opts.line_angle_overrides,
   });
   return {
     engine,

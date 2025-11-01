@@ -76,6 +76,9 @@ let selectedFrameId = null;
 let hexDiagram = null;
 let animationTimer = null;
 let animationRunning = false;
+let baseRenderSnapshot = null;
+let baseLineAngles = new Map();
+let animationOverridesActive = false;
 let currentFrameActive = new Set();
 let currentAnimationFrameIndex = 0;
 
@@ -568,6 +571,10 @@ function computeArcgroupMetadata(geometry) {
       angle,
       neighbours: Array.isArray(group.neighbours) ? group.neighbours.map(Number) : [],
       angularIndex: 0,
+      lineAngle: Number.isFinite(group.line_angle) ? Number(group.line_angle) : 0,
+      baseLineAngle: Number.isFinite(group.base_line_angle)
+        ? Number(group.base_line_angle)
+        : (Number.isFinite(group.line_angle) ? Number(group.line_angle) : 0),
     };
     metadata.byId.set(group.id, entry);
     if (!ringBuckets.has(ringIndex)) {
@@ -608,27 +615,40 @@ function handleArcgroupClick(event) {
   cycleSelectionState(id);
 }
 
-function prepareSvgInteractions(svgElement, geometry) {
+function prepareSvgInteractions(svgElement, geometry, options = {}) {
+  const {
+    preserveAnimation = false,
+    suppressStatus = false,
+    activeFrameSet = null,
+  } = options;
   overlayElements.forEach(element => {
     element.removeEventListener('click', handleArcgroupClick);
   });
   overlayElements = new Map();
   clearOverlayLayer(svgElement);
-  currentFrameActive = new Set();
+  if (activeFrameSet instanceof Set) {
+    currentFrameActive = new Set(activeFrameSet);
+  } else if (!preserveAnimation) {
+    currentFrameActive = new Set();
+  }
 
   if (!svgElement || !geometry || !Array.isArray(geometry.arcgroups) || !geometry.arcgroups.length) {
     arcgroupMetadata = { byId: new Map(), rings: new Map() };
     selectionState = new Map();
-    updateSelectionHighlights();
+    updateSelectionHighlights(currentFrameActive);
     updateSelectionStats();
     pushSelectionStateToViewer();
     pushFrameActiveToViewer(currentFrameActive);
-    setAnimationStatus('Animation controls require Arram-Boyle arcgroups.', 'error');
+    if (!suppressStatus) {
+      setAnimationStatus('Animation controls require Arram-Boyle arcgroups.', 'error');
+    }
     setOverlayInteractivity(false);
     return;
   }
 
-  stopAnimationLoop();
+  if (!preserveAnimation) {
+    stopAnimationLoop({ restoreBase: false });
+  }
   arcgroupMetadata = computeArcgroupMetadata(geometry);
   const nextSelection = new Map();
   arcgroupMetadata.byId.forEach((_, id) => {
@@ -637,6 +657,16 @@ function prepareSvgInteractions(svgElement, geometry) {
     }
   });
   selectionState = nextSelection;
+
+  if (currentFrameActive.size) {
+    const filtered = new Set();
+    currentFrameActive.forEach(id => {
+      if (arcgroupMetadata.byId.has(id)) {
+        filtered.add(id);
+      }
+    });
+    currentFrameActive = filtered;
+  }
 
   const layer = document.createElementNS(SVG_NS, 'g');
   layer.setAttribute('data-interaction-layer', 'true');
@@ -663,11 +693,13 @@ function prepareSvgInteractions(svgElement, geometry) {
 
   svgElement.appendChild(layer);
   setOverlayInteractivity(activeView === 'animation');
-  updateSelectionHighlights();
+  updateSelectionHighlights(currentFrameActive);
   updateSelectionStats();
   pushSelectionStateToViewer();
   pushFrameActiveToViewer(currentFrameActive);
-  setAnimationStatus(selectionState.size ? 'Ready to animate.' : 'Select arcgroups to begin.');
+  if (!suppressStatus) {
+    setAnimationStatus(selectionState.size ? 'Ready to animate.' : 'Select arcgroups to begin.');
+  }
 }
 
 function updateSelectionHighlights(activeSet = currentFrameActive) {
@@ -862,24 +894,111 @@ function ensureViewerGeometrySync() {
   pushSelectionStateToViewer();
 }
 
-function stopAnimationLoop() {
+function stopAnimationLoop({ restoreBase = true } = {}) {
   if (animationTimer) {
     clearTimeout(animationTimer);
     animationTimer = null;
   }
   const wasRunning = animationRunning;
   animationRunning = false;
-  currentFrameActive = new Set();
   if (runAnimationButton) {
     runAnimationButton.textContent = 'Animate sequence';
   }
-  updateSelectionHighlights();
-  pushFrameActiveToViewer(currentFrameActive);
+  let restored = false;
+  if (restoreBase && animationOverridesActive) {
+    restoreBaseRenderWithActive(new Set());
+    restored = true;
+  }
+  animationOverridesActive = false;
+  if (threeApp && typeof threeApp.updateLineAngles === 'function') {
+    threeApp.updateLineAngles(null, baseLineAngles);
+  }
+  currentFrameActive = new Set();
+  if (!restored) {
+    updateSelectionHighlights(currentFrameActive);
+    pushFrameActiveToViewer(currentFrameActive);
+  } else {
+    pushFrameActiveToViewer(currentFrameActive);
+  }
   const message = selectionState.size ? 'Ready to animate.' : 'Select arcgroups to begin.';
   if (wasRunning) {
     setAnimationStatus(selectionState.size ? 'Animation stopped.' : 'Select arcgroups to begin.');
   } else if (activeView === 'animation') {
     setAnimationStatus(message);
+  }
+}
+
+function restoreBaseRenderWithActive(activeSet = new Set()) {
+  if (!baseRenderSnapshot) {
+    currentFrameActive = new Set(activeSet instanceof Set ? activeSet : []);
+    updateSelectionHighlights(currentFrameActive);
+    pushFrameActiveToViewer(currentFrameActive);
+    return;
+  }
+  const frameSet = activeSet instanceof Set ? activeSet : new Set(activeSet || []);
+  currentFrameActive = new Set(frameSet);
+  handleRenderSuccess(baseRenderSnapshot, {
+    isAnimation: true,
+    activeFrameSet: currentFrameActive,
+    lineAngleOverrides: null,
+  });
+}
+
+function applyAnimationFrame(activeSet) {
+  const nextSet = activeSet instanceof Set ? activeSet : new Set(activeSet || []);
+  currentFrameActive = new Set(nextSet);
+
+  const baseParams = baseRenderSnapshot?.params || lastRender?.params || collectParams();
+  if (!baseParams) {
+    updateSelectionHighlights(currentFrameActive);
+    pushFrameActiveToViewer(currentFrameActive);
+    return;
+  }
+
+  const shift = Number(baseParams.fill_pattern_angle ?? 0);
+  const overrides = new Map();
+  if (Math.abs(shift) > 1e-6) {
+    currentFrameActive.forEach(id => {
+      const baseAngle = baseLineAngles.get(id);
+      if (Number.isFinite(baseAngle)) {
+        overrides.set(id, baseAngle + shift);
+      }
+    });
+  }
+
+  if (threeApp && typeof threeApp.updateLineAngles === 'function') {
+    threeApp.updateLineAngles(overrides.size ? overrides : null, baseLineAngles);
+  }
+
+  if (!baseParams.add_fill_pattern || overrides.size === 0) {
+    if (animationOverridesActive) {
+      restoreBaseRenderWithActive(currentFrameActive);
+    } else {
+      updateSelectionHighlights(currentFrameActive);
+      pushFrameActiveToViewer(currentFrameActive);
+    }
+    animationOverridesActive = false;
+    return;
+  }
+
+  const overridePayload = {};
+  overrides.forEach((value, key) => {
+    overridePayload[key] = value;
+  });
+
+  const params = { ...baseParams, line_angle_overrides: overridePayload };
+  try {
+    const result = renderSpiral(params);
+    handleRenderSuccess({ ...result, params }, {
+      isAnimation: true,
+      activeFrameSet: currentFrameActive,
+      lineAngleOverrides: overrides,
+    });
+    animationOverridesActive = true;
+  } catch (error) {
+    console.error('Animation render failed:', error);
+    updateSelectionHighlights(currentFrameActive);
+    pushFrameActiveToViewer(currentFrameActive);
   }
 }
 
@@ -892,9 +1011,8 @@ function scheduleNextAnimationFrame() {
     stopAnimationLoop();
     return;
   }
-  currentFrameActive = computeActiveIdsForFrame(frame);
-  updateSelectionHighlights(currentFrameActive);
-  pushFrameActiveToViewer(currentFrameActive);
+  const activeSet = computeActiveIdsForFrame(frame);
+  applyAnimationFrame(activeSet);
   const duration = Math.max(50, Number(frame.duration) || 600);
   animationTimer = setTimeout(() => {
     currentAnimationFrameIndex = (currentAnimationFrameIndex + 1) % animationFrames.length;
@@ -911,11 +1029,25 @@ function startAnimationLoop() {
     setAnimationStatus('Select arcgroups before animating.', 'error');
     return;
   }
+  if (!baseRenderSnapshot && lastRender) {
+    baseRenderSnapshot = lastRender;
+    baseLineAngles = new Map();
+    if (lastRender.geometry && Array.isArray(lastRender.geometry.arcgroups)) {
+      lastRender.geometry.arcgroups.forEach(group => {
+        const id = Number(group.id);
+        const baseAngle = Number(group.base_line_angle ?? group.line_angle ?? 0);
+        if (Number.isFinite(id) && Number.isFinite(baseAngle)) {
+          baseLineAngles.set(id, baseAngle);
+        }
+      });
+    }
+  }
   ensureViewerGeometrySync();
   animationRunning = true;
   currentAnimationFrameIndex = 0;
   runAnimationButton && (runAnimationButton.textContent = 'Stop animation');
   setAnimationStatus('Animation running…', 'loading');
+  animationOverridesActive = false;
   scheduleNextAnimationFrame();
 }
 
@@ -1001,7 +1133,12 @@ function showSVG(svgElement) {
   svgPreview.classList.remove('empty-state');
 }
 
-function handleRenderSuccess(result) {
+function handleRenderSuccess(result, options = {}) {
+  const {
+    isAnimation = false,
+    activeFrameSet = null,
+    lineAngleOverrides = null,
+  } = options;
   const svgElement = materializeSvg(result);
   if (!svgElement) {
     throw new Error('Renderer produced no SVG content');
@@ -1017,19 +1154,45 @@ function handleRenderSuccess(result) {
     : new XMLSerializer().serializeToString(svgElement);
 
   lastRender = { params, geometry, mode, svgString };
+  if (!isAnimation) {
+    baseRenderSnapshot = lastRender;
+    baseLineAngles = new Map();
+    if (geometry && Array.isArray(geometry.arcgroups)) {
+      geometry.arcgroups.forEach(group => {
+        const id = Number(group.id);
+        const baseAngle = Number(group.base_line_angle ?? group.line_angle ?? 0);
+        if (Number.isFinite(id) && Number.isFinite(baseAngle)) {
+          baseLineAngles.set(id, baseAngle);
+        }
+      });
+    }
+  }
 
-  prepareSvgInteractions(svgElement, geometry);
+  const interactionOptions = {
+    preserveAnimation: isAnimation,
+    suppressStatus: isAnimation,
+  };
+  if (activeFrameSet instanceof Set) {
+    interactionOptions.activeFrameSet = activeFrameSet;
+  }
+  prepareSvgInteractions(svgElement, geometry, interactionOptions);
 
   updateStats(geometry);
   statMode.textContent = mode === 'arram_boyle' ? 'Arram-Boyle' : 'Classic Doyle';
-  setStatus('Spiral updated. Switch views to explore it in 3D.');
+  if (!isAnimation) {
+    setStatus('Spiral updated. Switch views to explore it in 3D.');
+  }
   updateExportAvailability(true);
 
   if (threeApp) {
-    if (geometry) {
+    if (geometry && !isAnimation) {
       threeApp.useGeometryFromPayload(params, geometry);
-    } else {
+    } else if (!geometry && !isAnimation) {
       threeApp.queueGeometryUpdate(params, true);
+    }
+    if (typeof threeApp.updateLineAngles === 'function') {
+      const overridesPayload = lineAngleOverrides || null;
+      threeApp.updateLineAngles(overridesPayload, baseLineAngles);
     }
   }
 
@@ -1042,6 +1205,9 @@ function handleRenderFailure(message) {
   svgPreview.classList.add('empty-state');
   setStatus(message || 'Unexpected error', 'error');
   lastRender = null;
+  baseRenderSnapshot = null;
+  baseLineAngles = new Map();
+  animationOverridesActive = false;
   updateExportAvailability(false);
   prepareSvgInteractions(null, null);
 }
@@ -1121,6 +1287,7 @@ form.addEventListener('input', event => {
   if (event.target === fillPatternTypeSelect) {
     updatePatternTypeVisibility();
   }
+  stopAnimationLoop();
   debouncedRender();
   if (threeApp) {
     threeApp.queueGeometryUpdate(collectParams());
