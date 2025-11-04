@@ -269,6 +269,200 @@
       position: relative;
     }
 
+    .animate-card {
+      padding: 0;
+    }
+
+    .animate-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(280px, 320px);
+      min-height: 100%;
+    }
+
+    .animate-canvas {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+      padding: 1.5rem;
+      background: rgba(255, 255, 255, 0.78);
+    }
+
+    .animate-svg {
+      flex: 1 1 auto;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(248, 250, 252, 0.92);
+      border-radius: 1.2rem;
+      border: 1px solid rgba(148, 163, 184, 0.24);
+      overflow: hidden;
+    }
+
+    .animate-svg svg {
+      width: 100%;
+      height: 100%;
+    }
+
+    .animate-info {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+    }
+
+    .animate-sidebar {
+      border-left: 1px solid rgba(148, 163, 184, 0.16);
+      background: rgba(255, 255, 255, 0.7);
+      padding: 1.5rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+    }
+
+    .animate-section h2 {
+      font-size: 0.9rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-muted);
+      margin-bottom: 0.6rem;
+    }
+
+    .animate-field {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+
+    .animate-buttons {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 0.6rem;
+      margin-top: 0.8rem;
+    }
+
+    .frames-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0.6rem;
+    }
+
+    .frame-controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+    }
+
+    .frames-scroll {
+      display: flex;
+      gap: 0.8rem;
+      overflow-x: auto;
+      padding-bottom: 0.6rem;
+    }
+
+    .frames-scroll.disabled {
+      opacity: 0.5;
+      pointer-events: none;
+    }
+
+    .frame-column {
+      background: rgba(255, 255, 255, 0.75);
+      border: 1px solid rgba(148, 163, 184, 0.24);
+      border-radius: 1rem;
+      min-width: 160px;
+      display: flex;
+      flex-direction: column;
+      cursor: pointer;
+      transition: box-shadow 0.2s ease, transform 0.2s ease;
+    }
+
+    .frame-column.active {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
+    }
+
+    .frame-column.flash {
+      animation: frameFlash 0.6s ease;
+    }
+
+    @keyframes frameFlash {
+      0% { box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.25); }
+      100% { box-shadow: 0 0 0 0 rgba(37, 99, 235, 0); }
+    }
+
+    .frame-body {
+      flex: 1 1 auto;
+      padding: 0.9rem;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      align-content: flex-start;
+    }
+
+    .frame-placeholder {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+    }
+
+    .frame-number {
+      padding: 0.6rem;
+      text-align: center;
+      font-weight: 600;
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      border-top: 1px solid rgba(148, 163, 184, 0.18);
+    }
+
+    .frame-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      border-radius: 999px;
+      padding: 0.3rem 0.7rem;
+      font-size: 0.75rem;
+      border: 1px solid rgba(148, 163, 184, 0.2);
+      color: var(--text-strong);
+    }
+
+    .frame-tag .frame-remove {
+      background: none;
+      border: none;
+      color: inherit;
+      cursor: pointer;
+      font-size: 0.85rem;
+      line-height: 1;
+      padding: 0;
+    }
+
+    .animate-sidebar button {
+      width: 100%;
+    }
+
+    .arc-group {
+      cursor: pointer;
+      transition: filter 0.3s ease;
+    }
+
+    .arc-group.is-assigned {
+      filter: drop-shadow(0 0 12px var(--frame-color, rgba(250, 204, 21, 0.4)));
+    }
+
+    .arc-group.is-active-frame {
+      filter: drop-shadow(0 0 16px rgba(37, 99, 235, 0.35));
+    }
+
+    .arc-group.is-pulsing {
+      animation: goldenHighlight 1.2s ease;
+    }
+
+    @keyframes goldenHighlight {
+      0% { filter: drop-shadow(0 0 0 rgba(250, 204, 21, 0)); }
+      50% { filter: drop-shadow(0 0 18px rgba(250, 204, 21, 0.85)); }
+      100% { filter: drop-shadow(0 0 0 rgba(250, 204, 21, 0)); }
+    }
+
+    .arc-group-hit {
+      pointer-events: visibleFill;
+    }
+
     #svgPreview svg {
       width: 100%;
       height: 100%;
@@ -412,6 +606,16 @@
       background: rgba(255, 255, 255, 0.7);
     }
 
+    @media (max-width: 960px) {
+      .animate-layout {
+        grid-template-columns: 1fr;
+      }
+      .animate-sidebar {
+        border-left: none;
+        border-top: 1px solid rgba(148, 163, 184, 0.16);
+      }
+    }
+
     @media (max-width: 980px) {
       .layout {
         grid-template-columns: 1fr;
@@ -553,6 +757,7 @@
         <div class="view-toggle" role="group" aria-label="Preview mode">
           <button type="button" class="active" data-view="2d" aria-pressed="true">2D SVG</button>
           <button type="button" data-view="3d" aria-pressed="false">3D View</button>
+          <button type="button" data-view="animate" aria-pressed="false">Animate</button>
         </div>
 
         <div class="preview-card" id="view2d">
@@ -563,6 +768,44 @@
           <div class="stat-card"><strong id="statArcGroups">0</strong>Arc groups</div>
           <div class="stat-card"><strong id="statPolygons">0</strong>Polygons extruded</div>
           <div class="stat-card"><strong id="statMode">Arram-Boyle</strong>Render mode</div>
+        </div>
+
+        <div class="preview-card animate-card" id="viewAnimate" hidden>
+          <div class="animate-layout">
+            <div class="animate-canvas">
+              <div id="animateSvgPreview" class="animate-svg empty-state">
+                Switch to Arram-Boyle mode to enable animation.
+              </div>
+              <div class="animate-info" id="animateHint">
+                Animation controls become available after rendering the Arram-Boyle SVG.
+              </div>
+            </div>
+            <aside class="animate-sidebar">
+              <section class="animate-section">
+                <h2>Presets</h2>
+                <div class="animate-field">
+                  <label for="animationPresetSelect">Pattern</label>
+                  <select id="animationPresetSelect"></select>
+                </div>
+                <div class="animate-buttons">
+                  <button type="button" id="applyPresetButton">Apply preset</button>
+                  <button type="button" class="secondary" id="clearPresetButton">Clear preset</button>
+                </div>
+              </section>
+              <section class="animate-section">
+                <div class="frames-header">
+                  <h2>Frames</h2>
+                  <div class="frame-controls">
+                    <button type="button" class="secondary" id="addFrameButton">Add frame</button>
+                    <button type="button" class="secondary" id="removeFrameButton">Remove last</button>
+                    <button type="button" class="secondary" id="clearFramesButton">Clear</button>
+                  </div>
+                </div>
+                <div class="frames-scroll" id="animationFrames"></div>
+              </section>
+              <button type="button" id="runAnimationButton">Animate</button>
+            </aside>
+          </div>
         </div>
 
         <div class="preview-card three-card" id="view3d" hidden>
