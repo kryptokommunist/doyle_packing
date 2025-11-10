@@ -1053,7 +1053,10 @@ class ArcGroup {
     if (!this._patternSegmentsCache) {
       this._patternSegmentsCache = new Map();
     }
-    const key = `${spacing.toFixed(6)}|${angleDeg.toFixed(6)}|${offset.toFixed(6)}`;
+    const rotationDeg = Math.atan2(transform.sin || 0, transform.cos || 1) * (180 / Math.PI);
+    const normalizedAngleDeg = ((angleDeg - rotationDeg) % 360 + 360) % 360;
+
+    const key = `${spacing.toFixed(6)}|${normalizedAngleDeg.toFixed(6)}|${offset.toFixed(6)}`;
     const cached = this._patternSegmentsCache.get(key);
     if (cached) {
       return cached;
@@ -1081,7 +1084,7 @@ class ArcGroup {
           for (let idx = 0; idx < normalized.length; idx += 2) {
             polygon.push({ x: normalized[idx] * scale, y: normalized[idx + 1] * scale });
           }
-          normalizedSegments = linesInPolygon(polygon, spacingNorm, angleDeg, 0);
+          normalizedSegments = linesInPolygon(polygon, spacingNorm, normalizedAngleDeg, 0);
         }
       }
 

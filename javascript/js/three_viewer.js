@@ -9,6 +9,12 @@ function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
 
+function angularDifferenceDeg(a, b) {
+  const diff = (a - b) % 360;
+  const normalized = (diff + 540) % 360 - 180;
+  return Math.abs(normalized);
+}
+
 function createThreeViewer({
   canvas,
   statusElement,
@@ -196,9 +202,13 @@ function createThreeViewer({
     }
     const threshold = 20;
     const duration = 1 / Math.max(pulseSpeed, 0.0001);
-    spiralContainer.children.forEach(mesh => {
+    const sliderMetalness = metalnessSlider ? parseFloat(metalnessSlider.value) : NaN;
+    const baseMetalness = Number.isFinite(sliderMetalness) ? sliderMetalness : 0.4;
+    const children = spiralContainer.children;
+    for (let idx = 0; idx < children.length; idx += 1) {
+      const mesh = children[idx];
       const lineAngle = mesh.userData.lineAngle || 0;
-      const diff = Math.abs(((rotationAngleDeg - lineAngle + 450) % 180) - 90);
+      const diff = angularDifferenceDeg(rotationAngleDeg, lineAngle);
       const isInRange = diff < threshold;
       if (isInRange && !mesh.userData.wasInRange) {
         mesh.userData.isPulsing = true;
@@ -211,16 +221,20 @@ function createThreeViewer({
           const s = Math.sin(t * Math.PI);
           mesh.material.emissive.setHex(0xffd700);
           mesh.material.emissiveIntensity = s * 0.8;
-          mesh.material.metalness = (metalnessSlider ? parseFloat(metalnessSlider.value) : 0.4) + 0.1 * s;
+          mesh.material.metalness = baseMetalness + 0.1 * s;
         } else {
           mesh.userData.isPulsing = false;
           mesh.material.emissive.setHex(0x000000);
           mesh.material.emissiveIntensity = 0;
-          mesh.material.metalness = metalnessSlider ? parseFloat(metalnessSlider.value) : 0.4;
+          mesh.material.metalness = baseMetalness;
         }
+      } else if (mesh.userData.wasInRange) {
+        mesh.material.emissive.setHex(0x000000);
+        mesh.material.emissiveIntensity = 0;
+        mesh.material.metalness = baseMetalness;
       }
       mesh.userData.wasInRange = isInRange;
-    });
+    }
   }
 
   function updateCamera() {
