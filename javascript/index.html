@@ -504,6 +504,28 @@
               <label for="svgSize">Canvas size</label>
               <input id="svgSize" name="size" type="number" min="200" max="1600" step="50" value="800" />
             </div>
+            <div class="field-group">
+              <label for="boundingWidth">Bounding width (mm)</label>
+              <input
+                id="boundingWidth"
+                name="bounding_box_width_mm"
+                type="number"
+                min="0.001"
+                step="0.001"
+                value="200"
+              />
+            </div>
+            <div class="field-group">
+              <label for="boundingHeight">Bounding height (mm)</label>
+              <input
+                id="boundingHeight"
+                name="bounding_box_height_mm"
+                type="number"
+                min="0.001"
+                step="0.001"
+                value="200"
+              />
+            </div>
           </div>
 
           <div class="checkbox-row">
@@ -521,19 +543,26 @@
               </select>
             </div>
             <div class="field-group">
-              <label for="fillSpacing">Line spacing</label>
-              <input id="fillSpacing" name="fill_pattern_spacing" type="number" min="0.5" step="0.5" value="5" />
+              <label for="fillSpacing">Line spacing (mm)</label>
+              <input
+                id="fillSpacing"
+                name="fill_pattern_spacing"
+                type="number"
+                min="0.001"
+                step="0.001"
+                value="8"
+              />
             </div>
             <div class="field-group">
               <label for="fillAngle">Angle shift</label>
               <input id="fillAngle" name="fill_pattern_angle" type="number" min="-180" max="180" step="1" value="0" />
             </div>
             <div class="field-group">
-              <label for="fillOffset">Inset</label>
+              <label for="fillOffset">Inset (mm)</label>
               <input id="fillOffset" name="fill_pattern_offset" type="number" min="0" step="0.5" value="0" />
             </div>
             <div class="field-group" id="rectWidthGroup" hidden>
-              <label for="fillRectWidth">Rectangle width</label>
+              <label for="fillRectWidth">Rectangle width (mm)</label>
               <input
                 id="fillRectWidth"
                 name="fill_pattern_rect_width"
