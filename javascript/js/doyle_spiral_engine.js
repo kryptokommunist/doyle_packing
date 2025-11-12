@@ -1091,6 +1091,28 @@ class ArcGroup {
         }
       }
 
+      if (normalizedSegments && normalizedSegments.length) {
+        const filtered = [];
+        for (const segment of normalizedSegments) {
+          if (!segment || segment.length !== 2) {
+            continue;
+          }
+          const [start, end] = segment;
+          if (!start || !end) {
+            continue;
+          }
+          const dx = end.x - start.x;
+          const dy = end.y - start.y;
+          if (!Number.isFinite(dx) || !Number.isFinite(dy)) {
+            continue;
+          }
+          if (dx * dx + dy * dy <= 1e-12) {
+            continue;
+          }
+          filtered.push(segment);
+        }
+        normalizedSegments = filtered;
+      }
       template.patternCache.set(key, normalizedSegments);
     }
     if (!normalizedSegments || !normalizedSegments.length) {
@@ -1099,23 +1121,44 @@ class ArcGroup {
       return empty;
     }
     const { cos, sin, radius, center } = transform;
-    const segments = new Array(normalizedSegments.length);
+    const segments = [];
     for (let idx = 0; idx < normalizedSegments.length; idx += 1) {
       const [start, end] = normalizedSegments[idx];
+      const dxNorm = end.x - start.x;
+      const dyNorm = end.y - start.y;
+      if (dxNorm * dxNorm + dyNorm * dyNorm <= 1e-12) {
+        continue;
+      }
       const sx = start.x * radius;
       const sy = start.y * radius;
       const ex = end.x * radius;
       const ey = end.y * radius;
-      segments[idx] = [
+      const p1 = {
+        re: center.re + sx * cos - sy * sin,
+        im: center.im + sx * sin + sy * cos,
+      };
+      const p2 = {
+        re: center.re + ex * cos - ey * sin,
+        im: center.im + ex * sin + ey * cos,
+      };
+      const dx = p2.re - p1.re;
+      const dy = p2.im - p1.im;
+      if (!Number.isFinite(dx) || !Number.isFinite(dy)) {
+        continue;
+      }
+      if (dx * dx + dy * dy <= 1e-12) {
+        continue;
+      }
+      segments.push([
         {
-          re: center.re + sx * cos - sy * sin,
-          im: center.im + sx * sin + sy * cos,
+          re: p1.re,
+          im: p1.im,
         },
         {
-          re: center.re + ex * cos - ey * sin,
-          im: center.im + ex * sin + ey * cos,
+          re: p2.re,
+          im: p2.im,
         },
-      ];
+      ]);
     }
     this._patternSegmentsCache.set(key, segments);
     return segments;
@@ -1405,15 +1448,22 @@ class DrawingContext {
         const lineColor = stroke || '#000000';
         const patternStyle = patternType === 'rectangles' ? 'rectangles' : 'lines';
         if (patternStyle === 'rectangles') {
-          const widthValue = Number.isFinite(rectWidth) ? rectWidth : 0;
-          const scaledWidth = widthValue * this.scaleFactor;
+          const widthValue = Number.isFinite(rectWidth) ? Math.abs(rectWidth) : 0;
+          const scale = this.scaleFactor > 0 ? this.scaleFactor : 1;
+          const scaledWidth = widthValue * scale;
           if (scaledWidth > 1e-6) {
             const halfWidth = scaledWidth / 2;
             for (const [p1, p2] of segmentsToDraw) {
+              if (!p1 || !p2) {
+                continue;
+              }
               const dx = p2.x - p1.x;
               const dy = p2.y - p1.y;
               const length = Math.hypot(dx, dy);
               if (!Number.isFinite(length) || length <= 1e-6) {
+                continue;
+              }
+              if (length <= 2 * halfWidth) {
                 continue;
               }
               const invLength = 1 / length;
