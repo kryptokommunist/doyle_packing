@@ -1237,6 +1237,100 @@ class ArcGroup {
   }
 }
 
+function buildContinuousPathsFromArcs(arcs, tol = 1e-6) {
+  if (!arcs || !arcs.length) {
+    return [];
+  }
+  const distance = (a, b) => {
+    if (!a || !b) {
+      return Number.POSITIVE_INFINITY;
+    }
+    const dx = (a.re ?? 0) - (b.re ?? 0);
+    const dy = (a.im ?? 0) - (b.im ?? 0);
+    return Math.hypot(dx, dy);
+  };
+  const dedupePoints = points => {
+    if (!points || !points.length) {
+      return [];
+    }
+    const filtered = [];
+    for (const point of points) {
+      if (!point) {
+        continue;
+      }
+      if (!filtered.length || distance(filtered[filtered.length - 1], point) > tol) {
+        filtered.push(point);
+      }
+    }
+    if (
+      filtered.length >= 2
+      && distance(filtered[0], filtered[filtered.length - 1]) <= tol
+    ) {
+      filtered[filtered.length - 1] = filtered[0];
+    }
+    return filtered;
+  };
+  const entries = arcs
+    .map(arc => (arc && typeof arc.getPoints === 'function' ? arc.getPoints().slice() : []))
+    .map(points => points.filter(Boolean));
+  const used = new Array(entries.length).fill(false);
+  const sequences = [];
+
+  for (let idx = 0; idx < entries.length; idx += 1) {
+    if (used[idx] || entries[idx].length < 2) {
+      continue;
+    }
+    used[idx] = true;
+    let sequence = entries[idx].slice();
+    let extended = true;
+    while (extended) {
+      extended = false;
+      for (let j = 0; j < entries.length; j += 1) {
+        if (used[j] || entries[j].length < 2) {
+          continue;
+        }
+        const candidate = entries[j];
+        const seqStart = sequence[0];
+        const seqEnd = sequence[sequence.length - 1];
+        const candStart = candidate[0];
+        const candEnd = candidate[candidate.length - 1];
+        if (distance(seqEnd, candStart) <= tol) {
+          sequence = sequence.concat(candidate.slice(1));
+          used[j] = true;
+          extended = true;
+          break;
+        }
+        if (distance(seqEnd, candEnd) <= tol) {
+          const reversed = candidate.slice().reverse();
+          sequence = sequence.concat(reversed.slice(1));
+          used[j] = true;
+          extended = true;
+          break;
+        }
+        if (distance(seqStart, candEnd) <= tol) {
+          sequence = candidate.slice(0, -1).concat(sequence);
+          used[j] = true;
+          extended = true;
+          break;
+        }
+        if (distance(seqStart, candStart) <= tol) {
+          const reversed = candidate.slice().reverse();
+          sequence = reversed.slice(0, -1).concat(sequence);
+          used[j] = true;
+          extended = true;
+          break;
+        }
+      }
+    }
+    const filtered = dedupePoints(sequence);
+    if (filtered.length >= 2) {
+      sequences.push(filtered);
+    }
+  }
+
+  return sequences;
+}
+
 // ------------------------------------------------------------
 // Drawing context
 // ------------------------------------------------------------
@@ -1391,6 +1485,68 @@ class DrawingContext {
     } else if (shape instanceof CircleElement) {
       this.drawScaledCircle(shape, options);
     }
+  }
+
+  drawPolyline(points, {
+    color = '#000000',
+    width = 1.2,
+    close = false,
+  } = {}) {
+    if (!points || points.length < 2) {
+      return;
+    }
+    const scaled = [];
+    const distance = (a, b) => {
+      if (!a || !b) {
+        return Number.POSITIVE_INFINITY;
+      }
+      const dx = a.x - b.x;
+      const dy = a.y - b.y;
+      return Math.hypot(dx, dy);
+    };
+    for (const point of points) {
+      if (!point) {
+        continue;
+      }
+      const scaledPoint = this._scaled(point);
+      if (!scaled.length || distance(scaled[scaled.length - 1], scaledPoint) > 1e-6) {
+        scaled.push(scaledPoint);
+      }
+    }
+    if (scaled.length < 2) {
+      return;
+    }
+    let shouldClose = Boolean(close);
+    const first = scaled[0];
+    const last = scaled[scaled.length - 1];
+    if (distance(first, last) <= 1e-6) {
+      scaled.pop();
+      shouldClose = true;
+    }
+    const commands = scaled.map((pt, idx) => {
+      const prefix = idx === 0 ? 'M' : 'L';
+      return `${prefix}${pt.x.toFixed(4)},${pt.y.toFixed(4)}`;
+    });
+    if (shouldClose) {
+      commands.push('Z');
+    }
+    const attributes = {
+      d: commands.join(' '),
+      fill: 'none',
+      stroke: color,
+      'stroke-width': width.toString(),
+      'stroke-linecap': 'round',
+      'stroke-linejoin': 'round',
+    };
+    if (!this.hasDOM) {
+      this._pushVirtual('path', attributes);
+      return;
+    }
+    const path = document.createElementNS(SVG_NS, 'path');
+    for (const [key, value] of Object.entries(attributes)) {
+      path.setAttribute(key, value);
+    }
+    this.mainGroup.appendChild(path);
   }
 
   drawGroupOutline(points, {
@@ -2155,14 +2311,12 @@ class DoyleSpiralEngine {
         distances.push({ dist, i, j });
       }
       distances.sort((a, b) => a.dist - b.dist);
+      const arcsForCircle = [];
       for (let idx = 1; idx < Math.min(3, distances.length); idx += 1) {
         const { i, j } = distances[idx];
         const steps = estimateArcSteps(circle, pts[i], pts[j]);
         const arc = new ArcElement(circle, pts[i], pts[j], steps, true);
-        if (redOutline || (!addFillPattern && drawGroupOutline)) {
-          const color = redOutline ? '#ff0000' : '#000000';
-          context.drawScaled(arc, { color, width: 1.2 });
-        }
+        arcsForCircle.push(arc);
         const key = `outer_${circle.id}`;
         if (!this.arcGroups.has(key)) {
           const group = new ArcGroup(key);
@@ -2174,6 +2328,13 @@ class DoyleSpiralEngine {
           this.arcGroups.set(key, group);
         }
         this.arcGroups.get(key).addArc(arc);
+      }
+      if (arcsForCircle.length && (redOutline || (!addFillPattern && drawGroupOutline))) {
+        const color = redOutline ? '#ff0000' : '#000000';
+        const paths = buildContinuousPathsFromArcs(arcsForCircle);
+        for (const path of paths) {
+          context.drawPolyline(path, { color, width: 1.2 });
+        }
       }
     }
   }
@@ -2381,10 +2542,18 @@ class DoyleSpiralEngine {
         if (!key.startsWith('circle_')) {
           continue;
         }
+        if (group.ringIndex !== maxIndex) {
+          continue;
+        }
+        const highlightArcs = [];
         for (let i = 0; i < group.arcs.length; i += 1) {
-          if ((i === 3 || i === 2) && group.ringIndex === maxIndex) {
-            context.drawScaled(group.arcs[i], { color: '#ff0000', width: 1.2 });
+          if (i === 3 || i === 2) {
+            highlightArcs.push(group.arcs[i]);
           }
+        }
+        const paths = buildContinuousPathsFromArcs(highlightArcs);
+        for (const path of paths) {
+          context.drawPolyline(path, { color: '#ff0000', width: 1.2 });
         }
       }
     }
