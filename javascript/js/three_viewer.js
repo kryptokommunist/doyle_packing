@@ -10,9 +10,8 @@ function clamp(value, min, max) {
 }
 
 function angularDifferenceDeg(a, b) {
-  const diff = (a - b) % 360;
-  const normalized = (diff + 540) % 360 - 180;
-  return Math.abs(normalized);
+  const diff = ((a - b) % 180 + 180) % 180;
+  return Math.min(diff, 180 - diff);
 }
 
 function createThreeViewer({
