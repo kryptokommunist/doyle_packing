@@ -534,6 +534,29 @@
             <label><input type="checkbox" name="red_outline" id="toggleRed"> Highlight rim</label>
           </div>
 
+          <div class="field-group">
+            <label for="highlightWidth">Highlight rim stroke (mm)</label>
+            <input
+              id="highlightWidth"
+              name="highlight_rim_width"
+              type="number"
+              min="0"
+              step="0.1"
+              value="1.2"
+            />
+          </div>
+          <div class="field-group">
+            <label for="outlineWidth">Group outline stroke (mm)</label>
+            <input
+              id="outlineWidth"
+              name="group_outline_width"
+              type="number"
+              min="0"
+              step="0.1"
+              value="0.6"
+            />
+          </div>
+
           <div class="fill-settings" id="fillSettings" hidden>
             <div class="field-group">
               <label for="fillPatternType">Pattern style</label>
@@ -560,6 +583,17 @@
             <div class="field-group">
               <label for="fillOffset">Inset (mm)</label>
               <input id="fillOffset" name="fill_pattern_offset" type="number" min="0" step="0.5" value="0" />
+            </div>
+            <div class="field-group">
+              <label for="patternStrokeWidth">Pattern stroke width (mm)</label>
+              <input
+                id="patternStrokeWidth"
+                name="pattern_stroke_width"
+                type="number"
+                min="0"
+                step="0.1"
+                value="0.5"
+              />
             </div>
             <div class="field-group" id="rectWidthGroup" hidden>
               <label for="fillRectWidth">Rectangle width (mm)</label>
