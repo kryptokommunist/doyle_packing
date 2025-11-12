@@ -1566,6 +1566,20 @@ class DrawingContext {
     }
     const scaled = points.map(pt => this._scaled(pt));
 
+    const buildPathData = (pts, closePath = true) => {
+      if (!pts.length) {
+        return '';
+      }
+      const commands = pts.map((pt, idx) => {
+        const prefix = idx === 0 ? 'M' : 'L';
+        return `${prefix}${pt.x.toFixed(4)},${pt.y.toFixed(4)}`;
+      });
+      if (closePath && pts.length > 1) {
+        commands.push('Z');
+      }
+      return commands.join(' ');
+    };
+
     if (fill === 'pattern') {
       let segmentsToDraw = null;
       if (patternSegments !== null && patternSegments !== undefined) {
@@ -1582,22 +1596,22 @@ class DrawingContext {
         );
       }
       if (drawOutline) {
+        const pathData = buildPathData(scaled);
+        const attributes = {
+          d: pathData,
+          fill: 'none',
+          stroke: stroke || 'none',
+          'stroke-width': strokeWidth.toString(),
+          'stroke-linejoin': 'round',
+        };
         if (!this.hasDOM) {
-          this._pushVirtual('polygon', {
-            points: scaled.map(p => `${p.x.toFixed(4)},${p.y.toFixed(4)}`).join(' '),
-            fill: 'none',
-            stroke: stroke || 'none',
-            'stroke-width': strokeWidth.toString(),
-            'stroke-linejoin': 'round',
-          });
+          this._pushVirtual('path', attributes);
         } else {
-          const polygon = document.createElementNS(SVG_NS, 'polygon');
-          polygon.setAttribute('points', scaled.map(p => `${p.x.toFixed(4)},${p.y.toFixed(4)}`).join(' '));
-          polygon.setAttribute('fill', 'none');
-          polygon.setAttribute('stroke', stroke || 'none');
-          polygon.setAttribute('stroke-width', strokeWidth.toString());
-          polygon.setAttribute('stroke-linejoin', 'round');
-          this.mainGroup.appendChild(polygon);
+          const path = document.createElementNS(SVG_NS, 'path');
+          for (const [key, value] of Object.entries(attributes)) {
+            path.setAttribute(key, value);
+          }
+          this.mainGroup.appendChild(path);
         }
       }
       if (segmentsToDraw && segmentsToDraw.length) {
@@ -1631,23 +1645,21 @@ class DrawingContext {
                 { x: p2.x - offsetX, y: p2.y - offsetY },
                 { x: p1.x - offsetX, y: p1.y - offsetY },
               ];
-              const rectPointString = rectPoints
-                .map(pt => `${pt.x.toFixed(4)},${pt.y.toFixed(4)}`)
-                .join(' ');
+              const rectPathData = buildPathData(rectPoints);
+              const rectAttributes = {
+                d: rectPathData,
+                fill: 'none',
+                stroke: '#ff0000',
+                'stroke-width': '0.5',
+              };
               if (!this.hasDOM) {
-                this._pushVirtual('polygon', {
-                  points: rectPointString,
-                  fill: 'none',
-                  stroke: '#ff0000',
-                  'stroke-width': '0.5',
-                });
+                this._pushVirtual('path', rectAttributes);
               } else {
-                const polygon = document.createElementNS(SVG_NS, 'polygon');
-                polygon.setAttribute('points', rectPointString);
-                polygon.setAttribute('fill', 'none');
-                polygon.setAttribute('stroke', '#ff0000');
-                polygon.setAttribute('stroke-width', '0.5');
-                this.mainGroup.appendChild(polygon);
+                const path = document.createElementNS(SVG_NS, 'path');
+                for (const [key, value] of Object.entries(rectAttributes)) {
+                  path.setAttribute(key, value);
+                }
+                this.mainGroup.appendChild(path);
               }
             }
           }
@@ -1680,10 +1692,10 @@ class DrawingContext {
       return;
     }
 
-    const polygonPoints = scaled.map(p => `${p.x.toFixed(4)},${p.y.toFixed(4)}`).join(' ');
+    const pathData = buildPathData(scaled);
     if (!this.hasDOM) {
       const attrs = {
-        points: polygonPoints,
+        d: pathData,
         fill: fill ? fill : 'none',
       };
       if (fill) {
@@ -1696,25 +1708,25 @@ class DrawingContext {
       } else {
         attrs.stroke = 'none';
       }
-      this._pushVirtual('polygon', attrs);
+      this._pushVirtual('path', attrs);
       return;
     }
-    const polygon = document.createElementNS(SVG_NS, 'polygon');
-    polygon.setAttribute('points', polygonPoints);
+    const path = document.createElementNS(SVG_NS, 'path');
+    path.setAttribute('d', pathData);
     if (fill) {
-      polygon.setAttribute('fill', fill);
-      polygon.setAttribute('fill-opacity', fillOpacity.toString());
+      path.setAttribute('fill', fill);
+      path.setAttribute('fill-opacity', fillOpacity.toString());
     } else {
-      polygon.setAttribute('fill', 'none');
+      path.setAttribute('fill', 'none');
     }
     if (stroke) {
-      polygon.setAttribute('stroke', stroke);
-      polygon.setAttribute('stroke-width', strokeWidth.toString());
-      polygon.setAttribute('stroke-linejoin', 'round');
+      path.setAttribute('stroke', stroke);
+      path.setAttribute('stroke-width', strokeWidth.toString());
+      path.setAttribute('stroke-linejoin', 'round');
     } else {
-      polygon.setAttribute('stroke', 'none');
+      path.setAttribute('stroke', 'none');
     }
-    this.mainGroup.appendChild(polygon);
+    this.mainGroup.appendChild(path);
   }
 
   toString() {
