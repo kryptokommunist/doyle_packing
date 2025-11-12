@@ -1053,7 +1053,13 @@ class ArcGroup {
     if (!this._patternSegmentsCache) {
       this._patternSegmentsCache = new Map();
     }
-    const key = `${spacing.toFixed(6)}|${angleDeg.toFixed(6)}|${offset.toFixed(6)}`;
+    const rotationDeg =
+      Math.atan2(transform.sin ?? 0, transform.cos ?? 1) * (180 / Math.PI);
+
+    const a = angleDeg - rotationDeg;
+    const normalizedAngleDeg = ((a % 180) + 180) % 180;
+
+    const key = `${spacing.toFixed(6)}|${normalizedAngleDeg.toFixed(6)}|${offset.toFixed(6)}`;
     const cached = this._patternSegmentsCache.get(key);
     if (cached) {
       return cached;
@@ -1081,10 +1087,32 @@ class ArcGroup {
           for (let idx = 0; idx < normalized.length; idx += 2) {
             polygon.push({ x: normalized[idx] * scale, y: normalized[idx + 1] * scale });
           }
-          normalizedSegments = linesInPolygon(polygon, spacingNorm, angleDeg, 0);
+          normalizedSegments = linesInPolygon(polygon, spacingNorm, normalizedAngleDeg, 0);
         }
       }
 
+      if (normalizedSegments && normalizedSegments.length) {
+        const filtered = [];
+        for (const segment of normalizedSegments) {
+          if (!segment || segment.length !== 2) {
+            continue;
+          }
+          const [start, end] = segment;
+          if (!start || !end) {
+            continue;
+          }
+          const dx = end.x - start.x;
+          const dy = end.y - start.y;
+          if (!Number.isFinite(dx) || !Number.isFinite(dy)) {
+            continue;
+          }
+          if (dx * dx + dy * dy <= 1e-12) {
+            continue;
+          }
+          filtered.push(segment);
+        }
+        normalizedSegments = filtered;
+      }
       template.patternCache.set(key, normalizedSegments);
     }
     if (!normalizedSegments || !normalizedSegments.length) {
@@ -1093,23 +1121,44 @@ class ArcGroup {
       return empty;
     }
     const { cos, sin, radius, center } = transform;
-    const segments = new Array(normalizedSegments.length);
+    const segments = [];
     for (let idx = 0; idx < normalizedSegments.length; idx += 1) {
       const [start, end] = normalizedSegments[idx];
+      const dxNorm = end.x - start.x;
+      const dyNorm = end.y - start.y;
+      if (dxNorm * dxNorm + dyNorm * dyNorm <= 1e-12) {
+        continue;
+      }
       const sx = start.x * radius;
       const sy = start.y * radius;
       const ex = end.x * radius;
       const ey = end.y * radius;
-      segments[idx] = [
+      const p1 = {
+        re: center.re + sx * cos - sy * sin,
+        im: center.im + sx * sin + sy * cos,
+      };
+      const p2 = {
+        re: center.re + ex * cos - ey * sin,
+        im: center.im + ex * sin + ey * cos,
+      };
+      const dx = p2.re - p1.re;
+      const dy = p2.im - p1.im;
+      if (!Number.isFinite(dx) || !Number.isFinite(dy)) {
+        continue;
+      }
+      if (dx * dx + dy * dy <= 1e-12) {
+        continue;
+      }
+      segments.push([
         {
-          re: center.re + sx * cos - sy * sin,
-          im: center.im + sx * sin + sy * cos,
+          re: p1.re,
+          im: p1.im,
         },
         {
-          re: center.re + ex * cos - ey * sin,
-          im: center.im + ex * sin + ey * cos,
+          re: p2.re,
+          im: p2.im,
         },
-      ];
+      ]);
     }
     this._patternSegmentsCache.set(key, segments);
     return segments;
@@ -1124,6 +1173,8 @@ class ArcGroup {
     lineOffset = 0,
     patternType = 'lines',
     rectWidth = 2,
+    patternSpacingOverride = null,
+    patternOffsetOverride = null,
   } = {}) {
     const outline = this.getClosedOutline();
     if (!outline.length) {
@@ -1142,12 +1193,32 @@ class ArcGroup {
     }
     if (patternFill) {
       const stroke = this.debugStroke || '#000000';
-      const segments = this._getPatternSegments(lineSettings[0], lineSettings[1], lineOffset);
+      const [lineSpacingRaw, lineAngleDeg] = lineSettings;
+      const scaleFactor = context?.scaleFactor ?? 0;
+      const invScale = scaleFactor > 1e-9 ? 1 / scaleFactor : 0;
+      const spacingForSegments = Number.isFinite(patternSpacingOverride)
+        ? patternSpacingOverride
+        : invScale > 0
+          ? lineSpacingRaw * invScale
+          : lineSpacingRaw;
+      const offsetForSegmentsBase = Number.isFinite(patternOffsetOverride)
+        ? patternOffsetOverride
+        : invScale > 0
+          ? lineOffset * invScale
+          : lineOffset;
+      let offsetForSegments = offsetForSegmentsBase;
+      if (patternType === 'rectangles') {
+        const rectWidthValue = Number.isFinite(rectWidth) ? Math.abs(rectWidth) : 0;
+        if (rectWidthValue > 0) {
+          offsetForSegments += rectWidthValue / 2;
+        }
+      }
+      const segments = this._getPatternSegments(spacingForSegments, lineAngleDeg, offsetForSegments);
       context.drawGroupOutline(outline, {
         fill: 'pattern',
         stroke,
         strokeWidth: 0.8,
-        linePatternSettings: lineSettings,
+        linePatternSettings: [lineSpacingRaw, lineAngleDeg],
         drawOutline,
         lineOffset,
         patternSegments: segments,
@@ -1171,16 +1242,20 @@ class ArcGroup {
 // ------------------------------------------------------------
 
 class DrawingContext {
-  constructor(size = 800) {
-    this.size = size;
+  constructor(width = 800, height = null, units = '') {
+    const resolvedWidth = Number.isFinite(width) ? width : 800;
+    const resolvedHeight = Number.isFinite(height) ? height : resolvedWidth;
+    this.width = resolvedWidth;
+    this.height = resolvedHeight;
+    this.units = typeof units === 'string' ? units : '';
     this.scaleFactor = 1;
     this.hasDOM = typeof document !== 'undefined' && !!document.createElementNS;
     if (this.hasDOM) {
       this.svg = document.createElementNS(SVG_NS, 'svg');
       this.svg.setAttribute('xmlns', SVG_NS);
-      this.svg.setAttribute('viewBox', `${-size / 2} ${-size / 2} ${size} ${size}`);
-      this.svg.setAttribute('width', size);
-      this.svg.setAttribute('height', size);
+      this.svg.setAttribute('viewBox', this._viewBox());
+      this.svg.setAttribute('width', this._formatLength(this.width));
+      this.svg.setAttribute('height', this._formatLength(this.height));
       this.defs = document.createElementNS(SVG_NS, 'defs');
       this.mainGroup = document.createElementNS(SVG_NS, 'g');
       this.svg.appendChild(this.defs);
@@ -1213,7 +1288,12 @@ class DrawingContext {
       this.scaleFactor = 1;
       return;
     }
-    this.scaleFactor = (this.size / 2.1) / maxExtent;
+    const minDimension = Math.min(Math.abs(this.width), Math.abs(this.height));
+    if (!Number.isFinite(minDimension) || minDimension <= 0) {
+      this.scaleFactor = 1;
+      return;
+    }
+    this.scaleFactor = (minDimension / 2.1) / maxExtent;
   }
 
   _scaled(point) {
@@ -1221,6 +1301,17 @@ class DrawingContext {
       x: point.re * this.scaleFactor,
       y: point.im * this.scaleFactor,
     };
+  }
+
+  _formatLength(value) {
+    if (!Number.isFinite(value)) {
+      return '0';
+    }
+    return this.units ? `${value}${this.units}` : String(value);
+  }
+
+  _viewBox() {
+    return `${-this.width / 2} ${-this.height / 2} ${this.width} ${this.height}`;
   }
 
   _pushVirtual(tag, attributes, target = this._virtualMain) {
@@ -1357,15 +1448,22 @@ class DrawingContext {
         const lineColor = stroke || '#000000';
         const patternStyle = patternType === 'rectangles' ? 'rectangles' : 'lines';
         if (patternStyle === 'rectangles') {
-          const widthValue = Number.isFinite(rectWidth) ? rectWidth : 0;
-          const scaledWidth = widthValue * this.scaleFactor;
+          const widthValue = Number.isFinite(rectWidth) ? Math.abs(rectWidth) : 0;
+          const scale = this.scaleFactor > 0 ? this.scaleFactor : 1;
+          const scaledWidth = widthValue * scale;
           if (scaledWidth > 1e-6) {
             const halfWidth = scaledWidth / 2;
             for (const [p1, p2] of segmentsToDraw) {
+              if (!p1 || !p2) {
+                continue;
+              }
               const dx = p2.x - p1.x;
               const dy = p2.y - p1.y;
               const length = Math.hypot(dx, dy);
               if (!Number.isFinite(length) || length <= 1e-6) {
+                continue;
+              }
+              if (length <= 2 * halfWidth) {
                 continue;
               }
               const invLength = 1 / length;
@@ -1467,14 +1565,16 @@ class DrawingContext {
     if (this.hasDOM && this.svg) {
       return new XMLSerializer().serializeToString(this.svg);
     }
-    const viewBox = `${-this.size / 2} ${-this.size / 2} ${this.size} ${this.size}`;
+    const viewBox = this._viewBox();
     const defsContent = this._virtualDefs && this._virtualDefs.length
       ? `<defs>${this._virtualDefs.join('')}</defs>`
       : '';
     const mainContent = this._virtualMain && this._virtualMain.length
       ? `<g>${this._virtualMain.join('')}</g>`
       : '<g></g>';
-    return `<svg xmlns="${SVG_NS}" viewBox="${viewBox}" width="${this.size}" height="${this.size}">${defsContent}${mainContent}</svg>`;
+    const widthAttr = this._formatLength(this.width);
+    const heightAttr = this._formatLength(this.height);
+    return `<svg xmlns="${SVG_NS}" viewBox="${viewBox}" width="${widthAttr}" height="${heightAttr}">${defsContent}${mainContent}</svg>`;
   }
 
   toElement() {
@@ -2232,6 +2332,15 @@ class DoyleSpiralEngine {
     this._extendGroupsWithNeighbours(spiralCenter);
     this._finalizeRingTemplates();
 
+    const scaleFactor = context.scaleFactor;
+    const invScale = scaleFactor > 1e-9 ? 1 / scaleFactor : 0;
+    const spacingInternal = Math.max(0, fillPatternSpacing);
+    const offsetInternal = Math.max(0, fillPatternOffset);
+    const rectWidthInternal = Math.max(0, fillPatternRectWidth);
+    const spacingForGroups = invScale > 0 ? spacingInternal * invScale : 0;
+    const offsetForGroups = invScale > 0 ? offsetInternal * invScale : 0;
+    const rectWidthForGroups = invScale > 0 ? rectWidthInternal * invScale : 0;
+
     const ringIndices = Array.from(this.arcGroups.values())
       .filter(group => group.ringIndex !== null && group.ringIndex !== undefined)
       .map(group => group.ringIndex);
@@ -2256,11 +2365,13 @@ class DoyleSpiralEngine {
         group.toSVGFill(context, {
           debug: false,
           patternFill: true,
-          lineSettings: [fillPatternSpacing, angle],
+          lineSettings: [spacingInternal, angle],
           drawOutline: drawGroupOutline,
-          lineOffset: fillPatternOffset,
+          lineOffset: offsetInternal,
           patternType: fillPatternType,
-          rectWidth: fillPatternRectWidth,
+          rectWidth: rectWidthForGroups,
+          patternSpacingOverride: spacingForGroups,
+          patternOffsetOverride: offsetForGroups,
         });
       }
     }
@@ -2297,11 +2408,21 @@ class DoyleSpiralEngine {
     fillPatternOffset = 0.0,
     fillPatternType = 'lines',
     fillPatternRectWidth = 2.0,
+    boundingBoxWidth = null,
+    boundingBoxHeight = null,
+    lengthUnits = '',
   } = {}) {
     if (!this._generated) {
       this.generateCircles();
     }
-    const context = new DrawingContext(size);
+    const fallbackSize = Number.isFinite(size) && size > 0 ? size : 800;
+    const resolvedWidth = Number.isFinite(boundingBoxWidth) && boundingBoxWidth > 0
+      ? boundingBoxWidth
+      : fallbackSize;
+    const resolvedHeight = Number.isFinite(boundingBoxHeight) && boundingBoxHeight > 0
+      ? boundingBoxHeight
+      : fallbackSize;
+    const context = new DrawingContext(resolvedWidth, resolvedHeight, lengthUnits);
     this.arcGroups.clear();
 
     if (mode === 'doyle') {
@@ -2374,7 +2495,20 @@ function normaliseParams(params = {}) {
     ? params.fill_pattern_type.toLowerCase()
     : 'lines';
   const fillPatternType = patternTypeRaw === 'rectangles' ? 'rectangles' : 'lines';
+  const spacingRaw = Number(params.fill_pattern_spacing ?? 8);
+  const offsetRaw = Number(params.fill_pattern_offset ?? 0);
   const rectWidthValue = Number(params.fill_pattern_rect_width ?? 2);
+  const boundingWidthRaw = Number(params.bounding_box_width_mm ?? 200);
+  const boundingHeightRaw = Number(params.bounding_box_height_mm ?? boundingWidthRaw);
+  const fillPatternSpacing = Number.isFinite(spacingRaw) ? Math.max(0.001, spacingRaw) : 8;
+  const fillPatternOffset = Number.isFinite(offsetRaw) ? Math.max(0, offsetRaw) : 0;
+  const rectWidthMm = Math.max(0, Number.isFinite(rectWidthValue) ? rectWidthValue : 2);
+  const boundingWidthMm = Number.isFinite(boundingWidthRaw) && boundingWidthRaw > 0.0001
+    ? boundingWidthRaw
+    : 200;
+  const boundingHeightMm = Number.isFinite(boundingHeightRaw) && boundingHeightRaw > 0.0001
+    ? boundingHeightRaw
+    : boundingWidthMm;
   return {
     p: Number(params.p ?? 16),
     q: Number(params.q ?? 16),
@@ -2385,14 +2519,16 @@ function normaliseParams(params = {}) {
     size: Number(params.size ?? 800),
     debug_groups: Boolean(params.debug_groups ?? false),
     add_fill_pattern: Boolean(params.add_fill_pattern ?? false),
-    fill_pattern_spacing: Number(params.fill_pattern_spacing ?? 5),
+    fill_pattern_spacing: fillPatternSpacing,
     fill_pattern_angle: Number(params.fill_pattern_angle ?? 0),
-    fill_pattern_offset: Number(params.fill_pattern_offset ?? 0),
+    fill_pattern_offset: fillPatternOffset,
     fill_pattern_type: fillPatternType,
-    fill_pattern_rect_width: Math.max(0, Number.isFinite(rectWidthValue) ? rectWidthValue : 2),
+    fill_pattern_rect_width: rectWidthMm,
     red_outline: Boolean(params.red_outline ?? false),
     draw_group_outline: params.draw_group_outline !== undefined ? Boolean(params.draw_group_outline) : true,
     max_d: Number(params.max_d ?? 2000),
+    bounding_box_width_mm: boundingWidthMm,
+    bounding_box_height_mm: boundingHeightMm,
   };
 }
 
@@ -2415,6 +2551,9 @@ function renderSpiral(params = {}, overrideMode = null) {
     fillPatternOffset: opts.fill_pattern_offset,
     fillPatternType: opts.fill_pattern_type,
     fillPatternRectWidth: opts.fill_pattern_rect_width,
+    boundingBoxWidth: opts.bounding_box_width_mm,
+    boundingBoxHeight: opts.bounding_box_height_mm,
+    lengthUnits: 'mm',
   });
   return {
     engine,
