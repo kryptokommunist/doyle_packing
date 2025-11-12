@@ -1053,8 +1053,11 @@ class ArcGroup {
     if (!this._patternSegmentsCache) {
       this._patternSegmentsCache = new Map();
     }
-    const rotationDeg = Math.atan2(transform.sin || 0, transform.cos || 1) * (180 / Math.PI);
-    const normalizedAngleDeg = ((angleDeg - rotationDeg) % 360 + 360) % 360;
+    const rotationDeg =
+      Math.atan2(transform.sin ?? 0, transform.cos ?? 1) * (180 / Math.PI);
+
+    const a = angleDeg - rotationDeg;
+    const normalizedAngleDeg = ((a % 180) + 180) % 180;
 
     const key = `${spacing.toFixed(6)}|${normalizedAngleDeg.toFixed(6)}|${offset.toFixed(6)}`;
     const cached = this._patternSegmentsCache.get(key);
