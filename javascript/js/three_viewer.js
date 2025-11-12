@@ -9,8 +9,15 @@ function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
 
+function normaliseOrientationDeg(angle) {
+  if (!Number.isFinite(angle)) {
+    return 0;
+  }
+  return ((angle % 180) + 180) % 180;
+}
+
 function angularDifferenceDeg(a, b) {
-  const diff = ((a - b) % 180 + 180) % 180;
+  const diff = (normaliseOrientationDeg(a) - normaliseOrientationDeg(b) + 180) % 180;
   return Math.min(diff, 180 - diff);
 }
 
@@ -149,7 +156,7 @@ function createThreeViewer({
     mesh.receiveShadow = true;
     mesh.userData = {
       ringIndex,
-      lineAngle: lineAngle || 0,
+      lineAngle: normaliseOrientationDeg(lineAngle),
       isPulsing: false,
       wasInRange: false,
       pulseStart: 0,
