@@ -1163,7 +1163,20 @@ class ArcGroup {
         : invScale > 0
           ? lineOffset * invScale
           : lineOffset;
-      const segments = this._getPatternSegments(spacingForSegments, lineAngleDeg, offsetForSegments);
+      const rectWidthValue = Number.isFinite(rectWidth) ? rectWidth : 0;
+      const rectHalfWidth =
+        patternType === 'rectangles' && rectWidthValue > 0
+          ? rectWidthValue * 0.5
+          : 0;
+      const baseOffsetForSegments = Number.isFinite(offsetForSegments)
+        ? Math.max(0, offsetForSegments)
+        : 0;
+      const effectiveOffsetForSegments = baseOffsetForSegments + rectHalfWidth;
+      const segments = this._getPatternSegments(
+        spacingForSegments,
+        lineAngleDeg,
+        effectiveOffsetForSegments,
+      );
       context.drawGroupOutline(outline, {
         fill: 'pattern',
         stroke,
@@ -1361,6 +1374,7 @@ class DrawingContext {
     const scaled = points.map(pt => this._scaled(pt));
 
     if (fill === 'pattern') {
+      const patternStyle = patternType === 'rectangles' ? 'rectangles' : 'lines';
       let segmentsToDraw = null;
       if (patternSegments !== null && patternSegments !== undefined) {
         segmentsToDraw = patternSegments.map(([start, end]) => [
@@ -1368,11 +1382,17 @@ class DrawingContext {
           this._scaled(end),
         ]);
       } else {
+        const rawOffset = Number.isFinite(lineOffset) ? Math.max(0, lineOffset) : 0;
+        const rectWidthValue = Number.isFinite(rectWidth) ? rectWidth : 0;
+        const rectInset =
+          patternStyle === 'rectangles' && rectWidthValue > 0
+            ? rectWidthValue * 0.5
+            : 0;
         segmentsToDraw = linesInPolygon(
           scaled,
           linePatternSettings[0],
           linePatternSettings[1],
-          lineOffset,
+          rawOffset + rectInset,
         );
       }
       if (drawOutline) {
@@ -1396,7 +1416,6 @@ class DrawingContext {
       }
       if (segmentsToDraw && segmentsToDraw.length) {
         const lineColor = stroke || '#000000';
-        const patternStyle = patternType === 'rectangles' ? 'rectangles' : 'lines';
         if (patternStyle === 'rectangles') {
           const widthValue = Number.isFinite(rectWidth) ? rectWidth : 0;
           const scaledWidth = widthValue * this.scaleFactor;
