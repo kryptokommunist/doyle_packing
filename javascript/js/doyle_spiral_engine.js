@@ -1175,6 +1175,8 @@ class ArcGroup {
     rectWidth = 2,
     patternSpacingOverride = null,
     patternOffsetOverride = null,
+    outlineStrokeWidth = 0.6,
+    patternStrokeWidth = 0.5,
   } = {}) {
     const outline = this.getClosedOutline();
     if (!outline.length) {
@@ -1186,7 +1188,7 @@ class ArcGroup {
       context.drawGroupOutline(outline, {
         fill,
         stroke,
-        strokeWidth: 0.8,
+        strokeWidth: outlineStrokeWidth,
         fillOpacity,
       });
       return;
@@ -1217,13 +1219,14 @@ class ArcGroup {
       context.drawGroupOutline(outline, {
         fill: 'pattern',
         stroke,
-        strokeWidth: 0.8,
+        strokeWidth: outlineStrokeWidth,
         linePatternSettings: [lineSpacingRaw, lineAngleDeg],
         drawOutline,
         lineOffset,
         patternSegments: segments,
         patternType,
         rectWidth,
+        patternStrokeWidth,
       });
       return;
     }
@@ -1231,7 +1234,7 @@ class ArcGroup {
       context.drawGroupOutline(outline, {
         fill: null,
         stroke: '#000000',
-        strokeWidth: 0.6,
+        strokeWidth: outlineStrokeWidth,
       });
     }
   }
@@ -1560,11 +1563,18 @@ class DrawingContext {
     patternSegments = null,
     patternType = 'lines',
     rectWidth = 2,
+    patternStrokeWidth = 0.5,
   } = {}) {
     if (!points || !points.length) {
       return;
     }
     const scaled = points.map(pt => this._scaled(pt));
+    const outlineStrokeWidth = Number.isFinite(strokeWidth) ? strokeWidth : 0;
+    const outlineStrokeWidthStr = outlineStrokeWidth.toString();
+    const patternStroke = Number.isFinite(patternStrokeWidth)
+      ? Math.max(0, patternStrokeWidth)
+      : 0;
+    const patternStrokeStr = patternStroke.toString();
 
     const buildPathData = (pts, closePath = true) => {
       if (!pts.length) {
@@ -1601,7 +1611,7 @@ class DrawingContext {
           d: pathData,
           fill: 'none',
           stroke: stroke || 'none',
-          'stroke-width': strokeWidth.toString(),
+          'stroke-width': outlineStrokeWidthStr,
           'stroke-linejoin': 'round',
         };
         if (!this.hasDOM) {
@@ -1621,7 +1631,7 @@ class DrawingContext {
           const widthValue = Number.isFinite(rectWidth) ? Math.abs(rectWidth) : 0;
           const scale = this.scaleFactor > 0 ? this.scaleFactor : 1;
           const scaledWidth = widthValue * scale;
-          if (scaledWidth > 1e-6) {
+          if (scaledWidth > 1e-6 && patternStroke > 0) {
             const halfWidth = scaledWidth / 2;
             for (const [p1, p2] of segmentsToDraw) {
               if (!p1 || !p2) {
@@ -1650,7 +1660,7 @@ class DrawingContext {
                 d: rectPathData,
                 fill: 'none',
                 stroke: '#ff0000',
-                'stroke-width': '0.5',
+                'stroke-width': patternStrokeStr,
               };
               if (!this.hasDOM) {
                 this._pushVirtual('path', rectAttributes);
@@ -1664,27 +1674,29 @@ class DrawingContext {
             }
           }
         } else {
-          for (const [p1, p2] of segmentsToDraw) {
-            if (!this.hasDOM) {
-              this._pushVirtual('line', {
-                x1: p1.x.toFixed(4),
-                y1: p1.y.toFixed(4),
-                x2: p2.x.toFixed(4),
-                y2: p2.y.toFixed(4),
-                stroke: lineColor,
-                'stroke-width': '0.5',
-                'stroke-linecap': 'round',
-              });
-            } else {
-              const line = document.createElementNS(SVG_NS, 'line');
-              line.setAttribute('x1', p1.x.toFixed(4));
-              line.setAttribute('y1', p1.y.toFixed(4));
-              line.setAttribute('x2', p2.x.toFixed(4));
-              line.setAttribute('y2', p2.y.toFixed(4));
-              line.setAttribute('stroke', lineColor);
-              line.setAttribute('stroke-width', '0.5');
-              line.setAttribute('stroke-linecap', 'round');
-              this.mainGroup.appendChild(line);
+          if (patternStroke > 0) {
+            for (const [p1, p2] of segmentsToDraw) {
+              if (!this.hasDOM) {
+                this._pushVirtual('line', {
+                  x1: p1.x.toFixed(4),
+                  y1: p1.y.toFixed(4),
+                  x2: p2.x.toFixed(4),
+                  y2: p2.y.toFixed(4),
+                  stroke: lineColor,
+                  'stroke-width': patternStrokeStr,
+                  'stroke-linecap': 'round',
+                });
+              } else {
+                const line = document.createElementNS(SVG_NS, 'line');
+                line.setAttribute('x1', p1.x.toFixed(4));
+                line.setAttribute('y1', p1.y.toFixed(4));
+                line.setAttribute('x2', p2.x.toFixed(4));
+                line.setAttribute('y2', p2.y.toFixed(4));
+                line.setAttribute('stroke', lineColor);
+                line.setAttribute('stroke-width', patternStrokeStr);
+                line.setAttribute('stroke-linecap', 'round');
+                this.mainGroup.appendChild(line);
+              }
             }
           }
         }
@@ -1703,7 +1715,7 @@ class DrawingContext {
       }
       if (stroke) {
         attrs.stroke = stroke;
-        attrs['stroke-width'] = strokeWidth.toString();
+        attrs['stroke-width'] = outlineStrokeWidthStr;
         attrs['stroke-linejoin'] = 'round';
       } else {
         attrs.stroke = 'none';
@@ -1721,7 +1733,7 @@ class DrawingContext {
     }
     if (stroke) {
       path.setAttribute('stroke', stroke);
-      path.setAttribute('stroke-width', strokeWidth.toString());
+      path.setAttribute('stroke-width', outlineStrokeWidthStr);
       path.setAttribute('stroke-linejoin', 'round');
     } else {
       path.setAttribute('stroke', 'none');
@@ -2273,7 +2285,7 @@ class DoyleSpiralEngine {
     };
   }
 
-  _createArcGroupsForCircles(radiusToRing, spiralCenter, debugGroups, addFillPattern, drawGroupOutline, context) {
+  _createArcGroupsForCircles(radiusToRing, spiralCenter, debugGroups, addFillPattern, drawGroupOutline, context, outlineStrokeWidth = 0) {
     for (const circle of this.circles) {
       if (circle.intersections.length !== 6) {
         continue;
@@ -2298,7 +2310,7 @@ class DoyleSpiralEngine {
         const steps = estimateArcSteps(circle, start, end);
         const arc = new ArcElement(circle, start, end, steps, true);
         if (!addFillPattern && drawGroupOutline) {
-          context.drawScaled(arc);
+          context.drawScaledArc(arc, { color: '#000000', width: outlineStrokeWidth });
         }
         group.addArc(arc);
         arcs.push(arc);
@@ -2309,7 +2321,16 @@ class DoyleSpiralEngine {
     }
   }
 
-  _drawOuterClosureArcs(spiralCenter, debugGroups, redOutline, addFillPattern, drawGroupOutline, context) {
+  _drawOuterClosureArcs(
+    spiralCenter,
+    debugGroups,
+    redOutline,
+    addFillPattern,
+    drawGroupOutline,
+    context,
+    outlineStrokeWidth = 0,
+    highlightStrokeWidth = 0,
+  ) {
     for (const circle of this.outerCircles) {
       if (circle.intersections.length < 2) {
         continue;
@@ -2343,9 +2364,10 @@ class DoyleSpiralEngine {
       }
       if (arcsForCircle.length && (redOutline || (!addFillPattern && drawGroupOutline))) {
         const color = redOutline ? '#ff0000' : '#000000';
+        const strokeWidth = redOutline ? highlightStrokeWidth : outlineStrokeWidth;
         const paths = buildContinuousPathsFromArcs(arcsForCircle);
         for (const path of paths) {
-          context.drawPolyline(path, { color, width: 1.2 });
+          context.drawPolyline(path, { color, width: strokeWidth });
         }
       }
     }
@@ -2489,6 +2511,9 @@ class DoyleSpiralEngine {
     fillPatternOffset = 0.0,
     fillPatternType = 'lines',
     fillPatternRectWidth = 2.0,
+    highlightRimWidth = 1.2,
+    groupOutlineWidth = 0.6,
+    patternStrokeWidth = 0.5,
   } = {}) {
     this.generateOuterCircles();
     this.computeAllIntersections();
@@ -2497,11 +2522,38 @@ class DoyleSpiralEngine {
     this.arcGroups.clear();
     this._ringTemplates = new Map();
 
+    const highlightStrokeWidth = Number.isFinite(highlightRimWidth)
+      ? Math.max(0, highlightRimWidth)
+      : 0;
+    const outlineStrokeWidth = Number.isFinite(groupOutlineWidth)
+      ? Math.max(0, groupOutlineWidth)
+      : 0;
+    const patternStroke = Number.isFinite(patternStrokeWidth)
+      ? Math.max(0, patternStrokeWidth)
+      : 0;
+
     const spiralCenter = Complex.ZERO;
     const radiusToRing = this._computeRingIndices();
 
-    this._createArcGroupsForCircles(radiusToRing, spiralCenter, debugGroups, addFillPattern, drawGroupOutline, context);
-    this._drawOuterClosureArcs(spiralCenter, debugGroups, redOutline, addFillPattern, drawGroupOutline, context);
+    this._createArcGroupsForCircles(
+      radiusToRing,
+      spiralCenter,
+      debugGroups,
+      addFillPattern,
+      drawGroupOutline,
+      context,
+      outlineStrokeWidth,
+    );
+    this._drawOuterClosureArcs(
+      spiralCenter,
+      debugGroups,
+      redOutline,
+      addFillPattern,
+      drawGroupOutline,
+      context,
+      outlineStrokeWidth,
+      highlightStrokeWidth,
+    );
     this._extendGroupsWithNeighbours(spiralCenter);
     this._finalizeRingTemplates();
 
@@ -2524,7 +2576,11 @@ class DoyleSpiralEngine {
         if (key.startsWith('outer_')) {
           continue;
         }
-        group.toSVGFill(context, { debug: true, fillOpacity: 0.25 });
+        group.toSVGFill(context, {
+          debug: true,
+          fillOpacity: 0.25,
+          outlineStrokeWidth: outlineStrokeWidth,
+        });
       }
     }
 
@@ -2545,6 +2601,8 @@ class DoyleSpiralEngine {
           rectWidth: rectWidthForGroups,
           patternSpacingOverride: spacingForGroups,
           patternOffsetOverride: offsetForGroups,
+          outlineStrokeWidth: outlineStrokeWidth,
+          patternStrokeWidth: patternStroke,
         });
       }
     }
@@ -2565,7 +2623,7 @@ class DoyleSpiralEngine {
         }
         const paths = buildContinuousPathsFromArcs(highlightArcs);
         for (const path of paths) {
-          context.drawPolyline(path, { color: '#ff0000', width: 1.2 });
+          context.drawPolyline(path, { color: '#ff0000', width: highlightStrokeWidth });
         }
       }
     }
@@ -2589,6 +2647,9 @@ class DoyleSpiralEngine {
     fillPatternOffset = 0.0,
     fillPatternType = 'lines',
     fillPatternRectWidth = 2.0,
+    highlightRimWidth = 1.2,
+    groupOutlineWidth = 0.6,
+    patternStrokeWidth = 0.5,
     boundingBoxWidth = null,
     boundingBoxHeight = null,
     lengthUnits = '',
@@ -2621,6 +2682,9 @@ class DoyleSpiralEngine {
         fillPatternOffset,
         fillPatternType,
         fillPatternRectWidth,
+        highlightRimWidth,
+        groupOutlineWidth,
+        patternStrokeWidth,
       });
       return {
         svg: context.toElement(),
@@ -2681,6 +2745,9 @@ function normaliseParams(params = {}) {
   const rectWidthValue = Number(params.fill_pattern_rect_width ?? 2);
   const boundingWidthRaw = Number(params.bounding_box_width_mm ?? 200);
   const boundingHeightRaw = Number(params.bounding_box_height_mm ?? boundingWidthRaw);
+  const highlightWidthRaw = Number(params.highlight_rim_width ?? 1.2);
+  const outlineWidthRaw = Number(params.group_outline_width ?? 0.6);
+  const patternStrokeRaw = Number(params.pattern_stroke_width ?? 0.5);
   const fillPatternSpacing = Number.isFinite(spacingRaw) ? Math.max(0.001, spacingRaw) : 8;
   const fillPatternOffset = Number.isFinite(offsetRaw) ? Math.max(0, offsetRaw) : 0;
   const rectWidthMm = Math.max(0, Number.isFinite(rectWidthValue) ? rectWidthValue : 2);
@@ -2690,6 +2757,9 @@ function normaliseParams(params = {}) {
   const boundingHeightMm = Number.isFinite(boundingHeightRaw) && boundingHeightRaw > 0.0001
     ? boundingHeightRaw
     : boundingWidthMm;
+  const highlightRimWidth = Number.isFinite(highlightWidthRaw) ? Math.max(0, highlightWidthRaw) : 1.2;
+  const groupOutlineWidth = Number.isFinite(outlineWidthRaw) ? Math.max(0, outlineWidthRaw) : 0.6;
+  const patternStrokeWidth = Number.isFinite(patternStrokeRaw) ? Math.max(0, patternStrokeRaw) : 0.5;
   return {
     p: Number(params.p ?? 16),
     q: Number(params.q ?? 16),
@@ -2705,6 +2775,9 @@ function normaliseParams(params = {}) {
     fill_pattern_offset: fillPatternOffset,
     fill_pattern_type: fillPatternType,
     fill_pattern_rect_width: rectWidthMm,
+    highlight_rim_width: highlightRimWidth,
+    group_outline_width: groupOutlineWidth,
+    pattern_stroke_width: patternStrokeWidth,
     red_outline: Boolean(params.red_outline ?? false),
     draw_group_outline: params.draw_group_outline !== undefined ? Boolean(params.draw_group_outline) : true,
     max_d: Number(params.max_d ?? 2000),
@@ -2732,6 +2805,9 @@ function renderSpiral(params = {}, overrideMode = null) {
     fillPatternOffset: opts.fill_pattern_offset,
     fillPatternType: opts.fill_pattern_type,
     fillPatternRectWidth: opts.fill_pattern_rect_width,
+    highlightRimWidth: opts.highlight_rim_width,
+    groupOutlineWidth: opts.group_outline_width,
+    patternStrokeWidth: opts.pattern_stroke_width,
     boundingBoxWidth: opts.bounding_box_width_mm,
     boundingBoxHeight: opts.bounding_box_height_mm,
     lengthUnits: 'mm',
