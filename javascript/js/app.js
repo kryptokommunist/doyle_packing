@@ -207,11 +207,12 @@ function ensureThreeApp() {
   const metalnessValue = document.getElementById('threeMetalnessValue');
   const roughness = document.getElementById('threeRoughness');
   const roughnessValue = document.getElementById('threeRoughnessValue');
-  const manualRotation = document.getElementById('threeManualRotation');
-  const manualRotationValue = document.getElementById('threeManualRotationValue');
-  const reloadGeometry = document.getElementById('threeReloadGeometry');
-  const loadJson = document.getElementById('threeLoadJson');
-  const resetCamera = document.getElementById('threeResetCamera');
+const manualRotation = document.getElementById('threeManualRotation');
+const manualRotationValue = document.getElementById('threeManualRotationValue');
+const animationModeSelect = document.getElementById('threeAnimationMode');
+const reloadGeometry = document.getElementById('threeReloadGeometry');
+const loadJson = document.getElementById('threeLoadJson');
+const resetCamera = document.getElementById('threeResetCamera');
   const statArcGroups3d = document.getElementById('threeStatArcGroups');
   const statPolygons3d = document.getElementById('threeStatPolygons');
   const statParameters3d = document.getElementById('threeStatParameters');
@@ -236,6 +237,7 @@ function ensureThreeApp() {
       metalnessValue,
       roughness,
       roughnessValue,
+      animationModeSelect,
       reloadButton: reloadGeometry,
       loadJsonButton: loadJson,
       resetCameraButton: resetCamera,
