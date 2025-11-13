@@ -394,16 +394,6 @@ function computeBreadthFirstSteps(context) {
   return { steps, maxStep, seeds };
 }
 
-function countActiveNeighbors(meta, activeSet) {
-  let count = 0;
-  for (const neighbor of meta.neighbors) {
-    if (activeSet.has(neighbor)) {
-      count += 1;
-    }
-  }
-  return count;
-}
-
 function patternAnimationRingCycle(context, opts = {}) {
   const assignments = new Map();
   const baseAngle = Number.isFinite(opts.baseAngle) ? opts.baseAngle : 0;
@@ -434,38 +424,6 @@ function patternAnimationRingPingPong(context, opts = {}) {
   return assignments;
 }
 
-function patternAnimationSpiralExpansion(context, opts = {}) {
-  const assignments = new Map();
-  const baseAngle = Number.isFinite(opts.baseAngle) ? opts.baseAngle : 0;
-  const order = context.metaList
-    .slice()
-    .sort((a, b) => (a.radius + normaliseAngleRad(a.theta)) - (b.radius + normaliseAngleRad(b.theta)));
-  order.forEach((meta, index) => {
-    const angle = meta.ringIndex * baseAngle + index * 4;
-    assignments.set(meta.id, { primaryAngle: angle, angles: [angle] });
-  });
-  return assignments;
-}
-
-function patternAnimationDualSpiralWave(context, opts = {}) {
-  const assignments = new Map();
-  const baseAngle = Number.isFinite(opts.baseAngle) ? opts.baseAngle : 0;
-  const arms = [[], []];
-  context.metaList.forEach(meta => {
-    const thetaNorm = normaliseAngleRad(meta.theta) / (Math.PI * 2);
-    const armIndex = thetaNorm < 0.5 ? 0 : 1;
-    arms[armIndex].push(meta);
-  });
-  arms.forEach((arm, armIndex) => {
-    arm.sort((a, b) => a.radius - b.radius);
-    arm.forEach((meta, index) => {
-      const angle = meta.ringIndex * baseAngle + armIndex * 45 + index * 6;
-      assignments.set(meta.id, { primaryAngle: angle, angles: [angle] });
-    });
-  });
-  return assignments;
-}
-
 function patternAnimationRadialBloom(context, opts = {}) {
   const assignments = new Map();
   const baseAngle = Number.isFinite(opts.baseAngle) ? opts.baseAngle : 0;
@@ -493,81 +451,14 @@ function patternAnimationCAWavefront(context, opts = {}) {
   return assignments;
 }
 
-function patternAnimationCACheckerboard(context, opts = {}) {
-  const assignments = new Map();
-  const baseAngle = Number.isFinite(opts.baseAngle) ? opts.baseAngle : 0;
-  const seeds = context.metaList.filter(meta => meta.ringIndex === context.minRing);
-  const active = new Set(seeds);
-  const steps = new Map();
-  seeds.forEach(meta => steps.set(meta.id, 0));
-  let step = 1;
-  const limit = Math.max(context.metaList.length * 5, 1);
-  while (active.size < context.metaList.length && step < limit) {
-    let added = false;
-    for (const meta of context.metaList) {
-      if (active.has(meta)) {
-        continue;
-      }
-      const required = step % 2 === 0 ? 2 : 1;
-      const neighborCount = countActiveNeighbors(meta, active);
-      if (neighborCount >= required) {
-        active.add(meta);
-        steps.set(meta.id, step);
-        added = true;
-      }
-    }
-    if (!added) {
-      step += 1;
-      continue;
-    }
-    step += 1;
-  }
-  for (const meta of context.metaList) {
-    if (!steps.has(meta.id)) {
-      steps.set(meta.id, step);
-      step += 1;
-    }
-  }
-  context.metaList.forEach(meta => {
-    const activationStep = steps.get(meta.id) ?? 0;
-    const parityOffset = activationStep % 2 === 0 ? 0 : 15;
-    const angle = meta.ringIndex * baseAngle + activationStep * 9 + parityOffset;
-    assignments.set(meta.id, { primaryAngle: angle, angles: [angle] });
-  });
-  return assignments;
-}
-
-function patternAnimationCAEchoPulse(context, opts = {}) {
-  const assignments = new Map();
-  const baseAngle = Number.isFinite(opts.baseAngle) ? opts.baseAngle : 0;
-  const { steps, maxStep } = computeBreadthFirstSteps(context);
-  const gap = 14;
-  context.metaList.forEach(meta => {
-    const step = steps.get(meta.id) ?? 0;
-    const outward = meta.ringIndex * baseAngle + step * gap;
-    const inward = meta.ringIndex * baseAngle + (maxStep - step) * gap + 30;
-    const shimmer = meta.ringIndex * baseAngle + (step % 3) * 20 + 60;
-    const angles = dedupeAngles([outward, inward, shimmer], 3);
-    assignments.set(meta.id, {
-      primaryAngle: angles[0],
-      angles,
-    });
-  });
-  return assignments;
-}
-
 const PATTERN_ANIMATION_DEFINITIONS = {
+  radial_bloom: { label: 'Radial bloom', generator: patternAnimationRadialBloom },
   ring_cycle: { label: 'Ring cycle chase', generator: patternAnimationRingCycle },
   ring_pingpong: { label: 'Alternating ring sweep', generator: patternAnimationRingPingPong },
-  spiral_expansion: { label: 'Log spiral expansion', generator: patternAnimationSpiralExpansion },
-  dual_spiral_wave: { label: 'Dual spiral wave', generator: patternAnimationDualSpiralWave },
-  radial_bloom: { label: 'Radial bloom', generator: patternAnimationRadialBloom },
   ca_wavefront: { label: 'Cellular wavefront', generator: patternAnimationCAWavefront },
-  ca_checkerboard: { label: 'Cellular checkerboard', generator: patternAnimationCACheckerboard },
-  ca_echo_pulse: { label: 'Cellular echo pulse', generator: patternAnimationCAEchoPulse },
 };
 
-const DEFAULT_PATTERN_ANIMATION = 'ring_cycle';
+const DEFAULT_PATTERN_ANIMATION = 'radial_bloom';
 
 function normalisePatternAnimationId(value) {
   if (typeof value !== 'string') {
