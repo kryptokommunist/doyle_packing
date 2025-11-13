@@ -1895,6 +1895,74 @@ class DrawingContext {
       return commands.join(' ');
     };
 
+    const createOutlineSegments = (pts, closeLoop = true) => {
+      if (!pts || pts.length < 2) {
+        return [];
+      }
+      const segments = [];
+      for (let i = 0; i < pts.length - 1; i += 1) {
+        const start = pts[i];
+        const end = pts[i + 1];
+        if (!start || !end) {
+          continue;
+        }
+        if (Math.hypot(end.x - start.x, end.y - start.y) <= 1e-9) {
+          continue;
+        }
+        segments.push([start, end]);
+      }
+      if (closeLoop && pts.length > 2) {
+        const first = pts[0];
+        const last = pts[pts.length - 1];
+        if (
+          first &&
+          last &&
+          Math.hypot(first.x - last.x, first.y - last.y) > 1e-9
+        ) {
+          segments.push([last, first]);
+        }
+      }
+      return segments;
+    };
+
+    const emitOutlineSegments = (segments, color) => {
+      if (!segments || !segments.length) {
+        return;
+      }
+      const strokeColor = color || 'none';
+      if (!this.hasDOM) {
+        for (const [start, end] of segments) {
+          this._pushVirtual('line', {
+            x1: start.x.toFixed(4),
+            y1: start.y.toFixed(4),
+            x2: end.x.toFixed(4),
+            y2: end.y.toFixed(4),
+            stroke: strokeColor,
+            'stroke-width': outlineStrokeWidthStr,
+            'stroke-linecap': 'round',
+          });
+        }
+        return;
+      }
+      for (const [start, end] of segments) {
+        const line = document.createElementNS(SVG_NS, 'line');
+        line.setAttribute('x1', start.x.toFixed(4));
+        line.setAttribute('y1', start.y.toFixed(4));
+        line.setAttribute('x2', end.x.toFixed(4));
+        line.setAttribute('y2', end.y.toFixed(4));
+        line.setAttribute('stroke', strokeColor);
+        line.setAttribute('stroke-width', outlineStrokeWidthStr);
+        line.setAttribute('stroke-linecap', 'round');
+        this.mainGroup.appendChild(line);
+      }
+    };
+
+    const shouldDrawOutlineSegments =
+      drawOutline && stroke && outlineStrokeWidth > 0;
+    const outlineSegments = shouldDrawOutlineSegments
+      ? createOutlineSegments(scaled)
+      : null;
+
     if (fill === 'pattern') {
       let segmentsToDraw = null;
       if (patternSegments !== null && patternSegments !== undefined) {
@@ -1910,24 +1978,8 @@ class DrawingContext {
           lineOffset,
         );
       }
-      if (drawOutline) {
-        const pathData = buildPathData(scaled);
-        const attributes = {
-          d: pathData,
-          fill: 'none',
-          stroke: stroke || 'none',
-          'stroke-width': outlineStrokeWidthStr,
-          'stroke-linejoin': 'round',
-        };
-        if (!this.hasDOM) {
-          this._pushVirtual('path', attributes);
-        } else {
-          const path = document.createElementNS(SVG_NS, 'path');
-          for (const [key, value] of Object.entries(attributes)) {
-            path.setAttribute(key, value);
-          }
-          this.mainGroup.appendChild(path);
-        }
+      if (outlineSegments) {
+        emitOutlineSegments(outlineSegments, stroke);
       }
       if (segmentsToDraw && segmentsToDraw.length) {
         const lineColor = stroke || '#000000';
@@ -2009,41 +2061,29 @@ class DrawingContext {
       return;
     }
 
-    const pathData = buildPathData(scaled);
-    if (!this.hasDOM) {
-      const attrs = {
-        d: pathData,
-        fill: fill ? fill : 'none',
-      };
-      if (fill) {
-        attrs['fill-opacity'] = fillOpacity.toString();
-      }
-      if (stroke) {
-        attrs.stroke = stroke;
-        attrs['stroke-width'] = outlineStrokeWidthStr;
-        attrs['stroke-linejoin'] = 'round';
-      } else {
-        attrs.stroke = 'none';
-      }
-      this._pushVirtual('path', attrs);
-      return;
-    }
-    const path = document.createElementNS(SVG_NS, 'path');
-    path.setAttribute('d', pathData);
     if (fill) {
-      path.setAttribute('fill', fill);
-      path.setAttribute('fill-opacity', fillOpacity.toString());
-    } else {
-      path.setAttribute('fill', 'none');
+      const pathData = buildPathData(scaled);
+      if (!this.hasDOM) {
+        const attrs = {
+          d: pathData,
+          fill,
+          'fill-opacity': fillOpacity.toString(),
+          stroke: 'none',
+        };
+        this._pushVirtual('path', attrs);
+      } else {
+        const path = document.createElementNS(SVG_NS, 'path');
+        path.setAttribute('d', pathData);
+        path.setAttribute('fill', fill);
+        path.setAttribute('fill-opacity', fillOpacity.toString());
+        path.setAttribute('stroke', 'none');
+        this.mainGroup.appendChild(path);
+      }
     }
-    if (stroke) {
-      path.setAttribute('stroke', stroke);
-      path.setAttribute('stroke-width', outlineStrokeWidthStr);
-      path.setAttribute('stroke-linejoin', 'round');
-    } else {
-      path.setAttribute('stroke', 'none');
+
+    if (outlineSegments) {
+      emitOutlineSegments(outlineSegments, stroke);
     }
-    this.mainGroup.appendChild(path);
   }
 
   toString() {
