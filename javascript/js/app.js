@@ -207,6 +207,7 @@ function ensureThreeApp() {
   const metalnessValue = document.getElementById('threeMetalnessValue');
   const roughness = document.getElementById('threeRoughness');
   const roughnessValue = document.getElementById('threeRoughnessValue');
+  const animationMode = document.getElementById('threeAnimationMode');
   const manualRotation = document.getElementById('threeManualRotation');
   const manualRotationValue = document.getElementById('threeManualRotationValue');
   const reloadGeometry = document.getElementById('threeReloadGeometry');
@@ -236,6 +237,7 @@ function ensureThreeApp() {
       metalnessValue,
       roughness,
       roughnessValue,
+      animationMode,
       reloadButton: reloadGeometry,
       loadJsonButton: loadJson,
       resetCameraButton: resetCamera,

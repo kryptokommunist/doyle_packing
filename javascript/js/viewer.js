@@ -13,6 +13,7 @@ const roughness = document.getElementById('roughness');
 const roughnessValue = document.getElementById('roughnessValue');
 const manualRotation = document.getElementById('manualRotation');
 const manualRotationValue = document.getElementById('manualRotationValue');
+const animationMode = document.getElementById('threeAnimationMode') || document.getElementById('animationMode');
 const reloadButton = document.getElementById('reloadGeometry');
 const loadJsonButton = document.getElementById('loadJson');
 const resetCameraButton = document.getElementById('resetCamera');
@@ -64,6 +65,7 @@ const viewer = createThreeViewer({
     metalnessValue,
     roughness,
     roughnessValue,
+    animationMode,
     reloadButton,
     loadJsonButton,
     resetCameraButton,
