@@ -129,7 +129,7 @@ function createThreeViewer({
     spiralContainer.scale.set(1, 1, 1);
   }
 
-  function createPolygonMesh(outline, ringIndex = 0, lineAngle = 0) {
+  function createPolygonMesh(outline, ringIndex = 0, lineAngles = []) {
     if (!outline || outline.length < 3) {
       return null;
     }
@@ -154,9 +154,13 @@ function createThreeViewer({
     const mesh = new THREE.Mesh(geometry, material);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
+    const normalizedAngles = Array.isArray(lineAngles) && lineAngles.length
+      ? lineAngles.map(value => normaliseOrientationDeg(value))
+      : [normaliseOrientationDeg(lineAngles || 0)];
     mesh.userData = {
       ringIndex,
-      lineAngle: normaliseOrientationDeg(lineAngle),
+      lineAngle: normalizedAngles[0] || 0,
+      lineAngles: normalizedAngles,
       isPulsing: false,
       wasInRange: false,
       pulseStart: 0,
@@ -170,7 +174,10 @@ function createThreeViewer({
     }
     clearSpiral();
     data.arcgroups.forEach(group => {
-      const mesh = createPolygonMesh(group.outline || [], group.ring_index, group.line_angle);
+      const rawAngles = Array.isArray(group.line_pattern_angles) && group.line_pattern_angles.length
+        ? group.line_pattern_angles
+        : (Number.isFinite(group.line_angle) ? [group.line_angle] : []);
+      const mesh = createPolygonMesh(group.outline || [], group.ring_index, rawAngles);
       if (mesh) {
         spiralContainer.add(mesh);
       }
@@ -213,8 +220,16 @@ function createThreeViewer({
     const children = spiralContainer.children;
     for (let idx = 0; idx < children.length; idx += 1) {
       const mesh = children[idx];
-      const lineAngle = mesh.userData.lineAngle || 0;
-      const diff = angularDifferenceDeg(rotationAngleDeg, lineAngle);
+      const lineAngles = Array.isArray(mesh.userData.lineAngles) && mesh.userData.lineAngles.length
+        ? mesh.userData.lineAngles
+        : [mesh.userData.lineAngle || 0];
+      let diff = Infinity;
+      for (const angle of lineAngles) {
+        const angleDiff = angularDifferenceDeg(rotationAngleDeg, angle);
+        if (angleDiff < diff) {
+          diff = angleDiff;
+        }
+      }
       const isInRange = diff < threshold;
       if (isInRange && !mesh.userData.wasInRange) {
         mesh.userData.isPulsing = true;
