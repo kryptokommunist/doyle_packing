@@ -148,6 +148,28 @@
       grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
     }
 
+    .animation-panel {
+      border-top: 1px solid var(--panel-border);
+      padding-top: 1rem;
+      display: grid;
+      gap: 1rem;
+    }
+
+    .animation-panel h2 {
+      font-size: 1rem;
+      margin-bottom: 0.25rem;
+    }
+
+    .animation-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.6rem;
+    }
+
+    .animation-actions button {
+      flex: 1 1 120px;
+    }
+
     .actions {
       display: flex;
       flex-wrap: wrap;
@@ -606,6 +628,35 @@
                 value="2"
               />
             </div>
+          </div>
+
+          <div class="animation-panel">
+            <h2>2D Animation Lab</h2>
+            <div class="field-group">
+              <label for="animationSelect">Animation preset</label>
+              <select id="animationSelect" name="animation">
+                <option value="ring_ripple" selected>Ring ripple</option>
+                <option value="ring_chase">Ring chase</option>
+                <option value="spiral_growth">Log spiral growth</option>
+                <option value="twin_spirals">Twin spiral chase</option>
+                <option value="radial_breathe">Radial breath</option>
+                <option value="ca_frontier">CA frontier bloom</option>
+                <option value="ca_echo">CA echo lattice</option>
+                <option value="ca_checker">CA checker pulse</option>
+                <option value="none">No animation</option>
+              </select>
+            </div>
+            <div class="field-group">
+              <label for="animationSpeed">Playback speed</label>
+              <input type="range" id="animationSpeed" min="0.5" max="3" step="0.1" value="1.0" />
+              <div class="status"><span id="animationSpeedValue">1.0×</span> speed</div>
+            </div>
+            <div class="animation-actions">
+              <button type="button" class="secondary" id="animationPlay">Play</button>
+              <button type="button" class="secondary" id="animationPause">Pause</button>
+              <button type="button" class="secondary" id="animationReset">Reset</button>
+            </div>
+            <div class="status" id="animationStatus">Animations require an Arram-Boyle render.</div>
           </div>
 
           <div class="status" id="statusMessage">Adjust parameters and the spiral will render automatically.</div>
