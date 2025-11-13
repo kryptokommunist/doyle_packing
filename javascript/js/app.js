@@ -203,6 +203,7 @@ function ensureThreeApp() {
   const rotationSpeedValue = document.getElementById('threeRotationSpeedValue');
   const pulseSpeed = document.getElementById('threePulseSpeed');
   const pulseSpeedValue = document.getElementById('threePulseSpeedValue');
+  const animationMode = document.getElementById('threeAnimationMode');
   const metalness = document.getElementById('threeMetalness');
   const metalnessValue = document.getElementById('threeMetalnessValue');
   const roughness = document.getElementById('threeRoughness');
@@ -232,6 +233,7 @@ function ensureThreeApp() {
       manualRotationValue,
       pulseSpeed,
       pulseSpeedValue,
+      animationMode,
       metalness,
       metalnessValue,
       roughness,
