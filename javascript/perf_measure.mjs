@@ -1,34 +1,41 @@
 import { performance } from 'node:perf_hooks';
 import { renderSpiral, DoyleSpiralEngine, ArcGroup } from './js/doyle_spiral_engine.js';
 
-function createInstrumentation() {
-  const totals = new Map();
-  const counts = new Map();
-  const stats = {
-    patternFillTime: 0,
-    patternFillCalls: 0,
-    outlineTime: 0,
-    outlineCalls: 0,
-  };
+/**
+ * Simple helper that instruments selected methods on the Doyle spiral engine.
+ */
+class Instrumentation {
+  constructor() {
+    this.totals = new Map();
+    this.counts = new Map();
+    this.stats = {
+      patternFillTime: 0,
+      patternFillCalls: 0,
+      outlineTime: 0,
+      outlineCalls: 0,
+    };
+    this.installed = false;
+  }
 
-  const record = (label, duration) => {
-    const prev = totals.get(label) || 0;
-    totals.set(label, prev + duration);
-    counts.set(label, (counts.get(label) || 0) + 1);
-  };
+  record(label, duration) {
+    const previous = this.totals.get(label) || 0;
+    this.totals.set(label, previous + duration);
+    this.counts.set(label, (this.counts.get(label) || 0) + 1);
+  }
 
-  const wrapMethod = (prototype, name, label, extra = null) => {
+  wrapMethod(prototype, name, label, extra = null) {
     const original = prototype[name];
     if (typeof original !== 'function' || original.__instrumented) {
       return;
     }
+    const instrumentation = this;
     const wrapped = function wrappedMethod(...args) {
       const start = performance.now();
       try {
         return original.apply(this, args);
       } finally {
         const duration = performance.now() - start;
-        record(label, duration);
+        instrumentation.record(label, duration);
         if (extra) {
           extra({ duration, context: this, args });
         }
@@ -36,58 +43,67 @@ function createInstrumentation() {
     };
     wrapped.__instrumented = true;
     prototype[name] = wrapped;
-  };
+  }
 
-  wrapMethod(DoyleSpiralEngine.prototype, 'generateCircles', 'generateCircles');
-  wrapMethod(DoyleSpiralEngine.prototype, 'generateOuterCircles', 'generateOuterCircles');
-  wrapMethod(DoyleSpiralEngine.prototype, 'computeAllIntersections', 'computeAllIntersections');
-  wrapMethod(DoyleSpiralEngine.prototype, '_createArcGroupsForCircles', 'createArcGroups');
-  wrapMethod(DoyleSpiralEngine.prototype, '_drawOuterClosureArcs', 'drawOuterClosureArcs');
-  wrapMethod(DoyleSpiralEngine.prototype, '_extendGroupsWithNeighbours', 'extendGroups');
-  wrapMethod(ArcGroup.prototype, 'getClosedOutline', 'getClosedOutline', ({ duration }) => {
-    stats.outlineCalls += 1;
-    stats.outlineTime += duration;
-  });
-  wrapMethod(ArcGroup.prototype, 'toSVGFill', 'toSVGFill', ({ duration, args }) => {
-    if (args?.[1]?.patternFill) {
-      stats.patternFillTime += duration;
-      stats.patternFillCalls += 1;
+  install() {
+    if (this.installed) {
+      return;
     }
-  });
+    this.wrapMethod(DoyleSpiralEngine.prototype, 'generateCircles', 'generateCircles');
+    this.wrapMethod(DoyleSpiralEngine.prototype, 'generateOuterCircles', 'generateOuterCircles');
+    this.wrapMethod(DoyleSpiralEngine.prototype, 'computeAllIntersections', 'computeAllIntersections');
+    this.wrapMethod(DoyleSpiralEngine.prototype, '_createArcGroupsForCircles', 'createArcGroups');
+    this.wrapMethod(DoyleSpiralEngine.prototype, '_drawOuterClosureArcs', 'drawOuterClosureArcs');
+    this.wrapMethod(DoyleSpiralEngine.prototype, '_extendGroupsWithNeighbours', 'extendGroups');
+    this.wrapMethod(ArcGroup.prototype, 'getClosedOutline', 'getClosedOutline', ({ duration }) => {
+      this.stats.outlineCalls += 1;
+      this.stats.outlineTime += duration;
+    });
+    this.wrapMethod(ArcGroup.prototype, 'toSVGFill', 'toSVGFill', ({ duration, args }) => {
+      if (args?.[1]?.patternFill) {
+        this.stats.patternFillTime += duration;
+        this.stats.patternFillCalls += 1;
+      }
+    });
+    this.installed = true;
+  }
 
-  return {
-    reset() {
-      totals.clear();
-      counts.clear();
-      stats.patternFillTime = 0;
-      stats.patternFillCalls = 0;
-      stats.outlineTime = 0;
-      stats.outlineCalls = 0;
-    },
-    summary() {
-      return {
-        phases: Array.from(totals.entries())
-          .map(([label, total]) => ({
-            label,
-            total,
-            count: counts.get(label) || 0,
-          }))
-          .sort((a, b) => b.total - a.total),
-        patternFill: {
-          time: stats.patternFillTime,
-          calls: stats.patternFillCalls,
-        },
-        outlines: {
-          calls: stats.outlineCalls,
-          time: stats.outlineTime,
-        },
-      };
-    },
-  };
+  reset() {
+    this.totals.clear();
+    this.counts.clear();
+    this.stats.patternFillTime = 0;
+    this.stats.patternFillCalls = 0;
+    this.stats.outlineTime = 0;
+    this.stats.outlineCalls = 0;
+  }
+
+  summary() {
+    return {
+      phases: Array.from(this.totals.entries())
+        .map(([label, total]) => ({
+          label,
+          total,
+          count: this.counts.get(label) || 0,
+        }))
+        .sort((a, b) => b.total - a.total),
+      patternFill: {
+        time: this.stats.patternFillTime,
+        calls: this.stats.patternFillCalls,
+      },
+      outlines: {
+        calls: this.stats.outlineCalls,
+        time: this.stats.outlineTime,
+      },
+    };
+  }
 }
 
-const instrumentation = createInstrumentation();
+const instrumentation = new Instrumentation();
+instrumentation.install();
 
+/**
+ * Minimal DOM element stand-in so the engine can emit SVG in Node.js.
+ */
 class FakeElement {
   constructor(tagName) {
     this.tagName = tagName;
@@ -124,6 +140,11 @@ global.XMLSerializer = class {
   }
 };
 
+/**
+ * Run a single render and capture duration and instrumentation details.
+ * @param {{ p: number, q: number, fill_pattern_spacing: number }} params
+ * @param {boolean} withPattern
+ */
 function measure(params, withPattern) {
   instrumentation.reset();
   const start = performance.now();
@@ -143,6 +164,12 @@ function formatDuration(ms) {
   return `${ms.toFixed(2)} ms`;
 }
 
+/**
+ * Print the most expensive phases collected by instrumentation.
+ * @param {string} title
+ * @param {ReturnType<Instrumentation['summary']>} summary
+ * @param {number} [limit=6]
+ */
 function logSummary(title, summary, limit = 6) {
   if (!summary || !summary.phases || !summary.phases.length) {
     return;
