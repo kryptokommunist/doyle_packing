@@ -198,6 +198,418 @@ function normaliseVector(vec) {
   return { x: vec.x / length, y: vec.y / length };
 }
 
+function normaliseAngle360(angleDeg) {
+  if (!Number.isFinite(angleDeg)) {
+    return 0;
+  }
+  let value = angleDeg % 360;
+  if (value < 0) {
+    value += 360;
+  }
+  return value;
+}
+
+function normaliseAngleRad(angle) {
+  if (!Number.isFinite(angle)) {
+    return 0;
+  }
+  const twoPi = Math.PI * 2;
+  let value = angle % twoPi;
+  if (value < 0) {
+    value += twoPi;
+  }
+  return value;
+}
+
+function angularDistanceRad(a, b) {
+  const normA = normaliseAngleRad(a);
+  const normB = normaliseAngleRad(b);
+  const diff = Math.abs(normA - normB);
+  const twoPi = Math.PI * 2;
+  return Math.min(diff, twoPi - diff);
+}
+
+function dedupeAngles(values, maxCount = 3) {
+  const seen = new Set();
+  const result = [];
+  for (const value of values) {
+    if (!Number.isFinite(value)) {
+      continue;
+    }
+    const normalized = normaliseAngle360(value);
+    const key = normalized.toFixed(6);
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    result.push(value);
+    if (result.length >= maxCount) {
+      break;
+    }
+  }
+  return result;
+}
+
+function buildPatternAnimationContext(arcGroups) {
+  const metaList = [];
+  const ringMap = new Map();
+  let minRing = Infinity;
+  let maxRing = -Infinity;
+
+  for (const group of arcGroups.values()) {
+    if (!group || (group.name && group.name.startsWith('outer_'))) {
+      continue;
+    }
+    const outline = group.getClosedOutline();
+    if (!outline || outline.length < 3) {
+      continue;
+    }
+    const polygon = outline.map(pt => ({ x: pt.re, y: pt.im }));
+    const centroid = polygonCentroid(polygon);
+    if (!Number.isFinite(centroid.x) || !Number.isFinite(centroid.y)) {
+      continue;
+    }
+    const ringIndex = Number.isFinite(group.ringIndex) ? group.ringIndex : 0;
+    const radius = Math.hypot(centroid.x, centroid.y);
+    const theta = Math.atan2(centroid.y, centroid.x);
+    const meta = {
+      id: group.id,
+      group,
+      ringIndex,
+      centroid,
+      radius,
+      theta,
+      neighbors: new Set(),
+    };
+    metaList.push(meta);
+    if (!ringMap.has(ringIndex)) {
+      ringMap.set(ringIndex, []);
+    }
+    ringMap.get(ringIndex).push(meta);
+    if (ringIndex < minRing) {
+      minRing = ringIndex;
+    }
+    if (ringIndex > maxRing) {
+      maxRing = ringIndex;
+    }
+  }
+
+  if (!metaList.length) {
+    return {
+      metaList: [],
+      ringMap: new Map(),
+      sortedRings: [],
+      minRing: 0,
+      maxRing: 0,
+    };
+  }
+
+  const sortedRings = Array.from(ringMap.keys()).sort((a, b) => a - b);
+  for (const ring of sortedRings) {
+    const metas = ringMap.get(ring);
+    metas.sort((a, b) => a.theta - b.theta);
+    if (metas.length > 1) {
+      for (let idx = 0; idx < metas.length; idx += 1) {
+        const prev = metas[(idx - 1 + metas.length) % metas.length];
+        const next = metas[(idx + 1) % metas.length];
+        metas[idx].neighbors.add(prev);
+        metas[idx].neighbors.add(next);
+      }
+    }
+  }
+
+  for (let idx = 0; idx < sortedRings.length; idx += 1) {
+    const current = ringMap.get(sortedRings[idx]);
+    const prevRing = idx > 0 ? ringMap.get(sortedRings[idx - 1]) : null;
+    const nextRing = idx < sortedRings.length - 1 ? ringMap.get(sortedRings[idx + 1]) : null;
+    if (prevRing) {
+      linkRingNeighbors(current, prevRing, 2);
+    }
+    if (nextRing) {
+      linkRingNeighbors(current, nextRing, 2);
+    }
+  }
+
+  return { metaList, ringMap, sortedRings, minRing, maxRing };
+}
+
+function linkRingNeighbors(source, target, maxConnections = 2) {
+  if (!source || !target || !source.length || !target.length) {
+    return;
+  }
+  for (const meta of source) {
+    const sorted = target
+      .slice()
+      .sort((a, b) => angularDistanceRad(meta.theta, a.theta) - angularDistanceRad(meta.theta, b.theta));
+    const limit = Math.min(maxConnections, sorted.length);
+    for (let idx = 0; idx < limit; idx += 1) {
+      const neighbor = sorted[idx];
+      meta.neighbors.add(neighbor);
+      neighbor.neighbors.add(meta);
+    }
+  }
+}
+
+function computeBreadthFirstSteps(context) {
+  const seeds = context.metaList.filter(meta => meta.ringIndex === context.minRing);
+  const visited = new Set();
+  const steps = new Map();
+  let frontier = seeds.slice();
+  let step = 0;
+  const maxIterations = Math.max(context.metaList.length * 4, 1);
+
+  while (frontier.length && step < maxIterations) {
+    const next = [];
+    for (const meta of frontier) {
+      if (visited.has(meta)) {
+        continue;
+      }
+      visited.add(meta);
+      steps.set(meta.id, step);
+    }
+    for (const meta of frontier) {
+      for (const neighbor of meta.neighbors) {
+        if (!visited.has(neighbor)) {
+          next.push(neighbor);
+        }
+      }
+    }
+    frontier = next;
+    step += 1;
+  }
+
+  if (steps.size < context.metaList.length) {
+    let fallbackStep = step;
+    for (const meta of context.metaList) {
+      if (steps.has(meta.id)) {
+        continue;
+      }
+      steps.set(meta.id, fallbackStep);
+      fallbackStep += 1;
+    }
+    step = fallbackStep;
+  }
+
+  const maxStep = steps.size ? Math.max(...steps.values()) : 0;
+  return { steps, maxStep, seeds };
+}
+
+function countActiveNeighbors(meta, activeSet) {
+  let count = 0;
+  for (const neighbor of meta.neighbors) {
+    if (activeSet.has(neighbor)) {
+      count += 1;
+    }
+  }
+  return count;
+}
+
+function patternAnimationRingCycle(context, opts = {}) {
+  const assignments = new Map();
+  const baseAngle = Number.isFinite(opts.baseAngle) ? opts.baseAngle : 0;
+  for (const ring of context.sortedRings) {
+    const metas = context.ringMap.get(ring) || [];
+    metas.forEach((meta, index) => {
+      const angle = ring * baseAngle + index * 8;
+      assignments.set(meta.id, { primaryAngle: angle, angles: [angle] });
+    });
+  }
+  return assignments;
+}
+
+function patternAnimationRingPingPong(context, opts = {}) {
+  const assignments = new Map();
+  const baseAngle = Number.isFinite(opts.baseAngle) ? opts.baseAngle : 0;
+  for (const ring of context.sortedRings) {
+    const metas = (context.ringMap.get(ring) || []).slice();
+    const direction = ring % 2 === 0 ? 1 : -1;
+    if (direction < 0) {
+      metas.reverse();
+    }
+    metas.forEach((meta, index) => {
+      const angle = ring * baseAngle + index * 10 + (direction < 0 ? 5 : 0);
+      assignments.set(meta.id, { primaryAngle: angle, angles: [angle] });
+    });
+  }
+  return assignments;
+}
+
+function patternAnimationSpiralExpansion(context, opts = {}) {
+  const assignments = new Map();
+  const baseAngle = Number.isFinite(opts.baseAngle) ? opts.baseAngle : 0;
+  const order = context.metaList
+    .slice()
+    .sort((a, b) => (a.radius + normaliseAngleRad(a.theta)) - (b.radius + normaliseAngleRad(b.theta)));
+  order.forEach((meta, index) => {
+    const angle = meta.ringIndex * baseAngle + index * 4;
+    assignments.set(meta.id, { primaryAngle: angle, angles: [angle] });
+  });
+  return assignments;
+}
+
+function patternAnimationDualSpiralWave(context, opts = {}) {
+  const assignments = new Map();
+  const baseAngle = Number.isFinite(opts.baseAngle) ? opts.baseAngle : 0;
+  const arms = [[], []];
+  context.metaList.forEach(meta => {
+    const thetaNorm = normaliseAngleRad(meta.theta) / (Math.PI * 2);
+    const armIndex = thetaNorm < 0.5 ? 0 : 1;
+    arms[armIndex].push(meta);
+  });
+  arms.forEach((arm, armIndex) => {
+    arm.sort((a, b) => a.radius - b.radius);
+    arm.forEach((meta, index) => {
+      const angle = meta.ringIndex * baseAngle + armIndex * 45 + index * 6;
+      assignments.set(meta.id, { primaryAngle: angle, angles: [angle] });
+    });
+  });
+  return assignments;
+}
+
+function patternAnimationRadialBloom(context, opts = {}) {
+  const assignments = new Map();
+  const baseAngle = Number.isFinite(opts.baseAngle) ? opts.baseAngle : 0;
+  const maxRadius = context.metaList.reduce((acc, meta) => Math.max(acc, meta.radius), 0) || 1;
+  context.metaList.forEach(meta => {
+    const radiusRatio = meta.radius / maxRadius;
+    const wobble = Math.sin(normaliseAngleRad(meta.theta) * 3) * 5;
+    const angle = meta.ringIndex * baseAngle + radiusRatio * 90 + wobble;
+    assignments.set(meta.id, { primaryAngle: angle, angles: [angle] });
+  });
+  return assignments;
+}
+
+function patternAnimationCAWavefront(context, opts = {}) {
+  const assignments = new Map();
+  const baseAngle = Number.isFinite(opts.baseAngle) ? opts.baseAngle : 0;
+  const { steps } = computeBreadthFirstSteps(context);
+  const stepGap = 12;
+  context.metaList.forEach(meta => {
+    const step = steps.get(meta.id) ?? 0;
+    const jitter = (meta.neighbors.size % 3) * 2;
+    const angle = meta.ringIndex * baseAngle + step * stepGap + jitter;
+    assignments.set(meta.id, { primaryAngle: angle, angles: [angle] });
+  });
+  return assignments;
+}
+
+function patternAnimationCACheckerboard(context, opts = {}) {
+  const assignments = new Map();
+  const baseAngle = Number.isFinite(opts.baseAngle) ? opts.baseAngle : 0;
+  const seeds = context.metaList.filter(meta => meta.ringIndex === context.minRing);
+  const active = new Set(seeds);
+  const steps = new Map();
+  seeds.forEach(meta => steps.set(meta.id, 0));
+  let step = 1;
+  const limit = Math.max(context.metaList.length * 5, 1);
+  while (active.size < context.metaList.length && step < limit) {
+    let added = false;
+    for (const meta of context.metaList) {
+      if (active.has(meta)) {
+        continue;
+      }
+      const required = step % 2 === 0 ? 2 : 1;
+      const neighborCount = countActiveNeighbors(meta, active);
+      if (neighborCount >= required) {
+        active.add(meta);
+        steps.set(meta.id, step);
+        added = true;
+      }
+    }
+    if (!added) {
+      step += 1;
+      continue;
+    }
+    step += 1;
+  }
+  for (const meta of context.metaList) {
+    if (!steps.has(meta.id)) {
+      steps.set(meta.id, step);
+      step += 1;
+    }
+  }
+  context.metaList.forEach(meta => {
+    const activationStep = steps.get(meta.id) ?? 0;
+    const parityOffset = activationStep % 2 === 0 ? 0 : 15;
+    const angle = meta.ringIndex * baseAngle + activationStep * 9 + parityOffset;
+    assignments.set(meta.id, { primaryAngle: angle, angles: [angle] });
+  });
+  return assignments;
+}
+
+function patternAnimationCAEchoPulse(context, opts = {}) {
+  const assignments = new Map();
+  const baseAngle = Number.isFinite(opts.baseAngle) ? opts.baseAngle : 0;
+  const { steps, maxStep } = computeBreadthFirstSteps(context);
+  const gap = 14;
+  context.metaList.forEach(meta => {
+    const step = steps.get(meta.id) ?? 0;
+    const outward = meta.ringIndex * baseAngle + step * gap;
+    const inward = meta.ringIndex * baseAngle + (maxStep - step) * gap + 30;
+    const shimmer = meta.ringIndex * baseAngle + (step % 3) * 20 + 60;
+    const angles = dedupeAngles([outward, inward, shimmer], 3);
+    assignments.set(meta.id, {
+      primaryAngle: angles[0],
+      angles,
+    });
+  });
+  return assignments;
+}
+
+const PATTERN_ANIMATION_DEFINITIONS = {
+  ring_cycle: { label: 'Ring cycle chase', generator: patternAnimationRingCycle },
+  ring_pingpong: { label: 'Alternating ring sweep', generator: patternAnimationRingPingPong },
+  spiral_expansion: { label: 'Log spiral expansion', generator: patternAnimationSpiralExpansion },
+  dual_spiral_wave: { label: 'Dual spiral wave', generator: patternAnimationDualSpiralWave },
+  radial_bloom: { label: 'Radial bloom', generator: patternAnimationRadialBloom },
+  ca_wavefront: { label: 'Cellular wavefront', generator: patternAnimationCAWavefront },
+  ca_checkerboard: { label: 'Cellular checkerboard', generator: patternAnimationCACheckerboard },
+  ca_echo_pulse: { label: 'Cellular echo pulse', generator: patternAnimationCAEchoPulse },
+};
+
+const DEFAULT_PATTERN_ANIMATION = 'ring_cycle';
+
+function normalisePatternAnimationId(value) {
+  if (typeof value !== 'string') {
+    return DEFAULT_PATTERN_ANIMATION;
+  }
+  const key = value.toLowerCase();
+  return PATTERN_ANIMATION_DEFINITIONS[key] ? key : DEFAULT_PATTERN_ANIMATION;
+}
+
+function applyPatternAnimationToGroups(arcGroups, { animationId, baseAngle } = {}) {
+  if (!arcGroups || typeof arcGroups.values !== 'function') {
+    return new Map();
+  }
+  const resolvedId = normalisePatternAnimationId(animationId);
+  const context = buildPatternAnimationContext(arcGroups);
+  const baseAngleValue = Number.isFinite(baseAngle) ? baseAngle : 0;
+  const generator = PATTERN_ANIMATION_DEFINITIONS[resolvedId]?.generator
+    || PATTERN_ANIMATION_DEFINITIONS[DEFAULT_PATTERN_ANIMATION].generator;
+  const rawAssignments = generator(context, {
+    baseAngle: baseAngleValue,
+  }) || new Map();
+  const assignments = new Map();
+  for (const meta of context.metaList) {
+    const fallback = (meta.ringIndex ?? 0) * baseAngleValue;
+    const entry = rawAssignments.get(meta.id) || { primaryAngle: fallback, angles: [fallback] };
+    let angleList = Array.isArray(entry.angles) ? entry.angles.slice() : [];
+    if (!angleList.length && Number.isFinite(entry.primaryAngle)) {
+      angleList.push(entry.primaryAngle);
+    }
+    if (!angleList.length) {
+      angleList.push(fallback);
+    }
+    const deduped = dedupeAngles(angleList, 3);
+    const primary = Number.isFinite(entry.primaryAngle) ? entry.primaryAngle : deduped[0];
+    assignments.set(meta.id, {
+      primaryAngle: Number.isFinite(primary) ? primary : fallback,
+      angles: deduped.length ? deduped : [fallback],
+    });
+  }
+  return assignments;
+}
+
 function inwardNormal(direction, orientationSign) {
   if (orientationSign >= 0) {
     return { x: -direction.y, y: direction.x };
@@ -863,6 +1275,8 @@ class ArcGroup {
     this._patternSegmentsCache = new Map();
     this.template = null;
     this.templateTransform = null;
+    this.patternAngles = [];
+    this.primaryPatternAngle = 0;
   }
 
   addArc(arc) {
@@ -2000,6 +2414,7 @@ class DoyleSpiralEngine {
     this._generated = false;
     this.arcGroups = new Map();
     this.fillPatternAngle = 0;
+    this.fillPatternAnimationId = DEFAULT_PATTERN_ANIMATION;
     this._ringTemplates = new Map();
   }
 
@@ -2512,6 +2927,7 @@ class DoyleSpiralEngine {
     addFillPattern = false,
     fillPatternSpacing = 5.0,
     fillPatternAngle = 0.0,
+    fillPatternAnimation = DEFAULT_PATTERN_ANIMATION,
     redOutline = false,
     drawGroupOutline = true,
     fillPatternOffset = 0.0,
@@ -2525,6 +2941,7 @@ class DoyleSpiralEngine {
     this.computeAllIntersections();
     context.setNormalizationScale(this.circles.concat(this.outerCircles));
     this.fillPatternAngle = fillPatternAngle;
+    this.fillPatternAnimationId = normalisePatternAnimationId(fillPatternAnimation);
     this.arcGroups.clear();
     this._ringTemplates = new Map();
 
@@ -2563,6 +2980,24 @@ class DoyleSpiralEngine {
     this._extendGroupsWithNeighbours(spiralCenter);
     this._finalizeRingTemplates();
 
+    const patternAssignments = applyPatternAnimationToGroups(this.arcGroups, {
+      animationId: this.fillPatternAnimationId,
+      baseAngle: fillPatternAngle,
+    });
+
+    for (const group of this.arcGroups.values()) {
+      const ringIdx = Number.isFinite(group.ringIndex) ? group.ringIndex : 0;
+      const defaultAngle = ringIdx * fillPatternAngle;
+      const assignment = patternAssignments.get(group.id) || null;
+      if (assignment) {
+        group.primaryPatternAngle = assignment.primaryAngle;
+        group.patternAngles = assignment.angles.slice();
+      } else {
+        group.primaryPatternAngle = defaultAngle;
+        group.patternAngles = [defaultAngle];
+      }
+    }
+
     const scaleFactor = context.scaleFactor;
     const invScale = scaleFactor > 1e-9 ? 1 / scaleFactor : 0;
     const spacingInternal = Math.max(0, fillPatternSpacing);
@@ -2596,7 +3031,9 @@ class DoyleSpiralEngine {
           continue;
         }
         const ringIdx = group.ringIndex ?? 0;
-        const angle = ringIdx * fillPatternAngle;
+        const angle = Number.isFinite(group.primaryPatternAngle)
+          ? group.primaryPatternAngle
+          : ringIdx * fillPatternAngle;
         group.toSVGFill(context, {
           debug: false,
           patternFill: true,
@@ -2648,6 +3085,7 @@ class DoyleSpiralEngine {
     addFillPattern = false,
     fillPatternSpacing = 5.0,
     fillPatternAngle = 0.0,
+    fillPatternAnimation = DEFAULT_PATTERN_ANIMATION,
     redOutline = false,
     drawGroupOutline = true,
     fillPatternOffset = 0.0,
@@ -2683,6 +3121,7 @@ class DoyleSpiralEngine {
         addFillPattern,
         fillPatternSpacing,
         fillPatternAngle,
+        fillPatternAnimation,
         redOutline,
         drawGroupOutline,
         fillPatternOffset,
@@ -2715,6 +3154,7 @@ class DoyleSpiralEngine {
         num_gaps: this.numGaps,
       },
       arcgroups: [],
+      pattern_animation: this.fillPatternAnimationId || DEFAULT_PATTERN_ANIMATION,
     };
     for (const [key, group] of this.arcGroups.entries()) {
       if (key.startsWith('outer_')) {
@@ -2723,12 +3163,19 @@ class DoyleSpiralEngine {
       const outline = group.getClosedOutline();
       const outlinePoints = outline.map(pt => [pt.re, pt.im]);
       const ringIdx = group.ringIndex ?? 0;
-      const lineAngle = ringIdx * this.fillPatternAngle;
+      const fallbackAngle = ringIdx * this.fillPatternAngle;
+      const patternAngles = Array.isArray(group.patternAngles) && group.patternAngles.length
+        ? group.patternAngles.slice(0, 3)
+        : [fallbackAngle];
+      const primaryAngle = Number.isFinite(group.primaryPatternAngle)
+        ? group.primaryPatternAngle
+        : patternAngles[0];
       exportData.arcgroups.push({
         id: group.id,
         name: group.name,
         ring_index: group.ringIndex,
-        line_angle: lineAngle,
+        line_angle: normaliseAngle360(primaryAngle),
+        line_patterns: patternAngles.map(angle => normaliseAngle360(angle)),
         outline: outlinePoints,
         arc_count: group.arcs.length,
       });
@@ -2781,6 +3228,7 @@ function normaliseParams(params = {}) {
     fill_pattern_offset: fillPatternOffset,
     fill_pattern_type: fillPatternType,
     fill_pattern_rect_width: rectWidthMm,
+    fill_pattern_animation: normalisePatternAnimationId(params.fill_pattern_animation),
     highlight_rim_width: highlightRimWidth,
     group_outline_width: groupOutlineWidth,
     pattern_stroke_width: patternStrokeWidth,
@@ -2811,6 +3259,7 @@ function renderSpiral(params = {}, overrideMode = null) {
     fillPatternOffset: opts.fill_pattern_offset,
     fillPatternType: opts.fill_pattern_type,
     fillPatternRectWidth: opts.fill_pattern_rect_width,
+    fillPatternAnimation: opts.fill_pattern_animation,
     highlightRimWidth: opts.highlight_rim_width,
     groupOutlineWidth: opts.group_outline_width,
     patternStrokeWidth: opts.pattern_stroke_width,

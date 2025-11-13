@@ -557,19 +557,32 @@
             />
           </div>
 
-          <div class="fill-settings" id="fillSettings" hidden>
-            <div class="field-group">
-              <label for="fillPatternType">Pattern style</label>
-              <select id="fillPatternType" name="fill_pattern_type">
-                <option value="lines" selected>Lines</option>
-                <option value="rectangles">Rectangles</option>
-              </select>
-            </div>
-            <div class="field-group">
-              <label for="fillSpacing">Line spacing (mm)</label>
-              <input
-                id="fillSpacing"
-                name="fill_pattern_spacing"
+            <div class="fill-settings" id="fillSettings" hidden>
+              <div class="field-group">
+                <label for="fillPatternType">Pattern style</label>
+                <select id="fillPatternType" name="fill_pattern_type">
+                  <option value="lines" selected>Lines</option>
+                  <option value="rectangles">Rectangles</option>
+                </select>
+              </div>
+              <div class="field-group">
+                <label for="fillPatternAnimation">Pattern animation</label>
+                <select id="fillPatternAnimation" name="fill_pattern_animation">
+                  <option value="ring_cycle" selected>Ring cycle chase</option>
+                  <option value="ring_pingpong">Alternating ring sweep</option>
+                  <option value="spiral_expansion">Log spiral expansion</option>
+                  <option value="dual_spiral_wave">Dual spiral wave</option>
+                  <option value="radial_bloom">Radial bloom</option>
+                  <option value="ca_wavefront">Cellular wavefront</option>
+                  <option value="ca_checkerboard">Cellular checkerboard</option>
+                  <option value="ca_echo_pulse">Cellular echo pulse</option>
+                </select>
+              </div>
+              <div class="field-group">
+                <label for="fillSpacing">Line spacing (mm)</label>
+                <input
+                  id="fillSpacing"
+                  name="fill_pattern_spacing"
                 type="number"
                 min="0.001"
                 step="0.001"
