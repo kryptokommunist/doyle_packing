@@ -2363,11 +2363,17 @@ class DoyleSpiralEngine {
         this.arcGroups.get(key).addArc(arc);
       }
       if (arcsForCircle.length && (redOutline || (!addFillPattern && drawGroupOutline))) {
-        const color = redOutline ? '#ff0000' : '#000000';
-        const strokeWidth = redOutline ? highlightStrokeWidth : outlineStrokeWidth;
         const paths = buildContinuousPathsFromArcs(arcsForCircle);
-        for (const path of paths) {
-          context.drawPolyline(path, { color, width: strokeWidth });
+        const shouldDrawBaseOutline = !addFillPattern && drawGroupOutline && outlineStrokeWidth > 0;
+        if (shouldDrawBaseOutline) {
+          for (const path of paths) {
+            context.drawPolyline(path, { color: '#000000', width: outlineStrokeWidth });
+          }
+        }
+        if (redOutline && highlightStrokeWidth > 0) {
+          for (const path of paths) {
+            context.drawPolyline(path, { color: '#ff0000', width: highlightStrokeWidth });
+          }
         }
       }
     }
