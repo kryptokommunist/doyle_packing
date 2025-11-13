@@ -198,6 +198,279 @@ function normaliseVector(vec) {
   return { x: vec.x / length, y: vec.y / length };
 }
 
+function normaliseOrderAssignments(assignments) {
+  const output = new Map();
+  if (!assignments || !assignments.size) {
+    return output;
+  }
+  let maxOrder = 0;
+  assignments.forEach(values => {
+    if (!Array.isArray(values)) {
+      return;
+    }
+    for (const value of values) {
+      if (Number.isFinite(value)) {
+        if (value > maxOrder) {
+          maxOrder = value;
+        }
+      }
+    }
+  });
+  if (maxOrder <= 0) {
+    maxOrder = 1;
+  }
+  assignments.forEach((values, key) => {
+    if (!Array.isArray(values) || !values.length) {
+      return;
+    }
+    const angles = [];
+    for (const order of values) {
+      if (!Number.isFinite(order)) {
+        continue;
+      }
+      const scaled = (order / maxOrder) * 170 + 5;
+      const normalized = ((scaled % 180) + 180) % 180;
+      if (angles.some(value => Math.abs(value - normalized) < 1e-3)) {
+        continue;
+      }
+      angles.push(normalized);
+      if (angles.length >= 3) {
+        break;
+      }
+    }
+    if (angles.length) {
+      output.set(key, angles);
+    }
+  });
+  return output;
+}
+
+function buildCellularLayers(metadata, options = {}) {
+  const entries = Array.isArray(metadata) ? metadata.slice() : [];
+  if (!entries.length) {
+    return [];
+  }
+  const infoMap = new Map(entries.map(entry => [entry.id, entry]));
+  const neighbourMap = new Map(entries.map(entry => [entry.id, (entry.neighbours || []).filter(id => infoMap.has(id))]));
+  const ringIndices = entries.map(entry => entry.ringIndex ?? 0);
+  const minRing = ringIndices.length ? Math.min(...ringIndices) : 0;
+  let frontier = entries
+    .filter(entry => (entry.ringIndex ?? 0) === minRing)
+    .map(entry => entry.id);
+  if (!frontier.length) {
+    frontier = [entries[0].id];
+  }
+  const visited = new Set(frontier);
+  const layers = [];
+  let depth = 0;
+  while (frontier.length) {
+    layers.push(frontier);
+    const next = new Set();
+    for (const id of frontier) {
+      const neighbours = neighbourMap.get(id) || [];
+      for (const neighbourId of neighbours) {
+        if (visited.has(neighbourId)) {
+          continue;
+        }
+        const candidate = infoMap.get(neighbourId);
+        if (!candidate) {
+          continue;
+        }
+        if (options.parity !== undefined && options.parity !== null) {
+          const desiredParity = ((options.parity + depth + 1) % 2 + 2) % 2;
+          const candidateParity = (((candidate.ringIndex ?? 0) % 2) + 2) % 2;
+          if (candidateParity !== desiredParity) {
+            continue;
+          }
+        }
+        if (options.neighbourThreshold) {
+          const candidateNeighbours = neighbourMap.get(neighbourId) || [];
+          let activeCount = 0;
+          for (const nb of candidateNeighbours) {
+            if (visited.has(nb)) {
+              activeCount += 1;
+            }
+          }
+          if (activeCount < options.neighbourThreshold) {
+            continue;
+          }
+        }
+        visited.add(neighbourId);
+        next.add(neighbourId);
+      }
+    }
+    if (!next.size) {
+      const remaining = entries.filter(entry => !visited.has(entry.id));
+      if (!remaining.length) {
+        break;
+      }
+      const fallbackId = remaining[0].id;
+      visited.add(fallbackId);
+      next.add(fallbackId);
+    }
+    frontier = Array.from(next);
+    depth += 1;
+  }
+  return layers;
+}
+
+const AnimationPatternRegistry = {
+  ring_cascade(metadata) {
+    const assignments = new Map();
+    const ringBuckets = new Map();
+    for (const entry of metadata || []) {
+      const ringIdx = entry.ringIndex ?? 0;
+      if (!ringBuckets.has(ringIdx)) {
+        ringBuckets.set(ringIdx, []);
+      }
+      ringBuckets.get(ringIdx).push(entry);
+    }
+    const orderedRings = Array.from(ringBuckets.keys()).sort((a, b) => a - b);
+    let orderValue = 1;
+    for (const ringIdx of orderedRings) {
+      const entries = ringBuckets.get(ringIdx).slice().sort((a, b) => a.angle - b.angle);
+      for (const entry of entries) {
+        assignments.set(entry.id, [orderValue]);
+        orderValue += 1;
+      }
+    }
+    return normaliseOrderAssignments(assignments);
+  },
+
+  ring_pingpong(metadata) {
+    const assignments = new Map();
+    const ringBuckets = new Map();
+    for (const entry of metadata || []) {
+      const ringIdx = entry.ringIndex ?? 0;
+      if (!ringBuckets.has(ringIdx)) {
+        ringBuckets.set(ringIdx, []);
+      }
+      ringBuckets.get(ringIdx).push(entry);
+    }
+    const orderedRings = Array.from(ringBuckets.keys()).sort((a, b) => a - b);
+    let orderBase = 1;
+    orderedRings.forEach((ringIdx, ringPos) => {
+      const entries = ringBuckets.get(ringIdx).slice().sort((a, b) => a.angle - b.angle);
+      if (ringPos % 2 === 1) {
+        entries.reverse();
+      }
+      entries.forEach((entry, idx) => {
+        const jitter = idx / Math.max(entries.length, 1);
+        assignments.set(entry.id, [orderBase + jitter]);
+      });
+      orderBase += entries.length + 0.5;
+    });
+    return normaliseOrderAssignments(assignments);
+  },
+
+  log_spiral_expansion(metadata) {
+    const sorted = (metadata || [])
+      .slice()
+      .sort((a, b) => {
+        const da = (a.distance ?? 0) - (b.distance ?? 0);
+        if (Math.abs(da) > 1e-6) {
+          return da;
+        }
+        return (a.angle ?? 0) - (b.angle ?? 0);
+      });
+    const assignments = new Map();
+    sorted.forEach((entry, idx) => {
+      const fractional = (entry.angle ?? 0) / 360;
+      assignments.set(entry.id, [idx + 1 + fractional]);
+    });
+    return normaliseOrderAssignments(assignments);
+  },
+
+  dual_arms(metadata, options = {}) {
+    const armsRaw = Number.isFinite(options.spiralArms) ? options.spiralArms : 6;
+    const arms = Math.max(2, Math.min(12, Math.round(armsRaw)));
+    const assignments = new Map();
+    for (const entry of metadata || []) {
+      const normalizedAngle = ((entry.angle ?? 0) % 360 + 360) % 360;
+      const armIndex = Math.min(arms - 1, Math.max(0, Math.floor((normalizedAngle / 360) * arms)));
+      const order = (entry.ringIndex ?? 0) * arms + armIndex + 1;
+      assignments.set(entry.id, [order]);
+    }
+    return normaliseOrderAssignments(assignments);
+  },
+
+  cellular_wavefront(metadata) {
+    const layers = buildCellularLayers(metadata);
+    const assignments = new Map();
+    layers.forEach((layer, depth) => {
+      const order = depth + 1;
+      for (const id of layer) {
+        assignments.set(id, [order]);
+      }
+    });
+    return normaliseOrderAssignments(assignments);
+  },
+
+  cellular_checkerboard(metadata) {
+    const layers = buildCellularLayers(metadata, { parity: 0, neighbourThreshold: 2 });
+    const assignments = new Map();
+    layers.forEach((layer, depth) => {
+      const order = depth + 1;
+      for (const id of layer) {
+        assignments.set(id, [order]);
+      }
+    });
+    return normaliseOrderAssignments(assignments);
+  },
+
+  cellular_echoes(metadata) {
+    const layers = buildCellularLayers(metadata);
+    const totalLayers = Math.max(1, layers.length);
+    const assignments = new Map();
+    layers.forEach((layer, depth) => {
+      const base = depth + 1;
+      for (const id of layer) {
+        assignments.set(id, [base, base + totalLayers, base + totalLayers * 2]);
+      }
+    });
+    return normaliseOrderAssignments(assignments);
+  },
+
+  stochastic_bursts(metadata, options = {}) {
+    const seed = hashStringToSeed(String(options.seed || 'animation'));
+    const rng = seededRandom(seed);
+    const shuffled = (metadata || []).slice().sort(() => rng() - 0.5);
+    const assignments = new Map();
+    let order = 1;
+    shuffled.forEach((entry, idx) => {
+      const burstOffset = idx % 4 === 0 ? 0.75 : 0;
+      assignments.set(entry.id, [order + burstOffset]);
+      order += 1;
+    });
+    return normaliseOrderAssignments(assignments);
+  },
+};
+
+function resolveAnimationAngles(name, metadata, options = {}) {
+  const key = typeof name === 'string' ? name : 'ring_cascade';
+  const handler = AnimationPatternRegistry[key] || AnimationPatternRegistry.ring_cascade;
+  try {
+    return handler(metadata || [], options);
+  } catch (error) {
+    if (typeof console !== 'undefined' && console.warn) {
+      console.warn(`Animation pattern "${key}" failed. Falling back to ring_cascade.`, error);
+    }
+    return AnimationPatternRegistry.ring_cascade(metadata || [], options);
+  }
+}
+
+function hashStringToSeed(str = '') {
+  if (!str) {
+    return 0;
+  }
+  let hash = 2166136261 >>> 0;
+  for (let idx = 0; idx < str.length; idx += 1) {
+    hash ^= str.charCodeAt(idx);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
 function inwardNormal(direction, orientationSign) {
   if (orientationSign >= 0) {
     return { x: -direction.y, y: direction.x };
@@ -863,6 +1136,7 @@ class ArcGroup {
     this._patternSegmentsCache = new Map();
     this.template = null;
     this.templateTransform = null;
+    this.linePatternAngles = [];
   }
 
   addArc(arc) {
@@ -2001,6 +2275,7 @@ class DoyleSpiralEngine {
     this.arcGroups = new Map();
     this.fillPatternAngle = 0;
     this._ringTemplates = new Map();
+    this.currentPatternAnimation = 'ring_cascade';
   }
 
   generateCircles() {
@@ -2507,6 +2782,95 @@ class DoyleSpiralEngine {
     }
   }
 
+  _buildArcGroupMetadata() {
+    const entries = [];
+    for (const [key, group] of this.arcGroups.entries()) {
+      if (!key.startsWith('circle_')) {
+        continue;
+      }
+      const circle = group.baseCircle;
+      if (!circle) {
+        continue;
+      }
+      const center = circle.center || Complex.ZERO;
+      const angleRad = Math.atan2(center.im, center.re);
+      const normalizedAngle = ((angleRad * 180) / Math.PI + 360) % 360;
+      const distance = Complex.abs(center);
+      const neighbours = [];
+      if (circle.neighbours && circle.neighbours.size) {
+        for (const neighbour of circle.neighbours) {
+          const neighbourKey = `circle_${neighbour.id}`;
+          const neighbourGroup = this.arcGroups.get(neighbourKey);
+          if (neighbourGroup) {
+            neighbours.push(neighbourGroup.id);
+          }
+        }
+      }
+      entries.push({
+        id: group.id,
+        key,
+        ringIndex: group.ringIndex ?? 0,
+        angle: Number.isFinite(normalizedAngle) ? normalizedAngle : 0,
+        distance: Number.isFinite(distance) ? distance : 0,
+        neighbours,
+        group,
+      });
+    }
+    return entries;
+  }
+
+  _assignPatternAnglesFromAnimation(animationName, metadata, fillPatternAngle) {
+    const resolved = resolveAnimationAngles(animationName, metadata, {
+      spiralArms: this.q,
+      seed: `${this.p}_${this.q}_${Math.round(this.t * 1000)}`,
+    });
+    const angleLookup = new Map();
+    if (resolved && typeof resolved.forEach === 'function') {
+      resolved.forEach((angles, key) => {
+        if (Array.isArray(angles)) {
+          angleLookup.set(key, angles);
+        }
+      });
+    }
+    for (const [key, group] of this.arcGroups.entries()) {
+      if (!key.startsWith('circle_')) {
+        group.linePatternAngles = [];
+        continue;
+      }
+      const rawAngles = angleLookup.get(group.id) || angleLookup.get(group.name) || [];
+      group.linePatternAngles = this._sanitisePatternAngles(rawAngles, group, fillPatternAngle);
+    }
+  }
+
+  _sanitisePatternAngles(rawAngles, group, fillPatternAngle) {
+    const ringIdx = group?.ringIndex ?? 0;
+    const baseAngle = Number.isFinite(fillPatternAngle)
+      ? ringIdx * fillPatternAngle
+      : 0;
+    const defaultAngle = ((baseAngle % 180) + 180) % 180;
+    if (!rawAngles || !rawAngles.length) {
+      return [defaultAngle];
+    }
+    const filtered = [];
+    for (const value of rawAngles) {
+      if (!Number.isFinite(value)) {
+        continue;
+      }
+      const normalized = ((value % 180) + 180) % 180;
+      if (filtered.some(angle => Math.abs(angle - normalized) < 1e-4)) {
+        continue;
+      }
+      filtered.push(normalized);
+      if (filtered.length >= 3) {
+        break;
+      }
+    }
+    if (!filtered.length) {
+      filtered.push(defaultAngle);
+    }
+    return filtered;
+  }
+
   _renderArramBoyle(context, {
     debugGroups = false,
     addFillPattern = false,
@@ -2520,6 +2884,7 @@ class DoyleSpiralEngine {
     highlightRimWidth = 1.2,
     groupOutlineWidth = 0.6,
     patternStrokeWidth = 0.5,
+    patternAnimation = 'ring_cascade',
   } = {}) {
     this.generateOuterCircles();
     this.computeAllIntersections();
@@ -2527,6 +2892,7 @@ class DoyleSpiralEngine {
     this.fillPatternAngle = fillPatternAngle;
     this.arcGroups.clear();
     this._ringTemplates = new Map();
+    this.currentPatternAnimation = patternAnimation || 'ring_cascade';
 
     const highlightStrokeWidth = Number.isFinite(highlightRimWidth)
       ? Math.max(0, highlightRimWidth)
@@ -2562,6 +2928,8 @@ class DoyleSpiralEngine {
     );
     this._extendGroupsWithNeighbours(spiralCenter);
     this._finalizeRingTemplates();
+    const metadata = this._buildArcGroupMetadata();
+    this._assignPatternAnglesFromAnimation(this.currentPatternAnimation, metadata, fillPatternAngle);
 
     const scaleFactor = context.scaleFactor;
     const invScale = scaleFactor > 1e-9 ? 1 / scaleFactor : 0;
@@ -2595,20 +2963,23 @@ class DoyleSpiralEngine {
         if (key.startsWith('outer_')) {
           continue;
         }
-        const ringIdx = group.ringIndex ?? 0;
-        const angle = ringIdx * fillPatternAngle;
-        group.toSVGFill(context, {
-          debug: false,
-          patternFill: true,
-          lineSettings: [spacingInternal, angle],
-          drawOutline: drawGroupOutline,
-          lineOffset: offsetInternal,
-          patternType: fillPatternType,
-          rectWidth: rectWidthForGroups,
-          patternSpacingOverride: spacingForGroups,
-          patternOffsetOverride: offsetForGroups,
-          outlineStrokeWidth: outlineStrokeWidth,
-          patternStrokeWidth: patternStroke,
+        const angles = Array.isArray(group.linePatternAngles) && group.linePatternAngles.length
+          ? group.linePatternAngles
+          : [(group.ringIndex ?? 0) * fillPatternAngle];
+        angles.forEach((angleValue, angleIdx) => {
+          group.toSVGFill(context, {
+            debug: false,
+            patternFill: true,
+            lineSettings: [spacingInternal, angleValue],
+            drawOutline: drawGroupOutline && angleIdx === 0,
+            lineOffset: offsetInternal,
+            patternType: fillPatternType,
+            rectWidth: rectWidthForGroups,
+            patternSpacingOverride: spacingForGroups,
+            patternOffsetOverride: offsetForGroups,
+            outlineStrokeWidth: outlineStrokeWidth,
+            patternStrokeWidth: patternStroke,
+          });
         });
       }
     }
@@ -2713,6 +3084,7 @@ class DoyleSpiralEngine {
         max_d: this.maxDistance,
         arc_mode: this.arcMode,
         num_gaps: this.numGaps,
+        pattern_animation: this.currentPatternAnimation,
       },
       arcgroups: [],
     };
@@ -2723,12 +3095,16 @@ class DoyleSpiralEngine {
       const outline = group.getClosedOutline();
       const outlinePoints = outline.map(pt => [pt.re, pt.im]);
       const ringIdx = group.ringIndex ?? 0;
-      const lineAngle = ringIdx * this.fillPatternAngle;
+      const defaultAngle = ringIdx * this.fillPatternAngle;
+      const patternAngles = Array.isArray(group.linePatternAngles) && group.linePatternAngles.length
+        ? group.linePatternAngles.map(angle => ((angle % 180) + 180) % 180)
+        : [((defaultAngle % 180) + 180) % 180];
       exportData.arcgroups.push({
         id: group.id,
         name: group.name,
         ring_index: group.ringIndex,
-        line_angle: lineAngle,
+        line_angle: patternAngles[0],
+        line_pattern_angles: patternAngles,
         outline: outlinePoints,
         arc_count: group.arcs.length,
       });
@@ -2746,6 +3122,22 @@ function normaliseParams(params = {}) {
     ? params.fill_pattern_type.toLowerCase()
     : 'lines';
   const fillPatternType = patternTypeRaw === 'rectangles' ? 'rectangles' : 'lines';
+  const animationRaw = typeof params.pattern_animation === 'string'
+    ? params.pattern_animation.toLowerCase()
+    : 'ring_cascade';
+  const allowedAnimations = new Set([
+    'ring_cascade',
+    'ring_pingpong',
+    'log_spiral_expansion',
+    'dual_arms',
+    'cellular_wavefront',
+    'cellular_checkerboard',
+    'cellular_echoes',
+    'stochastic_bursts',
+  ]);
+  const patternAnimation = allowedAnimations.has(animationRaw)
+    ? animationRaw
+    : 'ring_cascade';
   const spacingRaw = Number(params.fill_pattern_spacing ?? 8);
   const offsetRaw = Number(params.fill_pattern_offset ?? 0);
   const rectWidthValue = Number(params.fill_pattern_rect_width ?? 2);
@@ -2780,6 +3172,7 @@ function normaliseParams(params = {}) {
     fill_pattern_angle: Number(params.fill_pattern_angle ?? 0),
     fill_pattern_offset: fillPatternOffset,
     fill_pattern_type: fillPatternType,
+    pattern_animation: patternAnimation,
     fill_pattern_rect_width: rectWidthMm,
     highlight_rim_width: highlightRimWidth,
     group_outline_width: groupOutlineWidth,
@@ -2817,6 +3210,7 @@ function renderSpiral(params = {}, overrideMode = null) {
     boundingBoxWidth: opts.bounding_box_width_mm,
     boundingBoxHeight: opts.bounding_box_height_mm,
     lengthUnits: 'mm',
+    patternAnimation: opts.pattern_animation,
   });
   return {
     engine,
