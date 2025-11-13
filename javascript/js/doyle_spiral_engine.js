@@ -95,6 +95,22 @@ function degToRad(angleDeg) {
   return (angleDeg * Math.PI) / 180;
 }
 
+function normaliseOrientationDeg(angleDeg) {
+  if (!Number.isFinite(angleDeg)) {
+    return 0;
+  }
+  const normalized = ((angleDeg % 180) + 180) % 180;
+  return normalized;
+}
+
+function buildLinePatternSet(baseAngleDeg) {
+  const offsets = [0, 45, 90];
+  return offsets.map((offset, index) => ({
+    index,
+    angle: normaliseOrientationDeg(baseAngleDeg + offset),
+  }));
+}
+
 function seededRandom(seed) {
   // Mulberry32 PRNG – deterministic for the same seed.
   let t = (seed + 0x6d2b79f5) >>> 0;
@@ -2724,11 +2740,14 @@ class DoyleSpiralEngine {
       const outlinePoints = outline.map(pt => [pt.re, pt.im]);
       const ringIdx = group.ringIndex ?? 0;
       const lineAngle = ringIdx * this.fillPatternAngle;
+      const normalizedAngle = normaliseOrientationDeg(lineAngle);
+      const linePatterns = buildLinePatternSet(normalizedAngle);
       exportData.arcgroups.push({
         id: group.id,
         name: group.name,
         ring_index: group.ringIndex,
-        line_angle: lineAngle,
+        line_angle: normalizedAngle,
+        line_patterns: linePatterns,
         outline: outlinePoints,
         arc_count: group.arcs.length,
       });

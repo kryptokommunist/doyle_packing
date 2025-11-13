@@ -12,6 +12,8 @@ const tRange = document.getElementById('inputT');
 const tValue = document.getElementById('tValue');
 const fillToggle = document.getElementById('togglePattern');
 const fillSettings = document.getElementById('fillSettings');
+const fillPatternTypeSelect = document.getElementById('fillPatternType');
+const fillRectWidthGroup = document.getElementById('rectWidthGroup');
 const outlineToggle = document.getElementById('toggleOutline');
 const redToggle = document.getElementById('toggleRed');
 const viewButtons = Array.from(document.querySelectorAll('[data-view]'));
@@ -33,17 +35,29 @@ const DEFAULTS = {
   arc_mode: 'closest',
   num_gaps: 2,
   size: 800,
+  bounding_box_width_mm: 200,
+  bounding_box_height_mm: 200,
   add_fill_pattern: false,
   draw_group_outline: true,
   red_outline: false,
-  fill_pattern_spacing: 5,
+  fill_pattern_spacing: 8,
   fill_pattern_angle: 0,
   fill_pattern_offset: 0,
+  fill_pattern_type: 'lines',
+  fill_pattern_rect_width: 2,
+  highlight_rim_width: 1.2,
+  group_outline_width: 0.6,
+  pattern_stroke_width: 0.5,
 };
 
 let activeView = '2d';
 let lastRender = null;
 let threeApp = null;
+const workerSupported = typeof Worker !== 'undefined';
+const renderWorkerURL = workerSupported ? new URL('./render_worker.js', import.meta.url) : null;
+let renderWorkerHandle = null;
+let currentRenderToken = 0;
+const svgParser = typeof DOMParser !== 'undefined' ? new DOMParser() : null;
 
 function sanitiseFileName(name) {
   return name.replace(/[\\/:*?"<>|]+/g, '-');
@@ -106,6 +120,7 @@ function updateTValue() {
 
 function toggleFillSettings() {
   fillSettings.hidden = !fillToggle.checked;
+  updatePatternTypeVisibility();
 }
 
 function setStatus(message, state = 'idle') {
@@ -114,6 +129,28 @@ function setStatus(message, state = 'idle') {
   if (state !== 'idle') {
     statusEl.classList.add(state);
   }
+}
+
+function terminateRenderWorker() {
+  if (renderWorkerHandle) {
+    renderWorkerHandle.terminate();
+    renderWorkerHandle = null;
+  }
+}
+
+function materializeSvg(result) {
+  if (result && result.svg) {
+    return result.svg;
+  }
+  if (!result || !result.svgString || !svgParser) {
+    return null;
+  }
+  const doc = svgParser.parseFromString(result.svgString, 'image/svg+xml');
+  const element = doc.documentElement;
+  if (!element || element.nodeName.toLowerCase() !== 'svg') {
+    return null;
+  }
+  return document.importNode(element, true);
 }
 
 function collectParams() {
@@ -139,6 +176,14 @@ function debounce(fn, delay) {
   };
 }
 
+function updatePatternTypeVisibility() {
+  if (!fillPatternTypeSelect || !fillRectWidthGroup) {
+    return;
+  }
+  const showRectangles = fillPatternTypeSelect.value === 'rectangles';
+  fillRectWidthGroup.hidden = !showRectangles;
+}
+
 function pulseSettingsButton() {
   if (!threeSettingsToggle) {
     return;
@@ -162,11 +207,12 @@ function ensureThreeApp() {
   const metalnessValue = document.getElementById('threeMetalnessValue');
   const roughness = document.getElementById('threeRoughness');
   const roughnessValue = document.getElementById('threeRoughnessValue');
-  const manualRotation = document.getElementById('threeManualRotation');
-  const manualRotationValue = document.getElementById('threeManualRotationValue');
-  const reloadGeometry = document.getElementById('threeReloadGeometry');
-  const loadJson = document.getElementById('threeLoadJson');
-  const resetCamera = document.getElementById('threeResetCamera');
+const manualRotation = document.getElementById('threeManualRotation');
+const manualRotationValue = document.getElementById('threeManualRotationValue');
+const animationModeSelect = document.getElementById('threeAnimationMode');
+const reloadGeometry = document.getElementById('threeReloadGeometry');
+const loadJson = document.getElementById('threeLoadJson');
+const resetCamera = document.getElementById('threeResetCamera');
   const statArcGroups3d = document.getElementById('threeStatArcGroups');
   const statPolygons3d = document.getElementById('threeStatPolygons');
   const statParameters3d = document.getElementById('threeStatParameters');
@@ -191,6 +237,7 @@ function ensureThreeApp() {
       metalnessValue,
       roughness,
       roughnessValue,
+      animationModeSelect,
       reloadButton: reloadGeometry,
       loadJsonButton: loadJson,
       resetCameraButton: resetCamera,
@@ -231,38 +278,106 @@ function showSVG(svgElement) {
   svgPreview.classList.remove('empty-state');
 }
 
-async function renderCurrentSpiral(showLoading = true) {
-  const params = collectParams();
-  if (showLoading) {
-    setStatus('Rendering spiral…', 'loading');
+function handleRenderSuccess(result) {
+  const svgElement = materializeSvg(result);
+  if (!svgElement) {
+    throw new Error('Renderer produced no SVG content');
   }
-  try {
-    const result = renderSpiral(params);
-    showSVG(result.svg);
 
-    const geometry = hasGeometry(result.geometry) ? result.geometry : null;
-    lastRender = { params, geometry, mode: params.mode, svgString: result.svgString };
+  showSVG(svgElement);
 
-    updateStats(geometry);
-    statMode.textContent = params.mode === 'arram_boyle' ? 'Arram-Boyle' : 'Classic Doyle';
-    setStatus('Spiral updated. Switch views to explore it in 3D.');
-    updateExportAvailability(true);
+  const params = result.params || collectParams();
+  const geometry = hasGeometry(result.geometry) ? result.geometry : null;
+  const mode = result.mode || params?.mode || DEFAULTS.mode;
+  const svgString = typeof result.svgString === 'string' && result.svgString.trim().length
+    ? result.svgString
+    : new XMLSerializer().serializeToString(svgElement);
 
-    if (threeApp) {
-      if (geometry) {
-        threeApp.useGeometryFromPayload(params, geometry);
-      } else {
-        threeApp.queueGeometryUpdate(params, true);
-      }
+  lastRender = { params, geometry, mode, svgString };
+
+  updateStats(geometry);
+  statMode.textContent = mode === 'arram_boyle' ? 'Arram-Boyle' : 'Classic Doyle';
+  setStatus('Spiral updated. Switch views to explore it in 3D.');
+  updateExportAvailability(true);
+
+  if (threeApp) {
+    if (geometry) {
+      threeApp.useGeometryFromPayload(params, geometry);
+    } else {
+      threeApp.queueGeometryUpdate(params, true);
     }
-  } catch (error) {
-    console.error(error);
-    svgPreview.innerHTML = '<div class="empty-state">Unable to render spiral.</div>';
-    svgPreview.classList.add('empty-state');
-    setStatus(error.message || 'Unexpected error', 'error');
-    lastRender = null;
-    updateExportAvailability(false);
   }
+}
+
+function handleRenderFailure(message) {
+  svgPreview.innerHTML = '<div class="empty-state">Unable to render spiral.</div>';
+  svgPreview.classList.add('empty-state');
+  setStatus(message || 'Unexpected error', 'error');
+  lastRender = null;
+  updateExportAvailability(false);
+}
+
+function startRenderJob(params, showLoading) {
+  const token = ++currentRenderToken;
+  const statusMessage = showLoading ? 'Rendering spiral…' : 'Updating spiral…';
+  setStatus(statusMessage, 'loading');
+
+  if (workerSupported && renderWorkerURL && svgParser) {
+    terminateRenderWorker();
+    const worker = new Worker(renderWorkerURL, { type: 'module' });
+    renderWorkerHandle = worker;
+
+    worker.onmessage = event => {
+      const data = event.data || {};
+      if (data.requestId !== token) {
+        return;
+      }
+      if (renderWorkerHandle === worker) {
+        worker.terminate();
+        renderWorkerHandle = null;
+      }
+      if (data.type === 'result') {
+        try {
+          handleRenderSuccess(data);
+        } catch (error) {
+          console.error(error);
+          handleRenderFailure(error.message || 'Unexpected error');
+        }
+      } else if (data.type === 'error') {
+        const message = data.message || 'Render failed';
+        console.error(message);
+        handleRenderFailure(message);
+      }
+    };
+
+    worker.onerror = event => {
+      const message = event?.message || 'Render failed';
+      if (renderWorkerHandle === worker) {
+        worker.terminate();
+        renderWorkerHandle = null;
+      }
+      console.error(event?.error || message);
+      handleRenderFailure(message);
+    };
+
+    worker.postMessage({ type: 'render', requestId: token, params });
+    return;
+  }
+
+  setTimeout(() => {
+    try {
+      const result = renderSpiral(params);
+      handleRenderSuccess(result);
+    } catch (error) {
+      console.error(error);
+      handleRenderFailure(error.message || 'Unexpected error');
+    }
+  }, 0);
+}
+
+function renderCurrentSpiral(showLoading = true) {
+  const params = collectParams();
+  startRenderJob(params, showLoading);
 }
 
 const debouncedRender = debounce(() => renderCurrentSpiral(false), 200);
@@ -273,6 +388,9 @@ form.addEventListener('input', event => {
   }
   if (event.target === fillToggle) {
     toggleFillSettings();
+  }
+  if (event.target === fillPatternTypeSelect) {
+    updatePatternTypeVisibility();
   }
   debouncedRender();
   if (threeApp) {
@@ -331,6 +449,10 @@ if (threeSettingsToggle) {
 
 if (exportButton) {
   exportButton.addEventListener('click', downloadCurrentSvg);
+}
+
+if (fillPatternTypeSelect) {
+  fillPatternTypeSelect.addEventListener('change', updatePatternTypeVisibility);
 }
 
 updateExportAvailability(false);

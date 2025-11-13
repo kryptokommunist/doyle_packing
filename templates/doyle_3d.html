@@ -206,6 +206,20 @@
             <div class="range-value"><span id="pulseSpeedValue">2.0</span> pulses / sec</div>
           </div>
           <div>
+            <label for="animationMode">Animation</label>
+            <select id="animationMode">
+              <option value="rotation_pulse" selected>Rotational pulse</option>
+              <option value="ring_chase">Ring chase</option>
+              <option value="ring_cascade">Ring cascade</option>
+              <option value="log_spiral">Log spiral expansion</option>
+              <option value="ca_wavefront">Cellular wavefront</option>
+              <option value="ca_toggle">Cellular toggles</option>
+              <option value="ca_decay">Cellular decay bloom</option>
+              <option value="triple_strobe">Triple pattern strobe</option>
+              <option value="random_echo">Random echo</option>
+            </select>
+          </div>
+          <div>
             <label for="metalness">Metalness</label>
             <input type="range" id="metalness" min="0" max="1" step="0.05" value="0.85">
             <div class="range-value"><span id="metalnessValue">0.85</span></div>
