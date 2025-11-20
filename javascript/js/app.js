@@ -14,6 +14,8 @@ const fillToggle = document.getElementById('togglePattern');
 const fillSettings = document.getElementById('fillSettings');
 const fillPatternTypeSelect = document.getElementById('fillPatternType');
 const fillRectWidthGroup = document.getElementById('rectWidthGroup');
+const fillSpacingShiftToggle = document.getElementById('fillSpacingShift');
+const fillSpacingRange = document.getElementById('fillSpacingRange');
 const outlineToggle = document.getElementById('toggleOutline');
 const redToggle = document.getElementById('toggleRed');
 const viewButtons = Array.from(document.querySelectorAll('[data-view]'));
@@ -41,6 +43,9 @@ const DEFAULTS = {
   draw_group_outline: true,
   red_outline: false,
   fill_pattern_spacing: 8,
+  fill_pattern_spacing_min: 6,
+  fill_pattern_spacing_max: 12,
+  fill_pattern_spacing_shift: false,
   fill_pattern_angle: 0,
   fill_pattern_offset: 0,
   fill_pattern_type: 'lines',
@@ -121,6 +126,7 @@ function updateTValue() {
 function toggleFillSettings() {
   fillSettings.hidden = !fillToggle.checked;
   updatePatternTypeVisibility();
+  updateSpacingRangeVisibility();
 }
 
 function setStatus(message, state = 'idle') {
@@ -182,6 +188,13 @@ function updatePatternTypeVisibility() {
   }
   const showRectangles = fillPatternTypeSelect.value === 'rectangles';
   fillRectWidthGroup.hidden = !showRectangles;
+}
+
+function updateSpacingRangeVisibility() {
+  if (!fillSpacingRange || !fillSpacingShiftToggle) {
+    return;
+  }
+  fillSpacingRange.hidden = !fillSpacingShiftToggle.checked;
 }
 
 function pulseSettingsButton() {
@@ -389,6 +402,9 @@ form.addEventListener('input', event => {
   }
   if (event.target === fillPatternTypeSelect) {
     updatePatternTypeVisibility();
+  }
+  if (event.target === fillSpacingShiftToggle) {
+    updateSpacingRangeVisibility();
   }
   debouncedRender();
   if (threeApp) {
