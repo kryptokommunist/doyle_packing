@@ -2566,9 +2566,13 @@ class DoyleSpiralEngine {
     const scaleFactor = context.scaleFactor;
     const invScale = scaleFactor > 1e-9 ? 1 / scaleFactor : 0;
     const spacingInternal = Math.max(0, fillPatternSpacing);
+    const spacingMinInternal = Math.max(0, fillPatternSpacingMin);
+    const spacingMaxInternal = Math.max(0, fillPatternSpacingMax);
+    const spacingLower = Math.min(spacingMinInternal, spacingMaxInternal);
+    const spacingUpper = Math.max(spacingMinInternal, spacingMaxInternal);
+    const spacingRangeEnabled = Boolean(fillPatternSpacingShift);
     const offsetInternal = Math.max(0, fillPatternOffset);
     const rectWidthInternal = Math.max(0, fillPatternRectWidth);
-    const spacingForGroups = invScale > 0 ? spacingInternal * invScale : 0;
     const offsetForGroups = invScale > 0 ? offsetInternal * invScale : 0;
     const rectWidthForGroups = invScale > 0 ? rectWidthInternal * invScale : 0;
 
@@ -2597,15 +2601,20 @@ class DoyleSpiralEngine {
         }
         const ringIdx = group.ringIndex ?? 0;
         const angle = ringIdx * fillPatternAngle;
+        const ratio = maxIndex && maxIndex > 0 ? Math.min(Math.max(ringIdx / maxIndex, 0), 1) : 0;
+        const spacingForRing = spacingRangeEnabled
+          ? spacingLower + (spacingUpper - spacingLower) * ratio
+          : spacingInternal;
+        const spacingForSegments = invScale > 0 ? spacingForRing * invScale : spacingForRing;
         group.toSVGFill(context, {
           debug: false,
           patternFill: true,
-          lineSettings: [spacingInternal, angle],
+          lineSettings: [spacingForRing, angle],
           drawOutline: drawGroupOutline,
           lineOffset: offsetInternal,
           patternType: fillPatternType,
           rectWidth: rectWidthForGroups,
-          patternSpacingOverride: spacingForGroups,
+          patternSpacingOverride: spacingForSegments,
           patternOffsetOverride: offsetForGroups,
           outlineStrokeWidth: outlineStrokeWidth,
           patternStrokeWidth: patternStroke,
@@ -2647,6 +2656,9 @@ class DoyleSpiralEngine {
     debugGroups = false,
     addFillPattern = false,
     fillPatternSpacing = 5.0,
+    fillPatternSpacingMin = 5.0,
+    fillPatternSpacingMax = 5.0,
+    fillPatternSpacingShift = false,
     fillPatternAngle = 0.0,
     redOutline = false,
     drawGroupOutline = true,
@@ -2724,11 +2736,16 @@ class DoyleSpiralEngine {
       const outlinePoints = outline.map(pt => [pt.re, pt.im]);
       const ringIdx = group.ringIndex ?? 0;
       const lineAngle = ringIdx * this.fillPatternAngle;
+      const spacingRatio = maxIndex && maxIndex > 0 ? Math.min(Math.max(ringIdx / maxIndex, 0), 1) : 0;
+      const lineSpacing = spacingRangeEnabled
+        ? spacingLower + (spacingUpper - spacingLower) * spacingRatio
+        : spacingInternal;
       exportData.arcgroups.push({
         id: group.id,
         name: group.name,
         ring_index: group.ringIndex,
         line_angle: lineAngle,
+        line_spacing: lineSpacing,
         outline: outlinePoints,
         arc_count: group.arcs.length,
       });
@@ -2747,6 +2764,9 @@ function normaliseParams(params = {}) {
     : 'lines';
   const fillPatternType = patternTypeRaw === 'rectangles' ? 'rectangles' : 'lines';
   const spacingRaw = Number(params.fill_pattern_spacing ?? 8);
+  const spacingMinRaw = Number(params.fill_pattern_spacing_min ?? spacingRaw);
+  const spacingMaxRaw = Number(params.fill_pattern_spacing_max ?? spacingRaw);
+  const spacingShift = Boolean(params.fill_pattern_spacing_shift ?? false);
   const offsetRaw = Number(params.fill_pattern_offset ?? 0);
   const rectWidthValue = Number(params.fill_pattern_rect_width ?? 2);
   const boundingWidthRaw = Number(params.bounding_box_width_mm ?? 200);
@@ -2755,6 +2775,10 @@ function normaliseParams(params = {}) {
   const outlineWidthRaw = Number(params.group_outline_width ?? 0.6);
   const patternStrokeRaw = Number(params.pattern_stroke_width ?? 0.5);
   const fillPatternSpacing = Number.isFinite(spacingRaw) ? Math.max(0.001, spacingRaw) : 8;
+  const fillPatternSpacingMin = Number.isFinite(spacingMinRaw) ? Math.max(0.001, spacingMinRaw) : fillPatternSpacing;
+  const fillPatternSpacingMax = Number.isFinite(spacingMaxRaw) ? Math.max(0.001, spacingMaxRaw) : fillPatternSpacing;
+  const spacingLower = Math.min(fillPatternSpacingMin, fillPatternSpacingMax);
+  const spacingUpper = Math.max(fillPatternSpacingMin, fillPatternSpacingMax);
   const fillPatternOffset = Number.isFinite(offsetRaw) ? Math.max(0, offsetRaw) : 0;
   const rectWidthMm = Math.max(0, Number.isFinite(rectWidthValue) ? rectWidthValue : 2);
   const boundingWidthMm = Number.isFinite(boundingWidthRaw) && boundingWidthRaw > 0.0001
@@ -2777,6 +2801,9 @@ function normaliseParams(params = {}) {
     debug_groups: Boolean(params.debug_groups ?? false),
     add_fill_pattern: Boolean(params.add_fill_pattern ?? false),
     fill_pattern_spacing: fillPatternSpacing,
+    fill_pattern_spacing_min: spacingLower,
+    fill_pattern_spacing_max: spacingUpper,
+    fill_pattern_spacing_shift: spacingShift,
     fill_pattern_angle: Number(params.fill_pattern_angle ?? 0),
     fill_pattern_offset: fillPatternOffset,
     fill_pattern_type: fillPatternType,
@@ -2805,6 +2832,9 @@ function renderSpiral(params = {}, overrideMode = null) {
     debugGroups: opts.debug_groups,
     addFillPattern: opts.add_fill_pattern,
     fillPatternSpacing: opts.fill_pattern_spacing,
+    fillPatternSpacingMin: opts.fill_pattern_spacing_min,
+    fillPatternSpacingMax: opts.fill_pattern_spacing_max,
+    fillPatternSpacingShift: opts.fill_pattern_spacing_shift,
     fillPatternAngle: opts.fill_pattern_angle,
     redOutline: opts.red_outline,
     drawGroupOutline: opts.draw_group_outline,

@@ -576,6 +576,36 @@
                 value="8"
               />
             </div>
+            <div class="checkbox-row">
+              <label>
+                <input type="checkbox" name="fill_pattern_spacing_shift" id="toggleSpacingShift">
+                Distribute spacing between rings
+              </label>
+            </div>
+            <div class="field-group inline-fields">
+              <div>
+                <label for="fillSpacingMin">Min spacing (mm)</label>
+                <input
+                  id="fillSpacingMin"
+                  name="fill_pattern_spacing_min"
+                  type="number"
+                  min="0.001"
+                  step="0.001"
+                  value="8"
+                />
+              </div>
+              <div>
+                <label for="fillSpacingMax">Max spacing (mm)</label>
+                <input
+                  id="fillSpacingMax"
+                  name="fill_pattern_spacing_max"
+                  type="number"
+                  min="0.001"
+                  step="0.001"
+                  value="8"
+                />
+              </div>
+            </div>
             <div class="field-group">
               <label for="fillAngle">Angle shift</label>
               <input id="fillAngle" name="fill_pattern_angle" type="number" min="-180" max="180" step="1" value="0" />
