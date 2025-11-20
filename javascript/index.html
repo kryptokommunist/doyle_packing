@@ -577,6 +577,33 @@
               />
             </div>
             <div class="field-group">
+              <label><input type="checkbox" id="fillSpacingShift" name="fill_pattern_spacing_shift"> Vary line spacing</label>
+            </div>
+            <div class="field-group">
+              <label for="fillSpacingMin">Min line spacing (mm)</label>
+              <input
+                id="fillSpacingMin"
+                name="fill_pattern_spacing_min"
+                type="number"
+                min="0.001"
+                step="0.001"
+                value="6"
+                disabled
+              />
+            </div>
+            <div class="field-group">
+              <label for="fillSpacingMax">Max line spacing (mm)</label>
+              <input
+                id="fillSpacingMax"
+                name="fill_pattern_spacing_max"
+                type="number"
+                min="0.001"
+                step="0.001"
+                value="12"
+                disabled
+              />
+            </div>
+            <div class="field-group">
               <label for="fillAngle">Angle shift</label>
               <input id="fillAngle" name="fill_pattern_angle" type="number" min="-180" max="180" step="1" value="0" />
             </div>
