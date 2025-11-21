@@ -1532,6 +1532,8 @@ class ArcGroup {
         patternType,
         rectWidth,
         patternStrokeWidth,
+        patternOffset: offsetForSegments,
+        patternSpacing: spacingForSegments,
       });
       return;
     }
@@ -1644,13 +1646,16 @@ function buildContinuousPathsFromArcs(arcs, tol = 1e-6) {
 // ------------------------------------------------------------
 
 class DrawingContext {
-  constructor(width = 800, height = null, units = '') {
+  constructor(width = 800, height = null, units = '', { patternFillRendering = 'lines' } = {}) {
     const resolvedWidth = Number.isFinite(width) ? width : 800;
     const resolvedHeight = Number.isFinite(height) ? height : resolvedWidth;
     this.width = resolvedWidth;
     this.height = resolvedHeight;
     this.units = typeof units === 'string' ? units : '';
     this.scaleFactor = 1;
+    this.patternFillRendering = patternFillRendering === 'pattern' ? 'pattern' : 'lines';
+    this._patternDefinitionCache = new Map();
+    this._patternIdCounter = 0;
     this.hasDOM = typeof document !== 'undefined' && !!document.createElementNS;
     if (this.hasDOM) {
       this.svg = document.createElementNS(SVG_NS, 'svg');
@@ -1725,6 +1730,61 @@ class DrawingContext {
       .map(([key, value]) => `${key}="${String(value)}"`)
       .join(' ');
     target.push(`<${tag}${attrString ? ` ${attrString}` : ''} />`);
+  }
+
+  _ensureLinePattern({ spacing, strokeWidth, angleDeg, offset, color }) {
+    const spacingValue = Math.max(0.001, Math.abs(spacing));
+    const strokeValue = Math.max(0, Number.isFinite(strokeWidth) ? strokeWidth : 0);
+    const angleValue = Number.isFinite(angleDeg) ? angleDeg : 0;
+    const offsetValue = Number.isFinite(offset) ? offset : 0;
+    const strokeColor = color || '#000000';
+    const key = [
+      'lines',
+      spacingValue.toFixed(4),
+      strokeValue.toFixed(4),
+      angleValue.toFixed(4),
+      offsetValue.toFixed(4),
+      strokeColor,
+    ].join(':');
+    const existing = this._patternDefinitionCache.get(key);
+    if (existing) {
+      return existing;
+    }
+
+    this._patternIdCounter += 1;
+    const patternId = `pattern-${this._patternIdCounter}`;
+    const spacingStr = spacingValue.toFixed(4);
+    const offsetStr = offsetValue.toFixed(4);
+    const strokeStr = strokeValue.toFixed(4);
+    const transform = `translate(${offsetStr},0) rotate(${angleValue.toFixed(4)})`;
+
+    if (this.hasDOM) {
+      const pattern = document.createElementNS(SVG_NS, 'pattern');
+      pattern.setAttribute('id', patternId);
+      pattern.setAttribute('patternUnits', 'userSpaceOnUse');
+      pattern.setAttribute('width', spacingStr);
+      pattern.setAttribute('height', spacingStr);
+      pattern.setAttribute('patternTransform', transform);
+
+      const line = document.createElementNS(SVG_NS, 'line');
+      line.setAttribute('x1', '0');
+      line.setAttribute('y1', '0');
+      line.setAttribute('x2', '0');
+      line.setAttribute('y2', spacingStr);
+      line.setAttribute('stroke', strokeColor);
+      line.setAttribute('stroke-width', strokeStr);
+      line.setAttribute('stroke-linecap', 'round');
+
+      pattern.appendChild(line);
+      this.defs.appendChild(pattern);
+    } else if (this._virtualDefs) {
+      const lineEl = `<line x1="0" y1="0" x2="0" y2="${spacingStr}" stroke="${strokeColor}" stroke-width="${strokeStr}" stroke-linecap="round" />`;
+      const patternEl = `<pattern id="${patternId}" patternUnits="userSpaceOnUse" width="${spacingStr}" height="${spacingStr}" patternTransform="${transform}">${lineEl}</pattern>`;
+      this._virtualDefs.push(patternEl);
+    }
+
+    this._patternDefinitionCache.set(key, patternId);
+    return patternId;
   }
 
   drawScaledCircle(circle, { color = '#4CB39B', opacity = 0.8 } = {}) {
@@ -1869,6 +1929,8 @@ class DrawingContext {
     patternType = 'lines',
     rectWidth = 2,
     patternStrokeWidth = 0.5,
+    patternOffset = 0,
+    patternSpacing = null,
   } = {}) {
     if (!points || !points.length) {
       return;
@@ -1978,12 +2040,13 @@ class DrawingContext {
           lineOffset,
         );
       }
+      const patternStyle = patternType === 'rectangles' ? 'rectangles' : 'lines';
+      const prefersPatternFill = this.patternFillRendering === 'pattern';
       if (outlineSegments) {
         emitOutlineSegments(outlineSegments, stroke);
       }
       if (segmentsToDraw && segmentsToDraw.length) {
         const lineColor = stroke || '#000000';
-        const patternStyle = patternType === 'rectangles' ? 'rectangles' : 'lines';
         if (patternStyle === 'rectangles') {
           const widthValue = Number.isFinite(rectWidth) ? Math.abs(rectWidth) : 0;
           const scale = this.scaleFactor > 0 ? this.scaleFactor : 1;
@@ -2030,30 +2093,52 @@ class DrawingContext {
               }
             }
           }
-        } else {
-          if (patternStroke > 0) {
-            for (const [p1, p2] of segmentsToDraw) {
-              if (!this.hasDOM) {
-                this._pushVirtual('line', {
-                  x1: p1.x.toFixed(4),
-                  y1: p1.y.toFixed(4),
-                  x2: p2.x.toFixed(4),
-                  y2: p2.y.toFixed(4),
-                  stroke: lineColor,
-                  'stroke-width': patternStrokeStr,
-                  'stroke-linecap': 'round',
-                });
-              } else {
-                const line = document.createElementNS(SVG_NS, 'line');
-                line.setAttribute('x1', p1.x.toFixed(4));
-                line.setAttribute('y1', p1.y.toFixed(4));
-                line.setAttribute('x2', p2.x.toFixed(4));
-                line.setAttribute('y2', p2.y.toFixed(4));
-                line.setAttribute('stroke', lineColor);
-                line.setAttribute('stroke-width', patternStrokeStr);
-                line.setAttribute('stroke-linecap', 'round');
-                this.mainGroup.appendChild(line);
-              }
+        } else if (prefersPatternFill && patternStroke > 0) {
+          const outlinePath = buildPathData(scaled);
+          const patternId = this._ensureLinePattern({
+            spacing: patternSpacing ?? linePatternSettings[0],
+            strokeWidth: patternStroke,
+            angleDeg: linePatternSettings[1],
+            offset: patternOffset ?? lineOffset,
+            color: lineColor,
+          });
+          const fillAttributes = {
+            d: outlinePath,
+            fill: `url(#${patternId})`,
+            'fill-opacity': fillOpacity.toString(),
+            stroke: 'none',
+          };
+          if (!this.hasDOM) {
+            this._pushVirtual('path', fillAttributes);
+          } else {
+            const path = document.createElementNS(SVG_NS, 'path');
+            for (const [key, value] of Object.entries(fillAttributes)) {
+              path.setAttribute(key, value);
+            }
+            this.mainGroup.appendChild(path);
+          }
+        } else if (patternStroke > 0) {
+          for (const [p1, p2] of segmentsToDraw) {
+            if (!this.hasDOM) {
+              this._pushVirtual('line', {
+                x1: p1.x.toFixed(4),
+                y1: p1.y.toFixed(4),
+                x2: p2.x.toFixed(4),
+                y2: p2.y.toFixed(4),
+                stroke: lineColor,
+                'stroke-width': patternStrokeStr,
+                'stroke-linecap': 'round',
+              });
+            } else {
+              const line = document.createElementNS(SVG_NS, 'line');
+              line.setAttribute('x1', p1.x.toFixed(4));
+              line.setAttribute('y1', p1.y.toFixed(4));
+              line.setAttribute('x2', p2.x.toFixed(4));
+              line.setAttribute('y2', p2.y.toFixed(4));
+              line.setAttribute('stroke', lineColor);
+              line.setAttribute('stroke-width', patternStrokeStr);
+              line.setAttribute('stroke-linecap', 'round');
+              this.mainGroup.appendChild(line);
             }
           }
         }
@@ -3039,7 +3124,12 @@ class DoyleSpiralEngine {
     const resolvedHeight = Number.isFinite(boundingBoxHeight) && boundingBoxHeight > 0
       ? boundingBoxHeight
       : fallbackSize;
-    const context = new DrawingContext(resolvedWidth, resolvedHeight, lengthUnits);
+    const context = new DrawingContext(
+      resolvedWidth,
+      resolvedHeight,
+      lengthUnits,
+      { patternFillRendering: opts.preview_pattern_fill ? 'pattern' : 'lines' },
+    );
     this.arcGroups.clear();
 
     if (mode === 'doyle') {
@@ -3168,6 +3258,7 @@ function normaliseParams(params = {}) {
     max_d: Number(params.max_d ?? 2000),
     bounding_box_width_mm: boundingWidthMm,
     bounding_box_height_mm: boundingHeightMm,
+    preview_pattern_fill: Boolean(params.preview_pattern_fill ?? false),
   };
 }
 
