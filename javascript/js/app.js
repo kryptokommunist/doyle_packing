@@ -27,6 +27,7 @@ const threeStats = document.getElementById('threeStats');
 const fileInput = document.getElementById('threeFileInput');
 const exportButton = document.getElementById('exportSvgButton');
 const exportFilenameInput = document.getElementById('exportFilename');
+const animationModeSelect = document.getElementById('threeAnimationMode');
 
 const DEFAULTS = {
   p: 16,
@@ -264,6 +265,7 @@ function ensureThreeApp() {
       metalnessValue,
       roughness,
       roughnessValue,
+      animationModeSelect,
       reloadButton: reloadGeometry,
       loadJsonButton: loadJson,
       resetCameraButton: resetCamera,
