@@ -549,79 +549,116 @@ function sanitisePolygonPoints(points, tolerance = 1e-9) {
 }
 
 function insetPolygon(points, offset) {
+  const base = sanitisePolygonPoints(points);
   if (!offset || offset <= 0) {
-    return sanitisePolygonPoints(points);
+    return base;
   }
 
-  const base = sanitisePolygonPoints(points);
   if (base.length < 3) {
     return [];
   }
 
   const orientation = polygonSignedArea(base) >= 0 ? 1 : -1;
-  const insetPoints = [];
-  const count = base.length;
 
-  for (let i = 0; i < count; i += 1) {
-    const prev = base[(i - 1 + count) % count];
-    const curr = base[i];
-    const next = base[(i + 1) % count];
-
-    const prevDir = normaliseVector({ x: curr.x - prev.x, y: curr.y - prev.y });
-    const nextDir = normaliseVector({ x: next.x - curr.x, y: next.y - curr.y });
-
-    let normalPrev = prevDir ? inwardNormal(prevDir, orientation) : null;
-    let normalNext = nextDir ? inwardNormal(nextDir, orientation) : null;
-
-    if (!normalPrev && !normalNext) {
-      insetPoints.push({ x: curr.x, y: curr.y });
-      continue;
+  const attemptInset = (distance) => {
+    if (!distance || distance <= 0) {
+      return base;
     }
 
-    if (!normalPrev) {
-      normalPrev = normalNext;
-    }
-    if (!normalNext) {
-      normalNext = normalPrev;
-    }
+    const insetPoints = [];
+    const count = base.length;
 
-    const dir1 = prevDir || nextDir || { x: 1, y: 0 };
-    const dir2 = nextDir || prevDir || { x: 0, y: 1 };
+    for (let i = 0; i < count; i += 1) {
+      const prev = base[(i - 1 + count) % count];
+      const curr = base[i];
+      const next = base[(i + 1) % count];
 
-    const shiftedPrev = {
-      x: curr.x + normalPrev.x * offset,
-      y: curr.y + normalPrev.y * offset,
-    };
-    const shiftedNext = {
-      x: curr.x + normalNext.x * offset,
-      y: curr.y + normalNext.y * offset,
-    };
+      const prevDir = normaliseVector({ x: curr.x - prev.x, y: curr.y - prev.y });
+      const nextDir = normaliseVector({ x: next.x - curr.x, y: next.y - curr.y });
 
-    const intersection = intersectLines(shiftedPrev, dir1, shiftedNext, dir2);
-    if (intersection) {
-      insetPoints.push(intersection);
-    } else {
-      const avg = normaliseVector({
-        x: normalPrev.x + normalNext.x,
-        y: normalPrev.y + normalNext.y,
-      });
-      if (avg) {
-        insetPoints.push({
-          x: curr.x + avg.x * offset,
-          y: curr.y + avg.y * offset,
+      let normalPrev = prevDir ? inwardNormal(prevDir, orientation) : null;
+      let normalNext = nextDir ? inwardNormal(nextDir, orientation) : null;
+
+      if (!normalPrev && !normalNext) {
+        insetPoints.push({ x: curr.x, y: curr.y });
+        continue;
+      }
+
+      if (!normalPrev) {
+        normalPrev = normalNext;
+      }
+      if (!normalNext) {
+        normalNext = normalPrev;
+      }
+
+      const dir1 = prevDir || nextDir || { x: 1, y: 0 };
+      const dir2 = nextDir || prevDir || { x: 0, y: 1 };
+
+      const shiftedPrev = {
+        x: curr.x + normalPrev.x * distance,
+        y: curr.y + normalPrev.y * distance,
+      };
+      const shiftedNext = {
+        x: curr.x + normalNext.x * distance,
+        y: curr.y + normalNext.y * distance,
+      };
+
+      const intersection = intersectLines(shiftedPrev, dir1, shiftedNext, dir2);
+      if (intersection) {
+        insetPoints.push(intersection);
+      } else {
+        const avg = normaliseVector({
+          x: normalPrev.x + normalNext.x,
+          y: normalPrev.y + normalNext.y,
         });
+        if (avg) {
+          insetPoints.push({
+            x: curr.x + avg.x * distance,
+            y: curr.y + avg.y * distance,
+          });
+        }
       }
     }
+
+    const cleaned = sanitisePolygonPoints(insetPoints);
+    if (cleaned.length < 3) {
+      return null;
+    }
+    if (Math.abs(polygonSignedArea(cleaned)) < 1e-6) {
+      return null;
+    }
+    return cleaned;
+  };
+
+  let best = base;
+  let low = 0;
+  let high = offset;
+  const maxIterations = 18;
+  const tolerance = Math.max(1e-6, offset * 1e-4);
+
+  for (let attempt = 0; attempt < maxIterations; attempt += 1) {
+    const distance = attempt === 0 ? high : (low + high) / 2;
+    if (distance <= 0) {
+      break;
+    }
+
+    const result = attemptInset(distance);
+    if (result) {
+      best = result;
+      low = distance;
+      if (Math.abs(distance - offset) <= tolerance) {
+        break;
+      }
+    } else {
+      high = distance;
+    }
+
+    if (high - low <= tolerance) {
+      break;
+    }
   }
 
-  const cleaned = sanitisePolygonPoints(insetPoints);
-  if (cleaned.length < 3) {
-    return [];
-  }
-  if (Math.abs(polygonSignedArea(cleaned)) < 1e-6) {
-    return [];
-  }
-  return cleaned;
+  return best;
 }
 
 function estimateArcSteps(circle, start, end) {
