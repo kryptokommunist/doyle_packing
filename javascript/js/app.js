@@ -100,6 +100,20 @@ function downloadCurrentSvg() {
   }
 
   let svgContent = lastRender.svgString || '';
+  try {
+    const exportParams = lastRender?.params ? { ...lastRender.params } : collectParams();
+    const modeOverride = lastRender?.mode || null;
+    const exportResult = renderSpiral({
+      ...exportParams,
+      use_pattern_fill_background: false,
+    }, modeOverride);
+    if (exportResult && typeof exportResult.svgString === 'string' && exportResult.svgString.trim()) {
+      svgContent = exportResult.svgString;
+    }
+  } catch (error) {
+    console.error('Export render failed, falling back to current SVG', error);
+  }
+
   if (!svgContent) {
     const svgElement = svgPreview.querySelector('svg');
     if (svgElement) {
@@ -344,6 +358,7 @@ function handleRenderFailure(message) {
 }
 
 function startRenderJob(params, showLoading) {
+  const paramsForRender = { ...params, use_pattern_fill_background: true };
   const token = ++currentRenderToken;
   const statusMessage = showLoading ? 'Rendering spiral…' : 'Updating spiral…';
   setStatus(statusMessage, 'loading');
@@ -410,7 +425,7 @@ function startRenderJob(params, showLoading) {
       handleRenderFailure(message);
     };
 
-    worker.postMessage({ type: 'render', requestId: token, params });
+    worker.postMessage({ type: 'render', requestId: token, params: paramsForRender });
     return;
   }
 
@@ -420,7 +435,7 @@ function startRenderJob(params, showLoading) {
     }
     activeRenderJob = null;
     try {
-      const result = renderSpiral(params);
+      const result = renderSpiral(paramsForRender);
       handleRenderSuccess(result);
     } catch (error) {
       console.error(error);
