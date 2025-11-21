@@ -86,6 +86,40 @@
       gap: 0.6rem;
     }
 
+    .advanced-settings {
+      border: 1px solid var(--panel-border);
+      border-radius: 1rem;
+      padding: 0.9rem 1rem;
+      background: rgba(255, 255, 255, 0.7);
+    }
+
+    .advanced-settings summary {
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      font-weight: 700;
+      letter-spacing: 0.01em;
+      list-style: none;
+      color: var(--text-strong);
+    }
+
+    .advanced-settings summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .advanced-settings .advanced-settings-content {
+      margin-top: 0.85rem;
+      display: grid;
+      gap: 0.85rem;
+    }
+
+    .advanced-settings .hint {
+      color: var(--text-muted);
+      font-size: 0.85rem;
+      line-height: 1.5;
+    }
+
     label {
       font-size: 0.78rem;
       text-transform: uppercase;
@@ -616,6 +650,25 @@
               />
             </div>
           </div>
+
+          <details class="advanced-settings">
+            <summary>Advanced settings</summary>
+            <div class="advanced-settings-content">
+              <div class="field-group">
+                <label for="renderTimeoutSeconds">Render timeout (seconds)</label>
+                <input
+                  id="renderTimeoutSeconds"
+                  name="render_timeout_seconds"
+                  type="number"
+                  min="5"
+                  max="300"
+                  step="5"
+                  value="30"
+                />
+                <p class="hint">Large renders can be cancelled automatically. Increase this limit for complex spirals or reduce it to keep the UI responsive.</p>
+              </div>
+            </div>
+          </details>
 
           <div class="status" id="statusMessage">Adjust parameters and the spiral will render automatically.</div>
 
