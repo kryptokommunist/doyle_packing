@@ -1,5 +1,6 @@
 import { renderSpiral, normaliseParams } from './doyle_spiral_engine.js';
 import { createThreeViewer } from './three_viewer.js';
+import { createArcAnimationController } from './animations.js';
 
 const form = document.getElementById('controlsForm');
 const statusEl = document.getElementById('statusMessage');
@@ -16,6 +17,13 @@ const fillPatternTypeSelect = document.getElementById('fillPatternType');
 const fillRectWidthGroup = document.getElementById('rectWidthGroup');
 const outlineToggle = document.getElementById('toggleOutline');
 const redToggle = document.getElementById('toggleRed');
+const animationSelect = document.getElementById('animationSelect');
+const animationPlayButton = document.getElementById('animationPlay');
+const animationPauseButton = document.getElementById('animationPause');
+const animationResetButton = document.getElementById('animationReset');
+const animationSpeed = document.getElementById('animationSpeed');
+const animationSpeedValue = document.getElementById('animationSpeedValue');
+const animationStatus = document.getElementById('animationStatus');
 const viewButtons = Array.from(document.querySelectorAll('[data-view]'));
 const view2d = document.getElementById('view2d');
 const view3d = document.getElementById('view3d');
@@ -26,6 +34,16 @@ const threeStats = document.getElementById('threeStats');
 const fileInput = document.getElementById('threeFileInput');
 const exportButton = document.getElementById('exportSvgButton');
 const exportFilenameInput = document.getElementById('exportFilename');
+
+const arcAnimationController = createArcAnimationController({
+  select: animationSelect,
+  playButton: animationPlayButton,
+  pauseButton: animationPauseButton,
+  resetButton: animationResetButton,
+  speedSlider: animationSpeed,
+  speedValue: animationSpeedValue,
+  statusElement: animationStatus,
+});
 
 const DEFAULTS = {
   p: 16,
@@ -299,6 +317,10 @@ function handleRenderSuccess(result) {
   setStatus('Spiral updated. Switch views to explore it in 3D.');
   updateExportAvailability(true);
 
+  if (arcAnimationController) {
+    arcAnimationController.setScene(svgElement, geometry, mode);
+  }
+
   if (threeApp) {
     if (geometry) {
       threeApp.useGeometryFromPayload(params, geometry);
@@ -314,6 +336,9 @@ function handleRenderFailure(message) {
   setStatus(message || 'Unexpected error', 'error');
   lastRender = null;
   updateExportAvailability(false);
+  if (arcAnimationController) {
+    arcAnimationController.setScene(null, null, null);
+  }
 }
 
 function startRenderJob(params, showLoading) {
