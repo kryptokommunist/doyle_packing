@@ -99,12 +99,19 @@ function downloadCurrentSvg() {
     return;
   }
 
-  let svgContent = lastRender.svgString || '';
-  if (!svgContent) {
-    const svgElement = svgPreview.querySelector('svg');
-    if (svgElement) {
-      svgContent = new XMLSerializer().serializeToString(svgElement);
-    }
+  const exportParams = lastRender.params
+    ? { ...lastRender.params, preview_pattern_fill: false }
+    : { ...collectParams(), preview_pattern_fill: false };
+  const exportMode = lastRender.mode || exportParams.mode;
+
+  let svgContent = '';
+  try {
+    const exportResult = renderSpiral(exportParams, exportMode);
+    svgContent = exportResult.svgString || '';
+  } catch (error) {
+    console.error(error);
+    setStatus('Unable to generate an export-ready SVG.', 'error');
+    return;
   }
 
   if (!svgContent) {
@@ -431,7 +438,7 @@ function startRenderJob(params, showLoading) {
 }
 
 function renderCurrentSpiral(showLoading = true) {
-  const params = collectParams();
+  const params = { ...collectParams(), preview_pattern_fill: true };
   startRenderJob(params, showLoading);
 }
 
