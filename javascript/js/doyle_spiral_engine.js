@@ -1482,6 +1482,7 @@ class ArcGroup {
     patternOffsetOverride = null,
     outlineStrokeWidth = 0.6,
     patternStrokeWidth = 0.5,
+    patternRenderMode = 'background',
   } = {}) {
     const outline = this.getClosedOutline();
     if (!outline.length) {
@@ -1532,6 +1533,9 @@ class ArcGroup {
         patternType,
         rectWidth,
         patternStrokeWidth,
+        patternRenderMode,
+        patternSpacingOverride: patternSpacingOverride,
+        patternOffsetOverride: patternOffsetOverride,
       });
       return;
     }
@@ -1669,6 +1673,7 @@ class DrawingContext {
       this._virtualDefs = [];
       this._virtualMain = [];
     }
+    this._patternDefinitionCache = new Map();
   }
 
   setNormalizationScale(elements) {
@@ -1725,6 +1730,63 @@ class DrawingContext {
       .map(([key, value]) => `${key}="${String(value)}"`)
       .join(' ');
     target.push(`<${tag}${attrString ? ` ${attrString}` : ''} />`);
+  }
+
+  _ensureLinePattern(spacing, angleDeg, offset, stroke, strokeWidthStr) {
+    const safeSpacing = Math.max(1e-6, Math.abs(Number(spacing) || 0));
+    const normalizedAngle = Number.isFinite(angleDeg) ? angleDeg : 0;
+    const normalizedOffset = Number.isFinite(offset) ? offset : 0;
+    const strokeColor = stroke || '#000000';
+    const key = [
+      safeSpacing.toFixed(6),
+      normalizedAngle.toFixed(6),
+      normalizedOffset.toFixed(6),
+      strokeColor,
+      strokeWidthStr,
+    ].join('|');
+    const cached = this._patternDefinitionCache.get(key);
+    if (cached) {
+      return cached;
+    }
+    const id = `linefill_${this._patternDefinitionCache.size + 1}`;
+    const transformParts = [];
+    if (Math.abs(normalizedOffset) > 1e-6) {
+      transformParts.push(`translate(0 ${normalizedOffset.toFixed(4)})`);
+    }
+    if (Math.abs(normalizedAngle % 360) > 1e-9) {
+      transformParts.push(`rotate(${normalizedAngle.toFixed(4)})`);
+    }
+    const transformAttr = transformParts.length ? transformParts.join(' ') : '';
+
+    if (!this.hasDOM) {
+      const transformSnippet = transformAttr ? ` patternTransform="${transformAttr}"` : '';
+      const pattern = `<pattern id="${id}" patternUnits="userSpaceOnUse" width="${safeSpacing.toFixed(4)}" height="${safeSpacing.toFixed(4)}"${transformSnippet}>`
+        + `<line x1="0" y1="0" x2="${safeSpacing.toFixed(4)}" y2="0" stroke="${strokeColor}" stroke-width="${strokeWidthStr}" stroke-linecap="round" />`
+        + `</pattern>`;
+      this._virtualDefs.push(pattern);
+    } else {
+      const patternEl = document.createElementNS(SVG_NS, 'pattern');
+      patternEl.setAttribute('id', id);
+      patternEl.setAttribute('patternUnits', 'userSpaceOnUse');
+      patternEl.setAttribute('width', safeSpacing.toFixed(4));
+      patternEl.setAttribute('height', safeSpacing.toFixed(4));
+      if (transformAttr) {
+        patternEl.setAttribute('patternTransform', transformAttr);
+      }
+      const line = document.createElementNS(SVG_NS, 'line');
+      line.setAttribute('x1', '0');
+      line.setAttribute('y1', '0');
+      line.setAttribute('x2', safeSpacing.toFixed(4));
+      line.setAttribute('y2', '0');
+      line.setAttribute('stroke', strokeColor);
+      line.setAttribute('stroke-width', strokeWidthStr);
+      line.setAttribute('stroke-linecap', 'round');
+      patternEl.appendChild(line);
+      this.defs.appendChild(patternEl);
+    }
+
+    this._patternDefinitionCache.set(key, id);
+    return id;
   }
 
   drawScaledCircle(circle, { color = '#4CB39B', opacity = 0.8 } = {}) {
@@ -1869,6 +1931,9 @@ class DrawingContext {
     patternType = 'lines',
     rectWidth = 2,
     patternStrokeWidth = 0.5,
+    patternRenderMode = 'background',
+    patternSpacingOverride = null,
+    patternOffsetOverride = null,
   } = {}) {
     if (!points || !points.length) {
       return;
@@ -1962,6 +2027,53 @@ class DrawingContext {
     const outlineSegments = shouldDrawOutlineSegments
       ? createOutlineSegments(scaled)
       : null;
+
+    const patternStyle = patternType === 'rectangles' ? 'rectangles' : 'lines';
+    const useBackgroundPattern =
+      fill === 'pattern'
+      && patternRenderMode === 'background'
+      && patternStyle === 'lines';
+
+    if (useBackgroundPattern) {
+      const spacingRaw = Array.isArray(linePatternSettings) && linePatternSettings.length
+        ? Number(linePatternSettings[0])
+        : null;
+      const angleDeg = Array.isArray(linePatternSettings) && linePatternSettings.length > 1
+        ? Number(linePatternSettings[1])
+        : 0;
+      const spacing = Number.isFinite(patternSpacingOverride)
+        ? Math.max(0, patternSpacingOverride) * this.scaleFactor
+        : Number.isFinite(spacingRaw)
+          ? Math.max(0, spacingRaw)
+          : 0;
+      const offset = Number.isFinite(patternOffsetOverride)
+        ? patternOffsetOverride * this.scaleFactor
+        : Number.isFinite(lineOffset)
+          ? lineOffset
+          : 0;
+      if (spacing > 0 && patternStroke > 0) {
+        const patternId = this._ensureLinePattern(spacing, angleDeg, offset, stroke, patternStrokeStr);
+        const pathData = buildPathData(scaled);
+        const pathAttributes = {
+          d: pathData,
+          fill: `url(#${patternId})`,
+          stroke: 'none',
+        };
+        if (!this.hasDOM) {
+          this._pushVirtual('path', pathAttributes);
+        } else {
+          const path = document.createElementNS(SVG_NS, 'path');
+          for (const [key, value] of Object.entries(pathAttributes)) {
+            path.setAttribute(key, value);
+          }
+          this.mainGroup.appendChild(path);
+        }
+      }
+      if (outlineSegments) {
+        emitOutlineSegments(outlineSegments, stroke);
+      }
+      return;
+    }
 
     if (fill === 'pattern') {
       let segmentsToDraw = null;
@@ -2867,6 +2979,7 @@ class DoyleSpiralEngine {
     highlightRimWidth = 1.2,
     groupOutlineWidth = 0.6,
     patternStrokeWidth = 0.5,
+    patternRenderMode = 'background',
   } = {}) {
     this.generateOuterCircles();
     this.computeAllIntersections();
@@ -2977,6 +3090,7 @@ class DoyleSpiralEngine {
           patternOffsetOverride: offsetForGroups,
           outlineStrokeWidth: outlineStrokeWidth,
           patternStrokeWidth: patternStroke,
+          patternRenderMode,
         });
       }
     }
@@ -3028,6 +3142,7 @@ class DoyleSpiralEngine {
     boundingBoxWidth = null,
     boundingBoxHeight = null,
     lengthUnits = '',
+    patternRenderMode = 'background',
   } = {}) {
     if (!this._generated) {
       this.generateCircles();
@@ -3061,6 +3176,7 @@ class DoyleSpiralEngine {
         highlightRimWidth,
         groupOutlineWidth,
         patternStrokeWidth,
+        patternRenderMode,
       });
       return {
         svg: context.toElement(),
@@ -3124,6 +3240,10 @@ function normaliseParams(params = {}) {
     ? params.fill_pattern_type.toLowerCase()
     : 'lines';
   const fillPatternType = patternTypeRaw === 'rectangles' ? 'rectangles' : 'lines';
+  const patternRenderModeRaw = typeof params.pattern_render_mode === 'string'
+    ? params.pattern_render_mode.toLowerCase()
+    : 'background';
+  const patternRenderMode = patternRenderModeRaw === 'segments' ? 'segments' : 'background';
   const spacingRaw = Number(params.fill_pattern_spacing ?? 8);
   const offsetRaw = Number(params.fill_pattern_offset ?? 0);
   const rectWidthValue = Number(params.fill_pattern_rect_width ?? 2);
@@ -3168,6 +3288,7 @@ function normaliseParams(params = {}) {
     max_d: Number(params.max_d ?? 2000),
     bounding_box_width_mm: boundingWidthMm,
     bounding_box_height_mm: boundingHeightMm,
+    pattern_render_mode: patternRenderMode,
   };
 }
 
@@ -3197,6 +3318,7 @@ function renderSpiral(params = {}, overrideMode = null) {
     boundingBoxWidth: opts.bounding_box_width_mm,
     boundingBoxHeight: opts.bounding_box_height_mm,
     lengthUnits: 'mm',
+    patternRenderMode: opts.pattern_render_mode,
   });
   return {
     engine,
