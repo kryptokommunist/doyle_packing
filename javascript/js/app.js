@@ -45,6 +45,7 @@ const DEFAULTS = {
   fill_pattern_offset: 0,
   fill_pattern_type: 'lines',
   fill_pattern_rect_width: 2,
+  fill_pattern_animation: 'radial_bloom',
   highlight_rim_width: 1.2,
   group_outline_width: 0.6,
   pattern_stroke_width: 0.5,

@@ -170,10 +170,21 @@ function createThreeViewer({
     }
     clearSpiral();
     data.arcgroups.forEach(group => {
-      const mesh = createPolygonMesh(group.outline || [], group.ring_index, group.line_angle);
-      if (mesh) {
-        spiralContainer.add(mesh);
-      }
+      const patternAngles = Array.isArray(group.line_patterns) && group.line_patterns.length
+        ? group.line_patterns.slice(0, 3)
+        : [group.line_angle];
+      patternAngles.forEach((angle, index) => {
+        const mesh = createPolygonMesh(group.outline || [], group.ring_index, angle);
+        if (mesh) {
+          mesh.userData.patternIndex = index;
+          if (index > 0) {
+            mesh.position.z += 0.02 * index;
+            mesh.material.transparent = true;
+            mesh.material.opacity = Math.max(0.65, 1 - index * 0.15);
+          }
+          spiralContainer.add(mesh);
+        }
+      });
     });
     if (spiralContainer.children.length) {
       const box = new THREE.Box3().setFromObject(spiralContainer);
