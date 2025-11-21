@@ -714,6 +714,45 @@ function findLinePolygonIntersections(start, end, polygon, lineDir, orientation)
   return intersections;
 }
 
+function ensureInsetPolygon(polygonPoints, offset = 0) {
+  const base = sanitisePolygonPoints(polygonPoints);
+  if (!base || base.length < 3) {
+    return { polygon: [], offset: 0 };
+  }
+
+  const desiredOffset = Number.isFinite(offset) ? Math.max(0, offset) : 0;
+  if (desiredOffset <= 1e-9) {
+    return { polygon: base, offset: 0 };
+  }
+
+  let inset = insetPolygon(base, desiredOffset);
+  if (inset && inset.length >= 3 && Math.abs(polygonSignedArea(inset)) >= 1e-6) {
+    return { polygon: inset, offset: desiredOffset };
+  }
+
+  let low = 0;
+  let high = desiredOffset;
+  let bestPolygon = base;
+  let bestOffset = 0;
+
+  for (let iteration = 0; iteration < 24 && high - low > 1e-6; iteration += 1) {
+    const mid = (low + high) / 2;
+    if (mid <= 1e-9) {
+      break;
+    }
+    inset = insetPolygon(base, mid);
+    if (inset && inset.length >= 3 && Math.abs(polygonSignedArea(inset)) >= 1e-6) {
+      bestPolygon = inset;
+      bestOffset = mid;
+      low = mid;
+    } else {
+      high = mid;
+    }
+  }
+
+  return { polygon: bestPolygon, offset: bestOffset };
+}
+
 function linesInPolygon(polygonPoints, spacing, angleDeg, offset = 0) {
   if (!polygonPoints || polygonPoints.length < 3) {
     return [];
@@ -724,7 +763,7 @@ function linesInPolygon(polygonPoints, spacing, angleDeg, offset = 0) {
     return [];
   }
 
-  const working = insetPolygon(polygonPoints, offset);
+  const { polygon: working } = ensureInsetPolygon(polygonPoints, offset);
   if (!working || working.length < 3) {
     return [];
   }
