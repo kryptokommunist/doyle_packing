@@ -99,11 +99,21 @@ function downloadCurrentSvg() {
     return;
   }
 
-  let svgContent = lastRender.svgString || '';
+  const exportParams = { ...collectParams(), pattern_render_mode: 'segments' };
+  let svgContent = '';
+  try {
+    const exportResult = renderSpiral(exportParams);
+    svgContent = exportResult?.svgString || '';
+  } catch (error) {
+    console.error('Export render failed', error);
+  }
+
   if (!svgContent) {
     const svgElement = svgPreview.querySelector('svg');
     if (svgElement) {
       svgContent = new XMLSerializer().serializeToString(svgElement);
+    } else if (lastRender.svgString) {
+      svgContent = lastRender.svgString;
     }
   }
 
