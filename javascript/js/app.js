@@ -10,6 +10,7 @@ const statPolygons = document.getElementById('statPolygons');
 const statMode = document.getElementById('statMode');
 const tRange = document.getElementById('inputT');
 const tValue = document.getElementById('tValue');
+const renderTimeoutInput = document.getElementById('renderTimeoutSeconds');
 const fillToggle = document.getElementById('togglePattern');
 const fillSettings = document.getElementById('fillSettings');
 const fillPatternTypeSelect = document.getElementById('fillPatternType');
@@ -57,7 +58,11 @@ const workerSupported = typeof Worker !== 'undefined';
 const renderWorkerURL = workerSupported ? new URL('./render_worker.js', import.meta.url) : null;
 let renderWorkerHandle = null;
 let currentRenderToken = 0;
+let activeRenderJob = null;
 const svgParser = typeof DOMParser !== 'undefined' ? new DOMParser() : null;
+const DEFAULT_RENDER_TIMEOUT_MS = 30000;
+const MIN_RENDER_TIMEOUT_MS = 5000;
+const MAX_RENDER_TIMEOUT_MS = 300000;
 
 function sanitiseFileName(name) {
   return name.replace(/[\\/:*?"<>|]+/g, '-');
@@ -76,6 +81,15 @@ function updateExportAvailability(available) {
   if (exportButton) {
     exportButton.disabled = !available;
   }
+}
+
+function getRenderTimeoutMs() {
+  const secondsRaw = renderTimeoutInput ? Number(renderTimeoutInput.value) : Number.NaN;
+  const seconds = Number.isFinite(secondsRaw)
+    ? secondsRaw
+    : DEFAULT_RENDER_TIMEOUT_MS / 1000;
+  const clampedSeconds = Math.min(Math.max(seconds, MIN_RENDER_TIMEOUT_MS / 1000), MAX_RENDER_TIMEOUT_MS / 1000);
+  return clampedSeconds * 1000;
 }
 
 function downloadCurrentSvg() {
@@ -136,6 +150,19 @@ function terminateRenderWorker() {
     renderWorkerHandle.terminate();
     renderWorkerHandle = null;
   }
+}
+
+function cancelActiveRenderJob() {
+  if (activeRenderJob?.type === 'timeout' && activeRenderJob.id) {
+    clearTimeout(activeRenderJob.id);
+  }
+  if (activeRenderJob?.type === 'worker') {
+    terminateRenderWorker();
+  }
+  if (activeRenderJob?.timeoutId) {
+    clearTimeout(activeRenderJob.timeoutId);
+  }
+  activeRenderJob = null;
 }
 
 function materializeSvg(result) {
@@ -320,10 +347,22 @@ function startRenderJob(params, showLoading) {
   const statusMessage = showLoading ? 'Rendering spiral…' : 'Updating spiral…';
   setStatus(statusMessage, 'loading');
 
+  cancelActiveRenderJob();
+
+  const renderTimeoutMs = getRenderTimeoutMs();
+
   if (workerSupported && renderWorkerURL && svgParser) {
-    terminateRenderWorker();
     const worker = new Worker(renderWorkerURL, { type: 'module' });
     renderWorkerHandle = worker;
+    const watchdogId = setTimeout(() => {
+      if (activeRenderJob?.handle === worker) {
+        terminateRenderWorker();
+        activeRenderJob = null;
+        const timeoutSeconds = Math.round(renderTimeoutMs / 100) / 10;
+        handleRenderFailure(`Render cancelled for exceeding the ${timeoutSeconds}s time limit. Adjust detail or increase the timeout in Advanced settings.`);
+      }
+    }, renderTimeoutMs);
+    activeRenderJob = { type: 'worker', requestId: token, handle: worker, timeoutId: watchdogId };
 
     worker.onmessage = event => {
       const data = event.data || {};
@@ -333,6 +372,12 @@ function startRenderJob(params, showLoading) {
       if (renderWorkerHandle === worker) {
         worker.terminate();
         renderWorkerHandle = null;
+      }
+      if (activeRenderJob?.handle === worker) {
+        if (activeRenderJob.timeoutId) {
+          clearTimeout(activeRenderJob.timeoutId);
+        }
+        activeRenderJob = null;
       }
       if (data.type === 'result') {
         try {
@@ -354,6 +399,12 @@ function startRenderJob(params, showLoading) {
         worker.terminate();
         renderWorkerHandle = null;
       }
+      if (activeRenderJob?.handle === worker) {
+        if (activeRenderJob.timeoutId) {
+          clearTimeout(activeRenderJob.timeoutId);
+        }
+        activeRenderJob = null;
+      }
       console.error(event?.error || message);
       handleRenderFailure(message);
     };
@@ -362,7 +413,11 @@ function startRenderJob(params, showLoading) {
     return;
   }
 
-  setTimeout(() => {
+  const timeoutId = setTimeout(() => {
+    if (token !== currentRenderToken) {
+      return;
+    }
+    activeRenderJob = null;
     try {
       const result = renderSpiral(params);
       handleRenderSuccess(result);
@@ -371,6 +426,7 @@ function startRenderJob(params, showLoading) {
       handleRenderFailure(error.message || 'Unexpected error');
     }
   }, 0);
+  activeRenderJob = { type: 'timeout', requestId: token, id: timeoutId };
 }
 
 function renderCurrentSpiral(showLoading = true) {
