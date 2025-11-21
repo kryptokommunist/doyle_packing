@@ -1,4 +1,4 @@
-import { renderSpiral, normaliseParams } from './doyle_spiral_engine.js';
+import { renderPreview, renderSpiral, normaliseParams } from './doyle_spiral_engine.js';
 import { createThreeViewer } from './three_viewer.js';
 
 const form = document.getElementById('controlsForm');
@@ -8,6 +8,7 @@ const statsBlock = document.getElementById('stats');
 const statArcGroups = document.getElementById('statArcGroups');
 const statPolygons = document.getElementById('statPolygons');
 const statMode = document.getElementById('statMode');
+const statPerformance = document.getElementById('statPerformance');
 const tRange = document.getElementById('inputT');
 const tValue = document.getElementById('tValue');
 const renderTimeoutInput = document.getElementById('renderTimeoutSeconds');
@@ -52,18 +53,61 @@ const DEFAULTS = {
   pattern_stroke_width: 0.5,
 };
 
-let activeView = '2d';
-let lastRender = null;
-let threeApp = null;
 const workerSupported = typeof Worker !== 'undefined';
 const renderWorkerURL = workerSupported ? new URL('./render_worker.js', import.meta.url) : null;
-let renderWorkerHandle = null;
-let currentRenderToken = 0;
-let activeRenderJob = null;
-const svgParser = typeof DOMParser !== 'undefined' ? new DOMParser() : null;
 const DEFAULT_RENDER_TIMEOUT_MS = 30000;
 const MIN_RENDER_TIMEOUT_MS = 5000;
 const MAX_RENDER_TIMEOUT_MS = 300000;
+
+const previewCanvas = document.createElement('canvas');
+previewCanvas.id = 'spiralPreviewCanvas';
+const previewContext = previewCanvas.getContext('2d');
+if (svgPreview) {
+  svgPreview.replaceChildren(previewCanvas);
+  svgPreview.classList.remove('empty-state');
+}
+
+let activeView = '2d';
+let threeApp = null;
+let lastRender = null;
+let renderToken = 0;
+let activeWorker = null;
+let activeTimeout = null;
+
+class PerformanceMeter {
+  constructor(target) {
+    this.target = target;
+    this.lastRenderMs = null;
+    this.lastDrawMs = null;
+    this.initialised = false;
+  }
+
+  start() {
+    this.startedAt = performance.now();
+    this.lastDrawMs = null;
+    this.report('Starting render…');
+  }
+
+  markDraw(durationMs) {
+    this.lastDrawMs = durationMs;
+  }
+
+  finish(renderDurationMs) {
+    this.lastRenderMs = renderDurationMs;
+    const renderText = `${renderDurationMs.toFixed(1)} ms`; 
+    const drawText = this.lastDrawMs !== null ? ` | draw ${this.lastDrawMs.toFixed(1)} ms` : '';
+    this.report(`render ${renderText}${drawText}`);
+    this.initialised = true;
+  }
+
+  report(text) {
+    if (!this.target) return;
+    const display = this.initialised ? text : `warmup: ${text}`;
+    this.target.textContent = display;
+  }
+}
+
+const perfMeter = new PerformanceMeter(statPerformance);
 
 function sanitiseFileName(name) {
   return name.replace(/[\\/:*?"<>|]+/g, '-');
@@ -93,42 +137,6 @@ function getRenderTimeoutMs() {
   return clampedSeconds * 1000;
 }
 
-function downloadCurrentSvg() {
-  if (!lastRender) {
-    setStatus('Render the spiral before downloading.', 'error');
-    return;
-  }
-
-  let svgContent = lastRender.svgString || '';
-  if (!svgContent) {
-    const svgElement = svgPreview.querySelector('svg');
-    if (svgElement) {
-      svgContent = new XMLSerializer().serializeToString(svgElement);
-    }
-  }
-
-  if (!svgContent) {
-    setStatus('Unable to access the rendered SVG for download.', 'error');
-    return;
-  }
-
-  const blob = new Blob([svgContent], { type: 'image/svg+xml;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const filename = getExportFileName();
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
-  setStatus(`SVG downloaded as ${filename}.`);
-}
-
-function hasGeometry(geometry) {
-  return Boolean(geometry && Array.isArray(geometry.arcgroups));
-}
-
 function updateTValue() {
   tValue.textContent = parseFloat(tRange.value).toFixed(2);
 }
@@ -146,39 +154,16 @@ function setStatus(message, state = 'idle') {
   }
 }
 
-function terminateRenderWorker() {
-  if (renderWorkerHandle) {
-    renderWorkerHandle.terminate();
-    renderWorkerHandle = null;
+function updatePatternTypeVisibility() {
+  if (!fillPatternTypeSelect || !fillRectWidthGroup) {
+    return;
   }
+  const showRectangles = fillPatternTypeSelect.value === 'rectangles';
+  fillRectWidthGroup.hidden = !showRectangles;
 }
 
-function cancelActiveRenderJob() {
-  if (activeRenderJob?.type === 'timeout' && activeRenderJob.id) {
-    clearTimeout(activeRenderJob.id);
-  }
-  if (activeRenderJob?.type === 'worker') {
-    terminateRenderWorker();
-  }
-  if (activeRenderJob?.timeoutId) {
-    clearTimeout(activeRenderJob.timeoutId);
-  }
-  activeRenderJob = null;
-}
-
-function materializeSvg(result) {
-  if (result && result.svg) {
-    return result.svg;
-  }
-  if (!result || !result.svgString || !svgParser) {
-    return null;
-  }
-  const doc = svgParser.parseFromString(result.svgString, 'image/svg+xml');
-  const element = doc.documentElement;
-  if (!element || element.nodeName.toLowerCase() !== 'svg') {
-    return null;
-  }
-  return document.importNode(element, true);
+function hasGeometry(geometry) {
+  return Boolean(geometry && Array.isArray(geometry.arcgroups));
 }
 
 function collectParams() {
@@ -191,7 +176,6 @@ function collectParams() {
   raw.draw_group_outline = outlineToggle.checked;
   raw.red_outline = redToggle.checked;
   const params = normaliseParams(raw);
-  // Preserve mode exactly as selected (normaliseParams already handles but ensure string)
   params.mode = raw.mode || params.mode;
   return params;
 }
@@ -204,20 +188,12 @@ function debounce(fn, delay) {
   };
 }
 
-function updatePatternTypeVisibility() {
-  if (!fillPatternTypeSelect || !fillRectWidthGroup) {
-    return;
-  }
-  const showRectangles = fillPatternTypeSelect.value === 'rectangles';
-  fillRectWidthGroup.hidden = !showRectangles;
-}
-
 function pulseSettingsButton() {
   if (!threeSettingsToggle) {
     return;
   }
   threeSettingsToggle.classList.remove('pulse');
-  void threeSettingsToggle.offsetWidth; // trigger reflow
+  void threeSettingsToggle.offsetWidth;
   threeSettingsToggle.classList.add('pulse');
   setTimeout(() => threeSettingsToggle.classList.remove('pulse'), 1200);
 }
@@ -270,7 +246,7 @@ function ensureThreeApp() {
       fileInput,
     },
     geometryFetcher: async params => {
-      const result = renderSpiral({ ...params, mode: 'arram_boyle' }, 'arram_boyle');
+      const result = renderPreview({ ...params, mode: 'arram_boyle' }, 'arram_boyle');
       if (!result.geometry || !Array.isArray(result.geometry.arcgroups)) {
         throw new Error('Geometry generation failed');
       }
@@ -296,146 +272,228 @@ function updateStats(geometry) {
   }
 }
 
-function showSVG(svgElement) {
-  svgElement.setAttribute('width', '100%');
-  svgElement.setAttribute('height', '100%');
-  svgElement.setAttribute('preserveAspectRatio', 'xMidYMid meet');
-  svgPreview.replaceChildren(svgElement);
-  svgPreview.classList.remove('empty-state');
-}
+function drawPreviewToCanvas(geometry, params) {
+  if (!previewCanvas || !previewContext) {
+    return 0;
+  }
+  const start = performance.now();
+  const boundsWidth = params.bounding_box_width_mm || DEFAULTS.bounding_box_width_mm;
+  const boundsHeight = params.bounding_box_height_mm || boundsWidth;
+  const clientWidth = svgPreview.clientWidth || boundsWidth;
+  const clientHeight = svgPreview.clientHeight || boundsHeight;
+  const dpr = window.devicePixelRatio || 1;
+  previewCanvas.width = clientWidth * dpr;
+  previewCanvas.height = clientHeight * dpr;
+  previewCanvas.style.width = `${clientWidth}px`;
+  previewCanvas.style.height = `${clientHeight}px`;
 
-function handleRenderSuccess(result) {
-  const svgElement = materializeSvg(result);
-  if (!svgElement) {
-    throw new Error('Renderer produced no SVG content');
+  previewContext.save();
+  previewContext.scale(dpr, dpr);
+  previewContext.clearRect(0, 0, clientWidth, clientHeight);
+  previewContext.translate(clientWidth / 2, clientHeight / 2);
+  const scale = 0.9 * Math.min(clientWidth / boundsWidth, clientHeight / boundsHeight);
+  previewContext.scale(scale, scale);
+  previewContext.lineWidth = Math.max(0.4 / scale, 0.4);
+  previewContext.strokeStyle = '#0f172a';
+  previewContext.fillStyle = 'rgba(37, 99, 235, 0.1)';
+
+  if (!hasGeometry(geometry)) {
+    previewContext.restore();
+    return performance.now() - start;
   }
 
-  showSVG(svgElement);
-
-  const params = result.params || collectParams();
-  const geometry = hasGeometry(result.geometry) ? result.geometry : null;
-  const mode = result.mode || params?.mode || DEFAULTS.mode;
-  const svgString = typeof result.svgString === 'string' && result.svgString.trim().length
-    ? result.svgString
-    : new XMLSerializer().serializeToString(svgElement);
-
-  lastRender = { params, geometry, mode, svgString };
-
-  updateStats(geometry);
-  statMode.textContent = mode === 'arram_boyle' ? 'Arram-Boyle' : 'Classic Doyle';
-  setStatus('Spiral updated. Switch views to explore it in 3D.');
-  updateExportAvailability(true);
-
-  if (threeApp) {
-    if (geometry) {
-      threeApp.useGeometryFromPayload(params, geometry);
-    } else {
-      threeApp.queueGeometryUpdate(params, true);
+  for (const group of geometry.arcgroups) {
+    const outline = group.outline || [];
+    if (outline.length < 2) continue;
+    previewContext.beginPath();
+    const [firstX, firstY] = outline[0];
+    previewContext.moveTo(firstX, firstY);
+    for (let i = 1; i < outline.length; i += 1) {
+      const [x, y] = outline[i];
+      previewContext.lineTo(x, y);
     }
+    previewContext.closePath();
+    previewContext.stroke();
   }
+
+  previewContext.restore();
+  return performance.now() - start;
 }
 
 function handleRenderFailure(message) {
-  svgPreview.innerHTML = '<div class="empty-state">Unable to render spiral.</div>';
-  svgPreview.classList.add('empty-state');
+  svgPreview?.classList.add('empty-state');
   setStatus(message || 'Unexpected error', 'error');
   lastRender = null;
   updateExportAvailability(false);
 }
 
-function startRenderJob(params, showLoading) {
-  const token = ++currentRenderToken;
-  const statusMessage = showLoading ? 'Rendering spiral…' : 'Updating spiral…';
-  setStatus(statusMessage, 'loading');
+function applyPreviewResult(result, renderDuration) {
+  const geometry = hasGeometry(result.geometry) ? result.geometry : null;
+  if (!geometry) {
+    throw new Error('No geometry returned');
+  }
+  svgPreview.classList.remove('empty-state');
+  const drawDuration = drawPreviewToCanvas(geometry, result.params || collectParams());
+  perfMeter.markDraw(drawDuration);
+  perfMeter.finish(renderDuration);
 
-  cancelActiveRenderJob();
+  const params = result.params || collectParams();
+  lastRender = { params, geometry, mode: result.mode || params.mode, svgString: null };
+  statMode.textContent = lastRender.mode === 'arram_boyle' ? 'Arram-Boyle' : 'Classic Doyle';
+  updateStats(geometry);
+  setStatus('Preview updated.');
+  updateExportAvailability(true);
 
-  const renderTimeoutMs = getRenderTimeoutMs();
+  if (threeApp) {
+    threeApp.useGeometryFromPayload(params, geometry);
+  }
+}
 
-  if (workerSupported && renderWorkerURL && svgParser) {
+function cancelActiveWorker() {
+  if (activeWorker) {
+    activeWorker.terminate();
+    activeWorker = null;
+  }
+  if (activeTimeout) {
+    clearTimeout(activeTimeout);
+    activeTimeout = null;
+  }
+}
+
+function startPreviewRender(showLoading = true) {
+  const params = collectParams();
+  renderToken += 1;
+  const requestId = renderToken;
+  cancelActiveWorker();
+  const timeoutMs = getRenderTimeoutMs();
+  perfMeter.start();
+
+  if (showLoading) {
+    setStatus('Rendering preview…', 'loading');
+  } else {
+    setStatus('Updating preview…', 'loading');
+  }
+
+  if (workerSupported && renderWorkerURL) {
     const worker = new Worker(renderWorkerURL, { type: 'module' });
-    renderWorkerHandle = worker;
-    const watchdogId = setTimeout(() => {
-      if (activeRenderJob?.handle === worker) {
-        terminateRenderWorker();
-        activeRenderJob = null;
-        const timeoutSeconds = Math.round(renderTimeoutMs / 100) / 10;
-        handleRenderFailure(`Render cancelled for exceeding the ${timeoutSeconds}s time limit. Adjust detail or increase the timeout in Advanced settings.`);
+    activeWorker = worker;
+    activeTimeout = setTimeout(() => {
+      if (activeWorker === worker) {
+        worker.terminate();
+        activeWorker = null;
       }
-    }, renderTimeoutMs);
-    activeRenderJob = { type: 'worker', requestId: token, handle: worker, timeoutId: watchdogId };
+      handleRenderFailure('Render cancelled after exceeding the timeout. Reduce detail or extend the limit.');
+    }, timeoutMs);
 
     worker.onmessage = event => {
       const data = event.data || {};
-      if (data.requestId !== token) {
+      if (data.requestId !== requestId) {
         return;
       }
-      if (renderWorkerHandle === worker) {
-        worker.terminate();
-        renderWorkerHandle = null;
-      }
-      if (activeRenderJob?.handle === worker) {
-        if (activeRenderJob.timeoutId) {
-          clearTimeout(activeRenderJob.timeoutId);
-        }
-        activeRenderJob = null;
-      }
-      if (data.type === 'result') {
-        try {
-          handleRenderSuccess(data);
-        } catch (error) {
-          console.error(error);
-          handleRenderFailure(error.message || 'Unexpected error');
-        }
-      } else if (data.type === 'error') {
-        const message = data.message || 'Render failed';
-        console.error(message);
-        handleRenderFailure(message);
+      cancelActiveWorker();
+      try {
+        applyPreviewResult(data, data.duration || 0);
+      } catch (error) {
+        console.error(error);
+        handleRenderFailure(error.message || 'Unexpected error');
       }
     };
 
     worker.onerror = event => {
-      const message = event?.message || 'Render failed';
-      if (renderWorkerHandle === worker) {
-        worker.terminate();
-        renderWorkerHandle = null;
-      }
-      if (activeRenderJob?.handle === worker) {
-        if (activeRenderJob.timeoutId) {
-          clearTimeout(activeRenderJob.timeoutId);
-        }
-        activeRenderJob = null;
-      }
-      console.error(event?.error || message);
-      handleRenderFailure(message);
+      cancelActiveWorker();
+      console.error(event?.error || event?.message);
+      handleRenderFailure('Render failed');
     };
 
-    worker.postMessage({ type: 'render', requestId: token, params });
+    worker.postMessage({ type: 'preview', requestId, params });
     return;
   }
 
-  const timeoutId = setTimeout(() => {
-    if (token !== currentRenderToken) {
-      return;
-    }
-    activeRenderJob = null;
+  setTimeout(() => {
     try {
-      const result = renderSpiral(params);
-      handleRenderSuccess(result);
+      const startedAt = performance.now();
+      const result = renderPreview(params);
+      const renderDuration = performance.now() - startedAt;
+      applyPreviewResult(result, renderDuration);
     } catch (error) {
       console.error(error);
       handleRenderFailure(error.message || 'Unexpected error');
     }
   }, 0);
-  activeRenderJob = { type: 'timeout', requestId: token, id: timeoutId };
 }
 
-function renderCurrentSpiral(showLoading = true) {
-  const params = collectParams();
-  startRenderJob(params, showLoading);
+async function downloadCurrentSvg() {
+  const params = lastRender?.params || collectParams();
+  if (!params) {
+    setStatus('Render the spiral before downloading.', 'error');
+    return;
+  }
+  setStatus('Preparing SVG export…', 'loading');
+  const requestId = ++renderToken;
+  cancelActiveWorker();
+  const timeoutMs = getRenderTimeoutMs();
+
+  const handleExportResult = svgString => {
+    const blob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const filename = getExportFileName();
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    setStatus(`SVG downloaded as ${filename}.`);
+  };
+
+  if (workerSupported && renderWorkerURL) {
+    const worker = new Worker(renderWorkerURL, { type: 'module' });
+    activeWorker = worker;
+    activeTimeout = setTimeout(() => {
+      if (activeWorker === worker) {
+        worker.terminate();
+        activeWorker = null;
+      }
+      handleRenderFailure('SVG export timed out.');
+    }, timeoutMs);
+
+    worker.onmessage = event => {
+      const data = event.data || {};
+      if (data.requestId !== requestId) {
+        return;
+      }
+      cancelActiveWorker();
+      if (data.svgString) {
+        handleExportResult(data.svgString);
+      } else {
+        handleRenderFailure('Export failed');
+      }
+    };
+
+    worker.onerror = event => {
+      cancelActiveWorker();
+      console.error(event?.error || event?.message);
+      handleRenderFailure('Export failed');
+    };
+
+    worker.postMessage({ type: 'export', requestId, params });
+    return;
+  }
+
+  try {
+    const result = renderSpiral(params);
+    if (!result.svgString) {
+      throw new Error('Export failed');
+    }
+    handleExportResult(result.svgString);
+  } catch (error) {
+    console.error(error);
+    handleRenderFailure(error.message || 'Export failed');
+  }
 }
 
-const debouncedRender = debounce(() => renderCurrentSpiral(false), 200);
+const debouncedRender = debounce(() => startPreviewRender(false), 150);
 
 form.addEventListener('input', event => {
   if (event.target.name === 't') {
@@ -455,7 +513,7 @@ form.addEventListener('input', event => {
 
 form.addEventListener('submit', event => {
   event.preventDefault();
-  renderCurrentSpiral(true);
+  startPreviewRender(true);
   if (threeApp) {
     threeApp.queueGeometryUpdate(collectParams(), true);
   }
@@ -513,4 +571,5 @@ if (fillPatternTypeSelect) {
 updateExportAvailability(false);
 toggleFillSettings();
 updateTValue();
-renderCurrentSpiral(true);
+perfMeter.report('waiting for first render…');
+startPreviewRender(true);

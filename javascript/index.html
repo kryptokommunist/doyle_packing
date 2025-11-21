@@ -302,9 +302,11 @@
       position: relative;
     }
 
-    #svgPreview svg {
+    #svgPreview svg,
+    #svgPreview canvas {
       width: 100%;
       height: 100%;
+      display: block;
     }
 
     .empty-state {
@@ -705,6 +707,7 @@
           <div class="stat-card"><strong id="statArcGroups">0</strong>Arc groups</div>
           <div class="stat-card"><strong id="statPolygons">0</strong>Polygons extruded</div>
           <div class="stat-card"><strong id="statMode">Arram-Boyle</strong>Render mode</div>
+          <div class="stat-card"><strong id="statPerformance">–</strong>Render timing</div>
         </div>
 
         <div class="preview-card three-card" id="view3d" hidden>
