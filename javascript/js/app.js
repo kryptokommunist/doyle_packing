@@ -57,6 +57,7 @@ const workerSupported = typeof Worker !== 'undefined';
 const renderWorkerURL = workerSupported ? new URL('./render_worker.js', import.meta.url) : null;
 let renderWorkerHandle = null;
 let currentRenderToken = 0;
+let pendingRenderTimeout = null;
 const svgParser = typeof DOMParser !== 'undefined' ? new DOMParser() : null;
 
 function sanitiseFileName(name) {
@@ -135,6 +136,14 @@ function terminateRenderWorker() {
   if (renderWorkerHandle) {
     renderWorkerHandle.terminate();
     renderWorkerHandle = null;
+  }
+}
+
+function cancelActiveRender() {
+  terminateRenderWorker();
+  if (pendingRenderTimeout !== null) {
+    clearTimeout(pendingRenderTimeout);
+    pendingRenderTimeout = null;
   }
 }
 
@@ -316,6 +325,7 @@ function handleRenderFailure(message) {
 }
 
 function startRenderJob(params, showLoading) {
+  cancelActiveRender();
   const token = ++currentRenderToken;
   const statusMessage = showLoading ? 'Rendering spiral…' : 'Updating spiral…';
   setStatus(statusMessage, 'loading');
@@ -362,10 +372,16 @@ function startRenderJob(params, showLoading) {
     return;
   }
 
-  setTimeout(() => {
+  pendingRenderTimeout = setTimeout(() => {
+    pendingRenderTimeout = null;
+    if (token !== currentRenderToken) {
+      return;
+    }
     try {
       const result = renderSpiral(params);
-      handleRenderSuccess(result);
+      if (token === currentRenderToken) {
+        handleRenderSuccess(result);
+      }
     } catch (error) {
       console.error(error);
       handleRenderFailure(error.message || 'Unexpected error');
