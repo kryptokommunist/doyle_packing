@@ -712,6 +712,7 @@ class ArcGroup {
     this.debugFill = null;
     this.debugStroke = null;
     this.ringIndex = null;
+    this.lineAngle = 0;
     this._outlineCache = null;
   }
 
@@ -909,6 +910,7 @@ class DrawingContext {
       this.defs = null;
       this.mainGroup = null;
     }
+    this._currentGroup = null;
   }
 
   setNormalizationScale(elements) {
@@ -940,6 +942,67 @@ class DrawingContext {
     };
   }
 
+  _getParentGroup() {
+    if (!this.hasDOM) {
+      return null;
+    }
+    return this._currentGroup || this.mainGroup;
+  }
+
+  _appendToCurrentGroup(element) {
+    if (!this.hasDOM || !element) {
+      return;
+    }
+    const parent = this._getParentGroup();
+    if (parent) {
+      parent.appendChild(element);
+    }
+  }
+
+  withGroup(attributes = {}, callback = () => {}) {
+    if (!this.hasDOM) {
+      if (typeof callback === 'function') {
+        callback();
+      }
+      return null;
+    }
+    const group = document.createElementNS(SVG_NS, 'g');
+    if (attributes && typeof attributes === 'object') {
+      Object.entries(attributes).forEach(([key, value]) => {
+        if (value === null || value === undefined) {
+          return;
+        }
+        if (key === 'class') {
+          group.setAttribute('class', value);
+        } else {
+          group.setAttribute(key, String(value));
+        }
+      });
+    }
+    const parent = this._getParentGroup() || this.mainGroup;
+    parent.appendChild(group);
+    const previous = this._currentGroup;
+    this._currentGroup = group;
+    try {
+      if (typeof callback === 'function') {
+        callback();
+      }
+    } finally {
+      this._currentGroup = previous;
+    }
+    return group;
+  }
+
+  createPolygonElement(points) {
+    if (!this.hasDOM || !points || !points.length) {
+      return null;
+    }
+    const scaled = points.map(pt => this._scaled(pt));
+    const polygon = document.createElementNS(SVG_NS, 'polygon');
+    polygon.setAttribute('points', scaled.map(p => `${p.x.toFixed(4)},${p.y.toFixed(4)}`).join(' '));
+    return polygon;
+  }
+
   drawScaledCircle(circle, { color = '#4CB39B', opacity = 0.8 } = {}) {
     if (!this.hasDOM) {
       return;
@@ -955,7 +1018,7 @@ class DrawingContext {
     element.setAttribute('r', radius.toFixed(4));
     element.setAttribute('fill', color);
     element.setAttribute('fill-opacity', opacity.toString());
-    this.mainGroup.appendChild(element);
+    this._appendToCurrentGroup(element);
   }
 
   drawScaledArc(arc, { color = '#000000', width = 1.2 } = {}) {
@@ -982,7 +1045,7 @@ class DrawingContext {
     path.setAttribute('stroke-width', width.toString());
     path.setAttribute('stroke-linecap', 'round');
     path.setAttribute('stroke-linejoin', 'round');
-    this.mainGroup.appendChild(path);
+    this._appendToCurrentGroup(path);
   }
 
   drawScaled(shape, options = {}) {
@@ -1024,7 +1087,7 @@ class DrawingContext {
         polygon.setAttribute('stroke', stroke || 'none');
         polygon.setAttribute('stroke-width', strokeWidth.toString());
         polygon.setAttribute('stroke-linejoin', 'round');
-        this.mainGroup.appendChild(polygon);
+        this._appendToCurrentGroup(polygon);
       }
       const lineColor = stroke || '#000000';
       for (const [p1, p2] of segments) {
@@ -1036,7 +1099,7 @@ class DrawingContext {
         line.setAttribute('stroke', lineColor);
         line.setAttribute('stroke-width', '0.5');
         line.setAttribute('stroke-linecap', 'round');
-        this.mainGroup.appendChild(line);
+        this._appendToCurrentGroup(line);
       }
       return;
     }
@@ -1056,7 +1119,7 @@ class DrawingContext {
     } else {
       polygon.setAttribute('stroke', 'none');
     }
-    this.mainGroup.appendChild(polygon);
+    this._appendToCurrentGroup(polygon);
   }
 
   toString() {
@@ -1297,6 +1360,8 @@ class DoyleSpiralEngine {
     arcMode = 'closest',
     numGaps = 2,
   } = {}) {
+    ArcGroup._idCounter = 0;
+    CIRCLE_ID = 0;
     this.p = p;
     this.q = q;
     this.t = t;
@@ -1436,9 +1501,6 @@ class DoyleSpiralEngine {
         const start = circle.intersections[i][0];
         const end = circle.intersections[j][0];
         const arc = new ArcElement(circle, start, end, 40, true);
-        if (!addFillPattern && drawGroupOutline) {
-          context.drawScaled(arc);
-        }
         group.addArc(arc);
       }
     }
@@ -1538,6 +1600,46 @@ class DoyleSpiralEngine {
     }
   }
 
+  _normaliseLineAngle(angle) {
+    if (!Number.isFinite(angle)) {
+      return 0;
+    }
+    let normalised = angle % 360;
+    if (normalised < 0) {
+      normalised += 360;
+    }
+    return normalised;
+  }
+
+  _applyLineAngles(fillPatternAngle, overrides = null) {
+    const overrideMap = new Map();
+    if (overrides) {
+      const entries = overrides instanceof Map ? overrides.entries() : Object.entries(overrides);
+      for (const [key, value] of entries) {
+        const numeric = Number(value);
+        if (!Number.isFinite(numeric)) {
+          continue;
+        }
+        overrideMap.set(String(key), this._normaliseLineAngle(numeric));
+      }
+    }
+    for (const [key, group] of this.arcGroups.entries()) {
+      const keysToCheck = [key, group.id != null ? group.id.toString() : null, group.name || null];
+      let angle = null;
+      for (const candidate of keysToCheck) {
+        if (candidate && overrideMap.has(candidate)) {
+          angle = overrideMap.get(candidate);
+          break;
+        }
+      }
+      if (angle === null || angle === undefined) {
+        const base = group.ringIndex ?? 0;
+        angle = base * fillPatternAngle;
+      }
+      group.lineAngle = this._normaliseLineAngle(angle);
+    }
+  }
+
   _renderArramBoyle(context, {
     debugGroups = false,
     addFillPattern = false,
@@ -1546,6 +1648,7 @@ class DoyleSpiralEngine {
     redOutline = false,
     drawGroupOutline = true,
     fillPatternOffset = 0.0,
+    groupLineAngles = null,
   } = {}) {
     this.generateOuterCircles();
     this.computeAllIntersections();
@@ -1565,30 +1668,50 @@ class DoyleSpiralEngine {
       .map(group => group.ringIndex);
     const maxIndex = ringIndices.length ? Math.max(...ringIndices) : null;
 
-    if (debugGroups) {
-      for (const [key, group] of this.arcGroups.entries()) {
-        if (key.startsWith('outer_')) {
-          continue;
-        }
-        group.toSVGFill(context, { debug: true, fillOpacity: 0.25 });
-      }
-    }
+    this._applyLineAngles(fillPatternAngle, groupLineAngles);
 
-    if (addFillPattern) {
-      for (const [key, group] of this.arcGroups.entries()) {
-        if (key.startsWith('outer_')) {
-          continue;
-        }
-        const ringIdx = group.ringIndex ?? 0;
-        const angle = ringIdx * fillPatternAngle;
-        group.toSVGFill(context, {
-          debug: false,
-          patternFill: true,
-          lineSettings: [fillPatternSpacing, angle],
-          drawOutline: drawGroupOutline,
-          lineOffset: fillPatternOffset,
-        });
+    for (const [key, group] of this.arcGroups.entries()) {
+      if (key.startsWith('outer_')) {
+        continue;
       }
+      const attributes = {
+        class: 'arc-group',
+        'data-arc-group-id': group.id,
+        'data-arc-group-key': key,
+        'data-arc-group-name': group.name,
+        'data-ring-index': group.ringIndex ?? '',
+        'data-line-angle': group.lineAngle.toFixed(2),
+      };
+      context.withGroup(attributes, () => {
+        if (!addFillPattern && drawGroupOutline) {
+          for (const arc of group.arcs) {
+            context.drawScaled(arc);
+          }
+        }
+        if (debugGroups) {
+          group.toSVGFill(context, { debug: true, fillOpacity: 0.25 });
+        } else if (addFillPattern) {
+          group.toSVGFill(context, {
+            debug: false,
+            patternFill: true,
+            lineSettings: [fillPatternSpacing, group.lineAngle],
+            drawOutline: drawGroupOutline,
+            lineOffset: fillPatternOffset,
+          });
+        }
+        const outline = group.getClosedOutline();
+        if (outline.length >= 3) {
+          const overlay = context.createPolygonElement(outline);
+          if (overlay) {
+            overlay.setAttribute('fill', 'rgba(255, 215, 0, 0)');
+            overlay.setAttribute('fill-opacity', '0');
+            overlay.setAttribute('stroke', 'none');
+            overlay.setAttribute('pointer-events', 'visibleFill');
+            overlay.setAttribute('class', 'arc-group-hit');
+            context._appendToCurrentGroup(overlay);
+          }
+        }
+      });
     }
 
     if (redOutline && maxIndex !== null) {
@@ -1621,6 +1744,7 @@ class DoyleSpiralEngine {
     redOutline = false,
     drawGroupOutline = true,
     fillPatternOffset = 0.0,
+    groupLineAngles = null,
   } = {}) {
     if (!this._generated) {
       this.generateCircles();
@@ -1641,6 +1765,7 @@ class DoyleSpiralEngine {
         redOutline,
         drawGroupOutline,
         fillPatternOffset,
+        groupLineAngles,
       });
       return {
         svg: context.toElement(),
@@ -1672,13 +1797,11 @@ class DoyleSpiralEngine {
       }
       const outline = group.getClosedOutline();
       const outlinePoints = outline.map(pt => [pt.re, pt.im]);
-      const ringIdx = group.ringIndex ?? 0;
-      const lineAngle = ringIdx * this.fillPatternAngle;
       exportData.arcgroups.push({
         id: group.id,
         name: group.name,
         ring_index: group.ringIndex,
-        line_angle: lineAngle,
+        line_angle: group.lineAngle,
         outline: outlinePoints,
         arc_count: group.arcs.length,
       });
@@ -1711,7 +1834,7 @@ function normaliseParams(params = {}) {
   };
 }
 
-function renderSpiral(params = {}, overrideMode = null) {
+function renderSpiral(params = {}, overrideMode = null, extraOptions = {}) {
   const opts = normaliseParams(params);
   const engine = new DoyleSpiralEngine(opts.p, opts.q, opts.t, {
     maxDistance: opts.max_d,
@@ -1728,6 +1851,7 @@ function renderSpiral(params = {}, overrideMode = null) {
     redOutline: opts.red_outline,
     drawGroupOutline: opts.draw_group_outline,
     fillPatternOffset: opts.fill_pattern_offset,
+    groupLineAngles: extraOptions.groupLineAngles || null,
   });
   return {
     engine,
