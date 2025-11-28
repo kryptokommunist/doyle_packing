@@ -243,80 +243,84 @@ function sanitisePolygonPoints(points, tolerance = 1e-9) {
   return result;
 }
 
-function insetPolygon(points, offset) {
-  if (!offset || offset <= 0) {
-    return sanitisePolygonPoints(points);
+function clipPolygonAgainstHalfPlane(points, normal, constant, tolerance = 1e-9) {
+  if (!Array.isArray(points) || points.length === 0) {
+    return [];
   }
 
-  const base = sanitisePolygonPoints(points);
+  const isInside = point => normal.x * point.x + normal.y * point.y >= constant - tolerance;
+  const output = [];
+  const count = points.length;
+
+  for (let i = 0; i < count; i += 1) {
+    const current = points[i];
+    const next = points[(i + 1) % count];
+    const currentInside = isInside(current);
+    const nextInside = isInside(next);
+
+    if (currentInside && nextInside) {
+      output.push({ x: next.x, y: next.y });
+      continue;
+    }
+
+    const direction = { x: next.x - current.x, y: next.y - current.y };
+    const denom = normal.x * direction.x + normal.y * direction.y;
+    if (Math.abs(denom) < 1e-12) {
+      if (currentInside) {
+        output.push({ x: next.x, y: next.y });
+      }
+      continue;
+    }
+
+    const t = (constant - (normal.x * current.x + normal.y * current.y)) / denom;
+    const intersection = {
+      x: current.x + direction.x * t,
+      y: current.y + direction.y * t,
+    };
+
+    if (currentInside && !nextInside) {
+      output.push(intersection);
+    } else if (!currentInside && nextInside) {
+      output.push(intersection);
+      output.push({ x: next.x, y: next.y });
+    }
+  }
+
+  return sanitisePolygonPoints(output, tolerance);
+}
+
+function insetPolygon(points, offset, tolerance = 1e-9) {
+  if (!offset || offset <= 0) {
+    return sanitisePolygonPoints(points, tolerance);
+  }
+
+  const base = sanitisePolygonPoints(points, tolerance);
   if (base.length < 3) {
     return [];
   }
 
   const orientation = polygonSignedArea(base) >= 0 ? 1 : -1;
-  const insetPoints = [];
-  const count = base.length;
+  let working = base;
 
-  for (let i = 0; i < count; i += 1) {
-    const prev = base[(i - 1 + count) % count];
-    const curr = base[i];
-    const next = base[(i + 1) % count];
-
-    const prevDir = normaliseVector({ x: curr.x - prev.x, y: curr.y - prev.y });
-    const nextDir = normaliseVector({ x: next.x - curr.x, y: next.y - curr.y });
-
-    let normalPrev = prevDir ? inwardNormal(prevDir, orientation) : null;
-    let normalNext = nextDir ? inwardNormal(nextDir, orientation) : null;
-
-    if (!normalPrev && !normalNext) {
-      insetPoints.push({ x: curr.x, y: curr.y });
+  for (let i = 0; i < base.length; i += 1) {
+    const a = base[i];
+    const b = base[(i + 1) % base.length];
+    const edgeVec = { x: b.x - a.x, y: b.y - a.y };
+    const direction = normaliseVector(edgeVec);
+    if (!direction) {
       continue;
     }
 
-    if (!normalPrev) {
-      normalPrev = normalNext;
-    }
-    if (!normalNext) {
-      normalNext = normalPrev;
-    }
+    const normal = inwardNormal(direction, orientation);
+    const constant = normal.x * a.x + normal.y * a.y + offset;
+    working = clipPolygonAgainstHalfPlane(working, normal, constant, tolerance);
 
-    const dir1 = prevDir || nextDir || { x: 1, y: 0 };
-    const dir2 = nextDir || prevDir || { x: 0, y: 1 };
-
-    const shiftedPrev = {
-      x: curr.x + normalPrev.x * offset,
-      y: curr.y + normalPrev.y * offset,
-    };
-    const shiftedNext = {
-      x: curr.x + normalNext.x * offset,
-      y: curr.y + normalNext.y * offset,
-    };
-
-    const intersection = intersectLines(shiftedPrev, dir1, shiftedNext, dir2);
-    if (intersection) {
-      insetPoints.push(intersection);
-    } else {
-      const avg = normaliseVector({
-        x: normalPrev.x + normalNext.x,
-        y: normalPrev.y + normalNext.y,
-      });
-      if (avg) {
-        insetPoints.push({
-          x: curr.x + avg.x * offset,
-          y: curr.y + avg.y * offset,
-        });
-      }
+    if (working.length < 3) {
+      return [];
     }
   }
 
-  const cleaned = sanitisePolygonPoints(insetPoints);
-  if (cleaned.length < 3) {
-    return [];
-  }
-  if (Math.abs(polygonSignedArea(cleaned)) < 1e-6) {
-    return [];
-  }
-  return cleaned;
+  return sanitisePolygonPoints(working, tolerance);
 }
 
 function lineSegmentIntersection(p1, p2, p3, p4) {
