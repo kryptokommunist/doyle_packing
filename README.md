@@ -18,3 +18,7 @@ A minimal Flask app in `app.py` mirrors the same spiral generation logic server-
 
 ## Contributing
 Feel free to adjust the JavaScript controls, improve the 3D presentation, or add presets that optimize reflections for your specific fibo laser and material. Keep changes focused on enhancing the design-to-etch loop.
+
+## Ackknowledgements
+
+Thanks to Arram Sabeti for coming up with the idea originally, I encountered his art on [twitter](https://x.com/arram/status/1438541186319282178).
