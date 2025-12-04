@@ -655,6 +655,15 @@
             <summary>Advanced settings</summary>
             <div class="advanced-settings-content">
               <div class="field-group">
+                <div class="checkbox-row">
+                  <label>
+                    <input type="checkbox" id="shadeByAngle" name="shade_by_angle" />
+                    Colour 2D regions by line angle (grayscale)
+                  </label>
+                </div>
+                <p class="hint">Fills each arc group using its normalised line angle (modulo 180°) mapped from black to white.</p>
+              </div>
+              <div class="field-group">
                 <label for="renderTimeoutSeconds">Render timeout (seconds)</label>
                 <input
                   id="renderTimeoutSeconds"
