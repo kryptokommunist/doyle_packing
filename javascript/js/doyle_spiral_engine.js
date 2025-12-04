@@ -2870,7 +2870,9 @@ class DoyleSpiralEngine {
   } = {}) {
     this.generateOuterCircles();
     this.computeAllIntersections();
-    context.setNormalizationScale(this.circles.concat(this.outerCircles));
+    // The outer circles are generated solely to derive the closure arcs on the rim
+    // and should not influence the scaling used for the visible outline.
+    context.setNormalizationScale(this.circles);
     this.fillPatternAngle = fillPatternAngle;
     this.fillPatternAnimationId = normalisePatternAnimationId(fillPatternAnimation);
     this.arcGroups.clear();
