@@ -3012,17 +3012,20 @@ class DoyleSpiralEngine {
           continue;
         }
         const ringIdx = group.ringIndex ?? 0;
-        const referenceArc = group.arcs.find(arc => arc?.start && arc?.end);
-        const fallbackAngle = Number.isFinite(group.primaryPatternAngle)
+        const patternAngle = Number.isFinite(group.primaryPatternAngle)
           ? group.primaryPatternAngle
           : ringIdx * fillPatternAngle;
-        let baseAngle = fallbackAngle;
-        if (referenceArc) {
+        const referenceArc = group.arcs.find(arc => arc?.start && arc?.end);
+        let baseAngle = Number.isFinite(patternAngle) ? patternAngle : null;
+        if (!Number.isFinite(baseAngle) && referenceArc) {
           const dx = referenceArc.end.re - referenceArc.start.re;
           const dy = referenceArc.end.im - referenceArc.start.im;
           if (Number.isFinite(dx) && Number.isFinite(dy) && Math.hypot(dx, dy) > 1e-9) {
             baseAngle = (Math.atan2(dy, dx) * 180) / Math.PI;
           }
+        }
+        if (!Number.isFinite(baseAngle)) {
+          baseAngle = 0;
         }
         const normalizedAngle = ((baseAngle % 180) + 180) % 180;
         const intensity = clamp(normalizedAngle / 179.999, 0, 1);
