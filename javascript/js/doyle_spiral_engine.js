@@ -1644,14 +1644,15 @@ function buildContinuousPathsFromArcs(arcs, tol = 1e-6) {
 // ------------------------------------------------------------
 
 class DrawingContext {
-  constructor(width = 800, height = null, units = '') {
+  constructor(width = 800, height = null, units = '', { enableDom = true, recordCommands = true } = {}) {
     const resolvedWidth = Number.isFinite(width) ? width : 800;
     const resolvedHeight = Number.isFinite(height) ? height : resolvedWidth;
     this.width = resolvedWidth;
     this.height = resolvedHeight;
     this.units = typeof units === 'string' ? units : '';
     this.scaleFactor = 1;
-    this.hasDOM = typeof document !== 'undefined' && !!document.createElementNS;
+    this.hasDOM = enableDom && typeof document !== 'undefined' && !!document.createElementNS;
+    this.recordCommands = recordCommands;
     if (this.hasDOM) {
       this.svg = document.createElementNS(SVG_NS, 'svg');
       this.svg.setAttribute('xmlns', SVG_NS);
@@ -1666,8 +1667,8 @@ class DrawingContext {
       this.svg = null;
       this.defs = null;
       this.mainGroup = null;
-      this._virtualDefs = [];
-      this._virtualMain = [];
+      this._virtualDefs = recordCommands ? [] : null;
+      this._virtualMain = recordCommands ? [] : null;
     }
   }
 
@@ -1717,7 +1718,7 @@ class DrawingContext {
   }
 
   _pushVirtual(tag, attributes, target = this._virtualMain) {
-    if (!target) {
+    if (!target || !this.recordCommands) {
       return;
     }
     const attrString = Object.entries(attributes)
@@ -2089,6 +2090,9 @@ class DrawingContext {
   toString() {
     if (this.hasDOM && this.svg) {
       return new XMLSerializer().serializeToString(this.svg);
+    }
+    if (!this.recordCommands) {
+      return '';
     }
     const viewBox = this._viewBox();
     const defsContent = this._virtualDefs && this._virtualDefs.length
@@ -3030,6 +3034,10 @@ class DoyleSpiralEngine {
     boundingBoxWidth = null,
     boundingBoxHeight = null,
     lengthUnits = '',
+  } = {}, {
+    contextFactory = null,
+    fastPreview = false,
+    contextOptions = {},
   } = {}) {
     if (!this._generated) {
       this.generateCircles();
@@ -3041,7 +3049,9 @@ class DoyleSpiralEngine {
     const resolvedHeight = Number.isFinite(boundingBoxHeight) && boundingBoxHeight > 0
       ? boundingBoxHeight
       : fallbackSize;
-    const context = new DrawingContext(resolvedWidth, resolvedHeight, lengthUnits);
+    const context = contextFactory
+      ? contextFactory({ width: resolvedWidth, height: resolvedHeight, units: lengthUnits })
+      : new DrawingContext(resolvedWidth, resolvedHeight, lengthUnits, contextOptions);
     this.arcGroups.clear();
 
     if (mode === 'doyle') {
@@ -3049,14 +3059,17 @@ class DoyleSpiralEngine {
       return { svg: context.toElement(), svgString: context.toString(), geometry: null };
     }
     if (mode === 'arram_boyle') {
+      const effectiveFillPattern = fastPreview ? false : addFillPattern;
+      const effectiveOutline = fastPreview ? false : drawGroupOutline;
+      const effectiveSpacing = fastPreview ? Math.max(fillPatternSpacing, 6) : fillPatternSpacing;
       this._renderArramBoyle(context, {
         debugGroups,
-        addFillPattern,
-        fillPatternSpacing,
+        addFillPattern: effectiveFillPattern,
+        fillPatternSpacing: effectiveSpacing,
         fillPatternAngle,
         fillPatternAnimation,
         redOutline,
-        drawGroupOutline,
+        drawGroupOutline: effectiveOutline,
         fillPatternOffset,
         fillPatternType,
         fillPatternRectWidth,
@@ -3173,7 +3186,7 @@ function normaliseParams(params = {}) {
   };
 }
 
-function renderSpiral(params = {}, overrideMode = null) {
+function renderSpiral(params = {}, overrideMode = null, renderControls = {}) {
   const opts = normaliseParams(params);
   const engine = new DoyleSpiralEngine(opts.p, opts.q, opts.t, {
     maxDistance: opts.max_d,
@@ -3199,7 +3212,7 @@ function renderSpiral(params = {}, overrideMode = null) {
     boundingBoxWidth: opts.bounding_box_width_mm,
     boundingBoxHeight: opts.bounding_box_height_mm,
     lengthUnits: 'mm',
-  });
+  }, renderControls);
   return {
     engine,
     mode,
@@ -3207,6 +3220,47 @@ function renderSpiral(params = {}, overrideMode = null) {
     svgString: result.svgString,
     geometry: result.geometry,
     params: opts,
+  };
+}
+
+function renderPreview(params = {}, overrideMode = null) {
+  const opts = normaliseParams(params);
+  const engine = new DoyleSpiralEngine(opts.p, opts.q, opts.t, {
+    maxDistance: opts.max_d,
+    arcMode: opts.arc_mode,
+    numGaps: opts.num_gaps,
+  });
+  const mode = overrideMode || opts.mode;
+  const renderResult = engine.render(mode, {
+    size: opts.size,
+    debugGroups: false,
+    addFillPattern: false,
+    fillPatternSpacing: opts.fill_pattern_spacing,
+    fillPatternAngle: opts.fill_pattern_angle,
+    fillPatternAnimation: opts.fill_pattern_animation,
+    redOutline: false,
+    drawGroupOutline: false,
+    fillPatternOffset: opts.fill_pattern_offset,
+    fillPatternType: opts.fill_pattern_type,
+    fillPatternRectWidth: opts.fill_pattern_rect_width,
+    highlightRimWidth: opts.highlight_rim_width,
+    groupOutlineWidth: opts.group_outline_width,
+    patternStrokeWidth: opts.pattern_stroke_width,
+    boundingBoxWidth: opts.bounding_box_width_mm,
+    boundingBoxHeight: opts.bounding_box_height_mm,
+    lengthUnits: 'mm',
+  }, {
+    fastPreview: true,
+    contextOptions: { enableDom: false, recordCommands: false },
+  });
+
+  return {
+    engine,
+    mode,
+    geometry: renderResult.geometry,
+    params: opts,
+    svg: null,
+    svgString: '',
   };
 }
 
@@ -3223,4 +3277,5 @@ export {
   renderSpiral,
   computeGeometry,
   normaliseParams,
+  renderPreview,
 };
