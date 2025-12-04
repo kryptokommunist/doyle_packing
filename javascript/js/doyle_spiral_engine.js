@@ -2963,6 +2963,40 @@ class DoyleSpiralEngine {
     const offsetForGroups = invScale > 0 ? offsetInternal * invScale : 0;
     const rectWidthForGroups = invScale > 0 ? rectWidthInternal * invScale : 0;
 
+    const normalizeAngle180 = (angleDeg) => (((angleDeg % 180) + 180) % 180);
+    const computeGroupChordAngle = (group) => {
+      if (!group?.arcs?.length) {
+        return null;
+      }
+      let sumX = 0;
+      let sumY = 0;
+      let count = 0;
+      for (const arc of group.arcs) {
+        const start = arc?.start;
+        const end = arc?.end;
+        if (!start || !end) {
+          continue;
+        }
+        const dx = end.re - start.re;
+        const dy = end.im - start.im;
+        if (!Number.isFinite(dx) || !Number.isFinite(dy)) {
+          continue;
+        }
+        const mag = Math.hypot(dx, dy);
+        if (mag <= 1e-9) {
+          continue;
+        }
+        sumX += dx / mag;
+        sumY += dy / mag;
+        count += 1;
+      }
+      if (!count) {
+        return null;
+      }
+      const angle = Math.atan2(sumY, sumX) * (180 / Math.PI);
+      return normalizeAngle180(angle);
+    };
+
     const ringIndices = Array.from(this.arcGroups.values())
       .filter(group => group.ringIndex !== null && group.ringIndex !== undefined)
       .map(group => group.ringIndex);
@@ -3012,10 +3046,11 @@ class DoyleSpiralEngine {
           continue;
         }
         const ringIdx = group.ringIndex ?? 0;
-        const baseAngle = Number.isFinite(group.primaryPatternAngle)
+        const chordAngle = computeGroupChordAngle(group);
+        const fallbackAngle = Number.isFinite(group.primaryPatternAngle)
           ? group.primaryPatternAngle
           : ringIdx * fillPatternAngle;
-        const normalizedAngle = ((baseAngle % 180) + 180) % 180;
+        const normalizedAngle = normalizeAngle180(chordAngle ?? fallbackAngle);
         const intensity = clamp(normalizedAngle / 180, 0, 1);
         const channel = Math.round(intensity * 255);
         const hex = channel.toString(16).padStart(2, '0');
