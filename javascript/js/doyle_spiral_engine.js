@@ -209,6 +209,19 @@ function normaliseAngle360(angleDeg) {
   return value;
 }
 
+function normaliseAngle180(angleDeg) {
+  const normalized = normaliseAngle360(angleDeg);
+  return ((normalized % 180) + 180) % 180;
+}
+
+function greyscaleFromAngle(angleDeg) {
+  const normalized = normaliseAngle180(angleDeg);
+  const ratio = clamp(normalized / 180, 0, 1);
+  const channel = Math.round(ratio * 255);
+  const hex = channel.toString(16).padStart(2, '0');
+  return `#${hex}${hex}${hex}`;
+}
+
 function normaliseAngleRad(angle) {
   if (!Number.isFinite(angle)) {
     return 0;
@@ -2867,6 +2880,7 @@ class DoyleSpiralEngine {
     highlightRimWidth = 1.2,
     groupOutlineWidth = 0.6,
     patternStrokeWidth = 0.5,
+    colorByAngle = false,
   } = {}) {
     this.generateOuterCircles();
     this.computeAllIntersections();
@@ -2926,6 +2940,27 @@ class DoyleSpiralEngine {
       } else {
         group.primaryPatternAngle = defaultAngle;
         group.patternAngles = [defaultAngle];
+      }
+    }
+
+    if (colorByAngle) {
+      const drawOutlineForAngleFill = drawGroupOutline && !addFillPattern;
+      for (const [key, group] of this.arcGroups.entries()) {
+        if (key.startsWith('outer_')) {
+          continue;
+        }
+        const ringIdx = group.ringIndex ?? 0;
+        const angle = Number.isFinite(group.primaryPatternAngle)
+          ? group.primaryPatternAngle
+          : ringIdx * fillPatternAngle;
+        const fill = greyscaleFromAngle(angle);
+        group.toSVGFill(context, {
+          debug: false,
+          fill,
+          fillOpacity: 1,
+          drawOutline: drawOutlineForAngleFill,
+          outlineStrokeWidth: outlineStrokeWidth,
+        });
       }
     }
 
@@ -3025,6 +3060,7 @@ class DoyleSpiralEngine {
     highlightRimWidth = 1.2,
     groupOutlineWidth = 0.6,
     patternStrokeWidth = 0.5,
+    colorByAngle = false,
     boundingBoxWidth = null,
     boundingBoxHeight = null,
     lengthUnits = '',
@@ -3061,6 +3097,7 @@ class DoyleSpiralEngine {
         highlightRimWidth,
         groupOutlineWidth,
         patternStrokeWidth,
+        colorByAngle,
       });
       return {
         svg: context.toElement(),
@@ -3163,6 +3200,7 @@ function normaliseParams(params = {}) {
     highlight_rim_width: highlightRimWidth,
     group_outline_width: groupOutlineWidth,
     pattern_stroke_width: patternStrokeWidth,
+    color_by_angle: Boolean(params.color_by_angle ?? false),
     red_outline: Boolean(params.red_outline ?? false),
     draw_group_outline: params.draw_group_outline !== undefined ? Boolean(params.draw_group_outline) : true,
     max_d: Number(params.max_d ?? 2000),
@@ -3194,6 +3232,7 @@ function renderSpiral(params = {}, overrideMode = null) {
     highlightRimWidth: opts.highlight_rim_width,
     groupOutlineWidth: opts.group_outline_width,
     patternStrokeWidth: opts.pattern_stroke_width,
+    colorByAngle: opts.color_by_angle,
     boundingBoxWidth: opts.bounding_box_width_mm,
     boundingBoxHeight: opts.bounding_box_height_mm,
     lengthUnits: 'mm',

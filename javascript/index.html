@@ -654,6 +654,15 @@
           <details class="advanced-settings">
             <summary>Advanced settings</summary>
             <div class="advanced-settings-content">
+              <div class="checkbox-row">
+                <label for="colorByAngle">
+                  <input type="checkbox" id="colorByAngle" name="color_by_angle" />
+                  Shade 2D regions by line angle
+                </label>
+              </div>
+              <p class="hint">
+                Colours each enclosed area using a black → white gradient based on its normalised line angle (modulo 180°).
+              </p>
               <div class="field-group">
                 <label for="renderTimeoutSeconds">Render timeout (seconds)</label>
                 <input
