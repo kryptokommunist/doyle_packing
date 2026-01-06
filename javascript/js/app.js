@@ -50,6 +50,7 @@ const DEFAULTS = {
   highlight_rim_width: 1.2,
   group_outline_width: 0.6,
   pattern_stroke_width: 0.5,
+  color_by_angle: false,
 };
 
 let activeView = '2d';
