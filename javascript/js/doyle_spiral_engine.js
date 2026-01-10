@@ -1476,6 +1476,8 @@ class ArcGroup {
     lineSettings = [3, 0],
     drawOutline = true,
     lineOffset = 0,
+    solidFill = null,
+    solidFillOpacity = 1.0,
     patternType = 'lines',
     rectWidth = 2,
     patternSpacingOverride = null,
@@ -1495,6 +1497,17 @@ class ArcGroup {
         stroke,
         strokeWidth: outlineStrokeWidth,
         fillOpacity,
+      });
+      return;
+    }
+    if (solidFill) {
+      const stroke = drawOutline ? '#000000' : 'none';
+      context.drawGroupOutline(outline, {
+        fill: solidFill,
+        stroke,
+        strokeWidth: outlineStrokeWidth,
+        fillOpacity: solidFillOpacity,
+        drawOutline,
       });
       return;
     }
@@ -2631,7 +2644,16 @@ class DoyleSpiralEngine {
     };
   }
 
-  _createArcGroupsForCircles(radiusToRing, spiralCenter, debugGroups, addFillPattern, drawGroupOutline, context, outlineStrokeWidth = 0) {
+  _createArcGroupsForCircles(
+    radiusToRing,
+    spiralCenter,
+    debugGroups,
+    addFillPattern,
+    drawGroupOutline,
+    context,
+    outlineStrokeWidth = 0,
+    shadeByAngle = false,
+  ) {
     for (const circle of this.circles) {
       if (circle.intersections.length !== 6) {
         continue;
@@ -2655,7 +2677,7 @@ class DoyleSpiralEngine {
         const end = circle.intersections[j][0];
         const steps = estimateArcSteps(circle, start, end);
         const arc = new ArcElement(circle, start, end, steps, true);
-        if (!addFillPattern && drawGroupOutline) {
+        if (!addFillPattern && drawGroupOutline && !shadeByAngle) {
           context.drawScaledArc(arc, { color: '#000000', width: outlineStrokeWidth });
         }
         group.addArc(arc);
@@ -2864,6 +2886,7 @@ class DoyleSpiralEngine {
     fillPatternOffset = 0.0,
     fillPatternType = 'lines',
     fillPatternRectWidth = 2.0,
+    shadeByAngle = false,
     highlightRimWidth = 1.2,
     groupOutlineWidth = 0.6,
     patternStrokeWidth = 0.5,
@@ -2887,6 +2910,7 @@ class DoyleSpiralEngine {
     const patternStroke = Number.isFinite(patternStrokeWidth)
       ? Math.max(0, patternStrokeWidth)
       : 0;
+    const shouldPatternFill = addFillPattern && !shadeByAngle;
 
     const spiralCenter = Complex.ZERO;
     const radiusToRing = this._computeRingIndices();
@@ -2895,16 +2919,17 @@ class DoyleSpiralEngine {
       radiusToRing,
       spiralCenter,
       debugGroups,
-      addFillPattern,
+      shouldPatternFill,
       drawGroupOutline,
       context,
       outlineStrokeWidth,
+      shadeByAngle,
     );
     this._drawOuterClosureArcs(
       spiralCenter,
       debugGroups,
       redOutline,
-      addFillPattern,
+      shouldPatternFill,
       drawGroupOutline,
       context,
       outlineStrokeWidth,
@@ -2940,6 +2965,40 @@ class DoyleSpiralEngine {
     const offsetForGroups = invScale > 0 ? offsetInternal * invScale : 0;
     const rectWidthForGroups = invScale > 0 ? rectWidthInternal * invScale : 0;
 
+    const normalizeAngle180 = (angleDeg) => (((angleDeg % 180) + 180) % 180);
+    const computeGroupChordAngle = (group) => {
+      if (!group?.arcs?.length) {
+        return null;
+      }
+      let sumX = 0;
+      let sumY = 0;
+      let count = 0;
+      for (const arc of group.arcs) {
+        const start = arc?.start;
+        const end = arc?.end;
+        if (!start || !end) {
+          continue;
+        }
+        const dx = end.re - start.re;
+        const dy = end.im - start.im;
+        if (!Number.isFinite(dx) || !Number.isFinite(dy)) {
+          continue;
+        }
+        const mag = Math.hypot(dx, dy);
+        if (mag <= 1e-9) {
+          continue;
+        }
+        sumX += dx / mag;
+        sumY += dy / mag;
+        count += 1;
+      }
+      if (!count) {
+        return null;
+      }
+      const angle = Math.atan2(sumY, sumX) * (180 / Math.PI);
+      return normalizeAngle180(angle);
+    };
+
     const ringIndices = Array.from(this.arcGroups.values())
       .filter(group => group.ringIndex !== null && group.ringIndex !== undefined)
       .map(group => group.ringIndex);
@@ -2958,7 +3017,7 @@ class DoyleSpiralEngine {
       }
     }
 
-    if (addFillPattern) {
+    if (shouldPatternFill) {
       for (const [key, group] of this.arcGroups.entries()) {
         if (key.startsWith('outer_')) {
           continue;
@@ -2979,6 +3038,30 @@ class DoyleSpiralEngine {
           patternOffsetOverride: offsetForGroups,
           outlineStrokeWidth: outlineStrokeWidth,
           patternStrokeWidth: patternStroke,
+        });
+      }
+    }
+
+    if (shadeByAngle) {
+      for (const [key, group] of this.arcGroups.entries()) {
+        if (key.startsWith('outer_')) {
+          continue;
+        }
+        const ringIdx = group.ringIndex ?? 0;
+        const chordAngle = computeGroupChordAngle(group);
+        const fallbackAngle = Number.isFinite(group.primaryPatternAngle)
+          ? group.primaryPatternAngle
+          : ringIdx * fillPatternAngle;
+        const normalizedAngle = normalizeAngle180(chordAngle ?? fallbackAngle);
+        const intensity = clamp(normalizedAngle / 180, 0, 1);
+        const channel = Math.round(intensity * 255);
+        const hex = channel.toString(16).padStart(2, '0');
+        const fillColor = `#${hex}${hex}${hex}`;
+        group.toSVGFill(context, {
+          solidFill: fillColor,
+          solidFillOpacity: 1,
+          drawOutline: drawGroupOutline,
+          outlineStrokeWidth: outlineStrokeWidth,
         });
       }
     }
@@ -3162,6 +3245,7 @@ function normaliseParams(params = {}) {
     fill_pattern_type: fillPatternType,
     fill_pattern_rect_width: rectWidthMm,
     fill_pattern_animation: normalisePatternAnimationId(params.fill_pattern_animation),
+    shade_by_angle: Boolean(params.shade_by_angle ?? false),
     highlight_rim_width: highlightRimWidth,
     group_outline_width: groupOutlineWidth,
     pattern_stroke_width: patternStrokeWidth,
@@ -3193,6 +3277,7 @@ function renderSpiral(params = {}, overrideMode = null) {
     fillPatternType: opts.fill_pattern_type,
     fillPatternRectWidth: opts.fill_pattern_rect_width,
     fillPatternAnimation: opts.fill_pattern_animation,
+    shadeByAngle: opts.shade_by_angle,
     highlightRimWidth: opts.highlight_rim_width,
     groupOutlineWidth: opts.group_outline_width,
     patternStrokeWidth: opts.pattern_stroke_width,
