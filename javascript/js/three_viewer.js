@@ -21,6 +21,329 @@ function angularDifferenceDeg(a, b) {
   return Math.min(diff, 180 - diff);
 }
 
+function computePolygonCentroid(points = []) {
+  if (!points.length) {
+    return { x: 0, y: 0 };
+  }
+  let sumX = 0;
+  let sumY = 0;
+  for (const [x, y] of points) {
+    sumX += x;
+    sumY += y;
+  }
+  const inv = 1 / points.length;
+  return { x: sumX * inv, y: sumY * inv };
+}
+
+function angularDistanceRad(a, b) {
+  let diff = Math.abs(a - b);
+  const tau = Math.PI * 2;
+  if (diff > Math.PI) {
+    diff = tau - diff;
+  }
+  return diff;
+}
+
+function addNeighborLink(a, b) {
+  if (!a || !b || a === b) {
+    return;
+  }
+  if (!a.userData.neighborSet) {
+    a.userData.neighborSet = new Set();
+  }
+  if (!b.userData.neighborSet) {
+    b.userData.neighborSet = new Set();
+  }
+  a.userData.neighborSet.add(b);
+  b.userData.neighborSet.add(a);
+}
+
+const GLOW_COLORS = {
+  warm: 0xffd15a,
+  cool: 0x6dd6ff,
+  magenta: 0xff6bd6,
+  green: 0x7dffa9,
+};
+
+function createCellularRuleAnimation({ id, label, color, rule }) {
+  return {
+    id,
+    label,
+    init: ({ meshes, rings }) => {
+      if (!meshes || !meshes.length) {
+        return { cells: [], startIndices: [], startSet: new Set(), color };
+      }
+      const cells = meshes.map(mesh => ({
+        mesh,
+        neighbors: mesh.userData.neighborIndices || [],
+        state: 0,
+        buffer: 0,
+      }));
+      const innerRingMeshes = rings && rings.length ? rings[0].meshes : [];
+      const startIndices = innerRingMeshes.map(mesh => mesh.userData.meshIndex);
+      startIndices.forEach(idx => {
+        if (cells[idx]) {
+          cells[idx].state = 1;
+        }
+      });
+      return {
+        cells,
+        startIndices,
+        startSet: new Set(startIndices),
+        lastStep: 0,
+        stepCounter: 0,
+        color,
+      };
+    },
+    update: ctx => {
+      const { state, timeSec, speed, helpers } = ctx;
+      if (!state.cells.length) {
+        return;
+      }
+      const interval = Math.max(0.12, 0.5 / Math.max(speed, 0.01));
+      if (timeSec - state.lastStep >= interval) {
+        state.lastStep = timeSec;
+        const previous = state.cells.map(cell => cell.state);
+        state.cells.forEach((cell, idx) => {
+          const neighborValues = cell.neighbors.map(nIdx => previous[nIdx] || 0);
+          cell.buffer = rule({
+            idx,
+            previousValue: previous[idx] || 0,
+            neighborValues,
+            state,
+          });
+        });
+        let active = 0;
+        state.cells.forEach(cell => {
+          cell.state = clamp(cell.buffer, 0, 1);
+          if (cell.state > 0.05) {
+            active += 1;
+          }
+        });
+        if (active === 0 && state.startIndices.length) {
+          state.startIndices.forEach(idx => {
+            if (state.cells[idx]) {
+              state.cells[idx].state = 1;
+            }
+          });
+        }
+        state.stepCounter += 1;
+      }
+      state.cells.forEach(cell => {
+        helpers.setGlow(cell.mesh, cell.state, state.color);
+      });
+    },
+  };
+}
+
+const wavefrontRule = ({ previousValue, neighborValues }) => {
+  if (previousValue > 0.2) {
+    return Math.max(0, previousValue - 0.35);
+  }
+  const neighborMax = neighborValues.reduce((max, value) => Math.max(max, value), 0);
+  if (neighborMax > 0.6) {
+    return 1;
+  }
+  return 0;
+};
+
+const echoRule = ({ previousValue, neighborValues }) => {
+  const activeNeighbors = neighborValues.filter(value => value > 0.6).length;
+  if (activeNeighbors === 1) {
+    return 1;
+  }
+  if (activeNeighbors >= 3) {
+    return 0;
+  }
+  return previousValue * 0.55;
+};
+
+const caBranchesAnimation = {
+  id: 'ca_branches',
+  label: 'CA · Branching vines',
+  init: ({ meshes, rings }) => {
+    const cells = (meshes || []).map(mesh => ({
+      mesh,
+      neighbors: mesh.userData.neighborIndices || [],
+      strength: 0,
+    }));
+    const startMeshes = rings && rings.length ? rings[0].meshes : [];
+    const startIndices = startMeshes.map(mesh => mesh.userData.meshIndex);
+    startIndices.forEach(idx => {
+      if (cells[idx]) {
+        cells[idx].strength = 1;
+      }
+    });
+    return {
+      cells,
+      startIndices,
+      lastStep: 0,
+      seed: Math.random() * 1000,
+      color: GLOW_COLORS.green,
+    };
+  },
+  update: ctx => {
+    const { state, timeSec, speed, helpers } = ctx;
+    if (!state.cells.length) {
+      return;
+    }
+    const interval = Math.max(0.18, 0.7 / Math.max(speed, 0.01));
+    if (timeSec - state.lastStep >= interval) {
+      state.lastStep = timeSec;
+      const previous = state.cells.map(cell => cell.strength);
+      const pendingActivations = new Set();
+      state.cells.forEach((cell, idx) => {
+        let value = previous[idx] * 0.55;
+        if (previous[idx] > 0.7 && cell.neighbors.length) {
+          const signal = Math.abs(Math.sin(state.seed + idx * 1.37 + timeSec));
+          const choice = Math.floor(signal * cell.neighbors.length) % cell.neighbors.length;
+          pendingActivations.add(cell.neighbors[choice]);
+        }
+        cell.strength = value;
+      });
+      pendingActivations.forEach(targetIdx => {
+        if (state.cells[targetIdx]) {
+          state.cells[targetIdx].strength = 1;
+        }
+      });
+      const hasEnergy = state.cells.some(cell => cell.strength > 0.05);
+      if (!hasEnergy && state.startIndices.length) {
+        state.startIndices.forEach(idx => {
+          if (state.cells[idx]) {
+            state.cells[idx].strength = 1;
+          }
+        });
+      }
+    }
+    state.cells.forEach(cell => {
+      helpers.setGlow(cell.mesh, clamp(cell.strength, 0, 1), state.color);
+    });
+  },
+};
+
+const animationDefinitions = {
+  rotation_sweep: {
+    id: 'rotation_sweep',
+    label: 'Rotation sweep',
+    init: () => ({}),
+    update: ({ meshes, rotationDeg, helpers }) => {
+      const threshold = 25;
+      meshes.forEach(mesh => {
+        const lineAngle = mesh.userData.lineAngle || 0;
+        const diff = angularDifferenceDeg(rotationDeg, lineAngle);
+        if (diff < threshold) {
+          const t = Math.cos((diff / threshold) * (Math.PI / 2));
+          helpers.setGlow(mesh, t * t, GLOW_COLORS.warm);
+        }
+      });
+    },
+  },
+  ring_chase: {
+    id: 'ring_chase',
+    label: 'Ring chase',
+    init: () => ({}),
+    update: ({ rings, timeSec, speed, helpers }) => {
+      if (!rings.length) {
+        return;
+      }
+      const tempo = Math.max(0.2, speed);
+      rings.forEach((ring, ringIdx) => {
+        const meshes = ring.meshes;
+        if (!meshes.length) {
+          return;
+        }
+        const localPhase = (timeSec * tempo * 0.2 + ringIdx * 0.12) % 1;
+        const position = localPhase * meshes.length;
+        meshes.forEach((mesh, idx) => {
+          const delta = Math.abs(idx - position);
+          const wrapped = Math.min(delta, meshes.length - delta);
+          const intensity = Math.max(0, 1 - wrapped);
+          if (intensity > 0) {
+            helpers.setGlow(mesh, intensity, GLOW_COLORS.warm);
+          }
+        });
+      });
+    },
+  },
+  spiral_expansion: {
+    id: 'spiral_expansion',
+    label: 'Spiral expansion',
+    init: () => ({}),
+    update: ({ rings, timeSec, speed, helpers }) => {
+      if (!rings.length) {
+        return;
+      }
+      const maxRingLength = rings.reduce((max, ring) => Math.max(max, ring.meshes.length), 1);
+      const totalSpan = rings.length + maxRingLength;
+      const progress = (timeSec * Math.max(speed, 0.1) * 0.15) % totalSpan;
+      rings.forEach((ring, orderIdx) => {
+        const meshes = ring.meshes;
+        const ringBase = orderIdx;
+        const count = Math.max(meshes.length, 1);
+        meshes.forEach(mesh => {
+          const value = ringBase + (mesh.userData.ringOrder || 0) / count;
+          const distance = Math.abs(value - progress);
+          if (distance < 1.2) {
+            const intensity = Math.max(0, 1 - distance / 1.2);
+            helpers.setGlow(mesh, intensity, GLOW_COLORS.cool);
+          }
+        });
+      });
+    },
+  },
+  radial_bloom: {
+    id: 'radial_bloom',
+    label: 'Radial bloom',
+    init: () => ({}),
+    update: ({ rings, timeSec, speed, helpers }) => {
+      if (!rings.length) {
+        return;
+      }
+      const span = Math.max(rings.length - 1, 1);
+      const wave = (Math.sin(timeSec * Math.max(speed, 0.1) * 0.7) + 1) * 0.5 * span;
+      rings.forEach((ring, orderIdx) => {
+        const ringDelta = Math.abs(orderIdx - wave);
+        const intensity = Math.max(0, 1 - ringDelta);
+        ring.meshes.forEach(mesh => {
+          if (intensity > 0.01) {
+            helpers.setGlow(mesh, intensity, GLOW_COLORS.magenta);
+          }
+        });
+      });
+    },
+  },
+  aurora_shimmer: {
+    id: 'aurora_shimmer',
+    label: 'Aurora shimmer',
+    init: () => ({}),
+    update: ({ meshes, timeSec, speed, helpers }) => {
+      const tempo = Math.max(speed, 0.1);
+      meshes.forEach(mesh => {
+        const angle = mesh.userData.angle || 0;
+        const ringOrder = mesh.userData.ringOrder || 0;
+        const band = Math.sin(angle * 4 + ringOrder * 0.2 + timeSec * tempo * 2.5);
+        const intensity = Math.max(0, (band + 1) * 0.5 - 0.1);
+        if (intensity > 0) {
+          helpers.setGlow(mesh, intensity * 0.85, GLOW_COLORS.cool);
+        }
+      });
+    },
+  },
+  ca_wavefront: createCellularRuleAnimation({
+    id: 'ca_wavefront',
+    label: 'CA · Wavefront',
+    color: GLOW_COLORS.cool,
+    rule: wavefrontRule,
+  }),
+  ca_echo: createCellularRuleAnimation({
+    id: 'ca_echo',
+    label: 'CA · Echo lattice',
+    color: GLOW_COLORS.magenta,
+    rule: echoRule,
+  }),
+  ca_branches: caBranchesAnimation,
+};
+
 function createThreeViewer({
   canvas,
   statusElement,
@@ -51,6 +374,7 @@ function createThreeViewer({
   const manualRotationValue = controls.manualRotationValue || null;
   const pulseSpeedSlider = controls.pulseSpeed || null;
   const pulseSpeedValue = controls.pulseSpeedValue || null;
+  const animationModeSelect = controls.animationMode || null;
   const metalnessSlider = controls.metalness || null;
   const metalnessValue = controls.metalnessValue || null;
   const roughnessSlider = controls.roughness || null;
@@ -127,6 +451,177 @@ function createThreeViewer({
     spiralContainer.position.set(0, 0, 0);
     spiralContainer.rotation.set(0, 0, 0);
     spiralContainer.scale.set(1, 1, 1);
+    ringInfos = [];
+    innermostRingIndex = 0;
+    resetAnimationState();
+  }
+
+  function resetAnimationState() {
+    animationState = null;
+  }
+
+  function linkRingPairs(innerMeshes = [], outerMeshes = []) {
+    if (!innerMeshes.length || !outerMeshes.length) {
+      return;
+    }
+    innerMeshes.forEach(mesh => {
+      let best = null;
+      let second = null;
+      outerMeshes.forEach(candidate => {
+        const diff = angularDistanceRad(mesh.userData.angle || 0, candidate.userData.angle || 0);
+        if (!best || diff < best.diff) {
+          second = best;
+          best = { mesh: candidate, diff };
+        } else if (!second || diff < second.diff) {
+          second = { mesh: candidate, diff };
+        }
+      });
+      if (best) {
+        addNeighborLink(mesh, best.mesh);
+      }
+      if (second) {
+        addNeighborLink(mesh, second.mesh);
+      }
+    });
+  }
+
+  function rebuildTopology() {
+    ringInfos = [];
+    innermostRingIndex = 0;
+    if (!spiralContainer.children.length) {
+      geometryRevision += 1;
+      resetAnimationState();
+      return;
+    }
+    const ringMap = new Map();
+    let minRingIndex = Infinity;
+    spiralContainer.children.forEach((mesh, idx) => {
+      mesh.userData.meshIndex = idx;
+      mesh.userData.neighborSet = new Set();
+      const ringIdx = Number(mesh.userData.ringIndex ?? 0);
+      if (!ringMap.has(ringIdx)) {
+        ringMap.set(ringIdx, []);
+      }
+      ringMap.get(ringIdx).push(mesh);
+      if (ringIdx < minRingIndex) {
+        minRingIndex = ringIdx;
+      }
+    });
+    ringInfos = Array.from(ringMap.entries())
+      .sort((a, b) => a[0] - b[0])
+      .map(([ringIdx, meshes], order) => {
+        meshes.sort((a, b) => (a.userData.angle || 0) - (b.userData.angle || 0));
+        meshes.forEach((mesh, idx) => {
+          mesh.userData.ringOrder = idx;
+        });
+        return { index: ringIdx, order, meshes };
+      });
+    innermostRingIndex = Number.isFinite(minRingIndex) ? minRingIndex : 0;
+    ringInfos.forEach(ring => {
+      const meshes = ring.meshes;
+      if (meshes.length <= 1) {
+        return;
+      }
+      for (let i = 0; i < meshes.length; i += 1) {
+        const current = meshes[i];
+        const next = meshes[(i + 1) % meshes.length];
+        const prev = meshes[(i - 1 + meshes.length) % meshes.length];
+        addNeighborLink(current, next);
+        addNeighborLink(current, prev);
+      }
+    });
+    for (let i = 0; i < ringInfos.length - 1; i += 1) {
+      linkRingPairs(ringInfos[i].meshes, ringInfos[i + 1].meshes);
+    }
+    spiralContainer.children.forEach(mesh => {
+      const neighbors = Array.from(mesh.userData.neighborSet || []);
+      mesh.userData.neighbors = neighbors;
+      mesh.userData.neighborIndices = neighbors.map(nb => nb.userData.meshIndex);
+      delete mesh.userData.neighborSet;
+    });
+    geometryRevision += 1;
+    resetAnimationState();
+  }
+
+  function getBaseMetalness() {
+    const sliderMetalness = metalnessSlider ? parseFloat(metalnessSlider.value) : NaN;
+    return Number.isFinite(sliderMetalness) ? sliderMetalness : 0.4;
+  }
+
+  function applyGlow(mesh, intensity, baseMetalness, colorHex = GLOW_COLORS.warm) {
+    if (!mesh || !mesh.material) {
+      return;
+    }
+    const clamped = clamp(Number.isFinite(intensity) ? intensity : 0, 0, 1);
+    if (clamped <= 0.001) {
+      mesh.material.emissive.setHex(0x000000);
+      mesh.material.emissiveIntensity = 0;
+    } else {
+      mesh.material.emissive.setHex(colorHex);
+      mesh.material.emissiveIntensity = clamped;
+    }
+    mesh.material.metalness = baseMetalness + 0.2 * clamped;
+  }
+
+  function setAnimationMode(nextId) {
+    const candidate = animationDefinitions[nextId] ? nextId : defaultAnimationId;
+    if (candidate !== activeAnimationId) {
+      activeAnimationId = candidate;
+      resetAnimationState();
+    }
+  }
+
+  setAnimationMode(activeAnimationId);
+
+  function ensureAnimationStateReady() {
+    if (!spiralContainer.children.length) {
+      return null;
+    }
+    const definition = animationDefinitions[activeAnimationId] || animationDefinitions[defaultAnimationId];
+    if (!definition) {
+      return null;
+    }
+    if (!animationState || animationState.mode !== definition.id || animationState.revision !== geometryRevision) {
+      animationState = {
+        mode: definition.id,
+        revision: geometryRevision,
+        data: definition.init({
+          meshes: spiralContainer.children,
+          rings: ringInfos,
+          innermostRingIndex,
+        }) || {},
+      };
+    }
+    return { definition, state: animationState.data };
+  }
+
+  function applyAnimationFrame(timeSec, rotationDeg) {
+    if (!spiralContainer.children.length) {
+      return;
+    }
+    const animationPayload = ensureAnimationStateReady();
+    if (!animationPayload) {
+      return;
+    }
+    const baseMetalness = getBaseMetalness();
+    spiralContainer.children.forEach(mesh => {
+      applyGlow(mesh, 0, baseMetalness);
+    });
+    const { definition, state } = animationPayload;
+    const setGlow = (mesh, intensity, color = GLOW_COLORS.warm) => {
+      applyGlow(mesh, intensity, baseMetalness, color);
+    };
+    definition.update({
+      state,
+      meshes: spiralContainer.children,
+      rings: ringInfos,
+      innermostRingIndex,
+      timeSec,
+      speed: Math.max(pulseSpeed, 0.01),
+      rotationDeg,
+      helpers: { setGlow },
+      baseMetalness,
+    });
   }
 
   function createPolygonMesh(outline, ringIndex = 0, lineAngle = 0) {
@@ -154,12 +649,15 @@ function createThreeViewer({
     const mesh = new THREE.Mesh(geometry, material);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
+    const centroid = computePolygonCentroid(outline);
+    const orientation = ((Math.atan2(centroid.y, centroid.x) % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
     mesh.userData = {
       ringIndex,
       lineAngle: normaliseOrientationDeg(lineAngle),
-      isPulsing: false,
-      wasInRange: false,
-      pulseStart: 0,
+      centroid,
+      angle: orientation,
+      ringOrder: 0,
+      neighbors: [],
     };
     return mesh;
   }
@@ -195,6 +693,7 @@ function createThreeViewer({
       spiralContainer.position.set(-center.x * scale, -center.y * scale, -center.z * scale);
       spiralContainer.scale.setScalar(scale);
       resetView();
+      rebuildTopology();
     }
     if (statsContainer) {
       statsContainer.hidden = false;
@@ -212,47 +711,14 @@ function createThreeViewer({
   let autoRotationSpeed = rotationSpeed ? parseFloat(rotationSpeed.value) : 0.4;
   let pulseSpeed = pulseSpeedSlider ? parseFloat(pulseSpeedSlider.value) : 1.0;
   let animationStart = performance.now();
-
-  function updateMaterialsForRotation(rotationAngleDeg, timeSec) {
-    if (!spiralContainer.children.length) {
-      return;
-    }
-    const threshold = 20;
-    const duration = 1 / Math.max(pulseSpeed, 0.0001);
-    const sliderMetalness = metalnessSlider ? parseFloat(metalnessSlider.value) : NaN;
-    const baseMetalness = Number.isFinite(sliderMetalness) ? sliderMetalness : 0.4;
-    const children = spiralContainer.children;
-    for (let idx = 0; idx < children.length; idx += 1) {
-      const mesh = children[idx];
-      const lineAngle = mesh.userData.lineAngle || 0;
-      const diff = angularDifferenceDeg(rotationAngleDeg, lineAngle);
-      const isInRange = diff < threshold;
-      if (isInRange && !mesh.userData.wasInRange) {
-        mesh.userData.isPulsing = true;
-        mesh.userData.pulseStart = timeSec;
-      }
-      if (mesh.userData.isPulsing) {
-        const elapsed = timeSec - mesh.userData.pulseStart;
-        if (elapsed < duration) {
-          const t = elapsed / duration;
-          const s = Math.sin(t * Math.PI);
-          mesh.material.emissive.setHex(0xffd700);
-          mesh.material.emissiveIntensity = s * 0.8;
-          mesh.material.metalness = baseMetalness + 0.1 * s;
-        } else {
-          mesh.userData.isPulsing = false;
-          mesh.material.emissive.setHex(0x000000);
-          mesh.material.emissiveIntensity = 0;
-          mesh.material.metalness = baseMetalness;
-        }
-      } else if (mesh.userData.wasInRange) {
-        mesh.material.emissive.setHex(0x000000);
-        mesh.material.emissiveIntensity = 0;
-        mesh.material.metalness = baseMetalness;
-      }
-      mesh.userData.wasInRange = isInRange;
-    }
-  }
+  let ringInfos = [];
+  let innermostRingIndex = 0;
+  let geometryRevision = 0;
+  let animationState = null;
+  const defaultAnimationId = 'rotation_sweep';
+  let activeAnimationId = animationModeSelect && animationDefinitions[animationModeSelect.value]
+    ? animationModeSelect.value
+    : defaultAnimationId;
 
   function updateCamera() {
     const { x, y } = cameraRotation;
@@ -397,6 +863,13 @@ function createThreeViewer({
     pulseSpeedSlider.addEventListener('input', () => {
       pulseSpeed = parseFloat(pulseSpeedSlider.value);
       pulseSpeedValue.textContent = pulseSpeed.toFixed(1);
+      resetAnimationState();
+    });
+  }
+
+  if (animationModeSelect) {
+    animationModeSelect.addEventListener('change', () => {
+      setAnimationMode(animationModeSelect.value);
     });
   }
 
@@ -472,7 +945,7 @@ function createThreeViewer({
       rotationDeg = manualValue % 360;
     }
     spiralContainer.rotation.z = THREE.MathUtils.degToRad(rotationDeg);
-    updateMaterialsForRotation(rotationDeg, timeSec);
+    applyAnimationFrame(timeSec, rotationDeg);
     updateCamera();
     renderer.render(scene, camera);
   }
