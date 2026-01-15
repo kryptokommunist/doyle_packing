@@ -14,6 +14,7 @@ import svgwrite
 from IPython.display import display, SVG, clear_output
 import ipywidgets as widgets
 from typing import Any, Dict, List, Optional, Set, Tuple
+from dataclasses import dataclass
 import random
 import math
 import itertools
@@ -176,6 +177,62 @@ def _shapely_geometry_to_segments(geometry):
             segments.extend(_shapely_geometry_to_segments(geom))
 
     return segments
+
+
+@dataclass(frozen=True)
+class PatternFillSettings:
+    """Normalized settings for polygon pattern fills."""
+
+    spacing: float
+    angle: float
+    shape: str = "lines"
+    rectangle_width: float = 2.0
+
+    @staticmethod
+    def _normalize_shape(shape: str) -> str:
+        shape_lower = str(shape).strip().lower()
+        if shape_lower in {"rect", "rectangle", "rectangles"}:
+            return "rectangles"
+        return "lines"
+
+    @classmethod
+    def parse(cls, value: Any) -> "PatternFillSettings":
+        """Create settings from user-provided tuples, dicts, or dataclasses."""
+
+        if isinstance(value, PatternFillSettings):
+            return value
+
+        if isinstance(value, dict):
+            spacing = float(value.get("spacing", value.get("line_spacing", 3.0)))
+            angle = float(value.get("angle", value.get("line_angle", 0.0)))
+            shape = cls._normalize_shape(value.get("shape", value.get("type", "lines")))
+            rect_width = float(
+                value.get(
+                    "rectangle_width",
+                    value.get("rect_width", value.get("width", 2.0))
+                )
+            )
+            return cls(spacing=spacing, angle=angle, shape=shape, rectangle_width=rect_width)
+
+        if isinstance(value, (list, tuple)):
+            if len(value) >= 4:
+                return cls(
+                    spacing=float(value[0]),
+                    angle=float(value[1]),
+                    shape=cls._normalize_shape(value[2]),
+                    rectangle_width=float(value[3]),
+                )
+            if len(value) == 3:
+                return cls(
+                    spacing=float(value[0]),
+                    angle=float(value[1]),
+                    shape=cls._normalize_shape(value[2]),
+                )
+            if len(value) >= 2:
+                return cls(spacing=float(value[0]), angle=float(value[1]))
+
+        # Fallback to defaults if the format is unexpected
+        return cls(spacing=3.0, angle=0.0)
 
 
 class LineFillCache:
@@ -602,8 +659,12 @@ class DrawingContext:
         return pattern
     
     def _draw_clipped_line_fill(self, coords, points, stroke, stroke_width, line_pattern_settings, draw_outline, line_offset):
-        """Draw polygon with clipped parallel line fill."""
-        line_spacing, line_angle = line_pattern_settings
+        """Draw polygon with clipped parallel line or rectangle fill."""
+        pattern_settings = PatternFillSettings.parse(line_pattern_settings)
+        line_spacing = pattern_settings.spacing
+        line_angle = pattern_settings.angle
+        pattern_shape = pattern_settings.shape
+        rectangle_width = max(0.0, float(pattern_settings.rectangle_width))
 
         base_array = convert_polygon_to_array(points)
         polygon_signature = None
@@ -691,17 +752,41 @@ class DrawingContext:
         
         # Draw clipped line segments
         line_color = stroke or "#000000"
-        for (x1, y1), (x2, y2) in line_segments:
-            self.dwg.add(self.dwg.line(
-                start=(x1, y1), 
-                end=(x2, y2),
-                stroke=line_color, 
-                stroke_width=0.5
-            ))
+        if pattern_shape == "rectangles" and rectangle_width > 0:
+            half_width = rectangle_width / 2.0
+            for (x1, y1), (x2, y2) in line_segments:
+                dx = x2 - x1
+                dy = y2 - y1
+                length = math.hypot(dx, dy)
+                if length <= 1e-9:
+                    continue
+                ux = -dy / length
+                uy = dx / length
+                ox = ux * half_width
+                oy = uy * half_width
+                rect_points = [
+                    (x1 - ox, y1 - oy),
+                    (x1 + ox, y1 + oy),
+                    (x2 + ox, y2 + oy),
+                    (x2 - ox, y2 - oy),
+                ]
+                self.dwg.add(self.dwg.polygon(
+                    points=rect_points,
+                    fill=line_color,
+                    stroke="none"
+                ))
+        else:
+            for (x1, y1), (x2, y2) in line_segments:
+                self.dwg.add(self.dwg.line(
+                    start=(x1, y1),
+                    end=(x2, y2),
+                    stroke=line_color,
+                    stroke_width=0.5
+                ))
     
-    def draw_group_outline(self, points: List[complex], fill: Optional[str] = None, 
-                          stroke: Optional[str] = None, stroke_width: float = 1.0, 
-                          line_pattern_settings = (3, 0), use_clipped_lines: bool = False, 
+    def draw_group_outline(self, points: List[complex], fill: Optional[str] = None,
+                          stroke: Optional[str] = None, stroke_width: float = 1.0,
+                          line_pattern_settings = (3, 0), use_clipped_lines: bool = False,
                           draw_outline: bool = True, line_offset: float = 0):
         """Draw a polygon with optional line pattern fill.
         
@@ -710,7 +795,7 @@ class DrawingContext:
             fill: Fill type ("pattern", "clipped_lines", color, or None)
             stroke: Outline color
             stroke_width: Outline width
-            line_pattern_settings: Tuple of (spacing, angle) for line fills
+            line_pattern_settings: Pattern fill settings (tuple, dict, or PatternFillSettings)
             use_clipped_lines: Use precise clipped lines instead of SVG patterns
             draw_outline: Whether to draw polygon outline
             line_offset: Inward offset for line clipping
@@ -1298,7 +1383,7 @@ class ArcGroup:
             debug: Whether to render with debug colors (fill and stroke).
             fill_opacity: The opacity of the fill when debug is True.
             pattern_fill: Whether to use pattern/line fill.
-            line_settings: Tuple of (spacing, angle) for line patterns.
+            line_settings: Pattern fill settings (tuple, dict, or PatternFillSettings).
             use_clipped_lines: If True, use actual clipped lines instead of SVG patterns (default: True).
             draw_outline: If True, draw the polygon outline (default: True).
             line_offset: Inset distance from polygon edge for line clipping (positive = shrink inward).
@@ -1561,14 +1646,16 @@ class DoyleSpiral:
     
     # ---- Rendering ----
 
-    def _render_arram_boyle(self, context: DrawingContext, debug_groups: bool = False, 
-                           add_fill_pattern: bool = False, fill_pattern_spacing: float = 5.0, 
-                           fill_pattern_angle: float = 0.0, red_outline: bool = False, 
-                           draw_group_outline: bool = True, fill_pattern_offset: float = 0):
+    def _render_arram_boyle(self, context: DrawingContext, debug_groups: bool = False,
+                           add_fill_pattern: bool = False, fill_pattern_spacing: float = 5.0,
+                           fill_pattern_angle: float = 0.0, red_outline: bool = False,
+                           draw_group_outline: bool = True, fill_pattern_offset: float = 0,
+                           fill_pattern_shape: str = "lines", fill_pattern_rectangle_width: float = 2.0):
         """Render spiral in Arram-Boyle mode with arc groups.
-        
+
         Creates arc groups for each circle, draws closure arcs, and optionally
-        adds pattern fills or debug visualization.
+        adds pattern fills or debug visualization. Pattern fills support either
+        lines or rectangles depending on ``fill_pattern_shape``.
         """
         # Setup
         self.generate_outer_circles()
@@ -1657,7 +1744,12 @@ class DoyleSpiral:
                 #group.to_svg_fill(context, debug=True, fill_opacity=0.25)
                 # Interpret fill_pattern_angle as per-ring angle offset (degrees)
                 ring_idx = group.ring_index if group.ring_index is not None else 0
-                line_settings = (fill_pattern_spacing, ring_idx * fill_pattern_angle)
+                line_settings = PatternFillSettings(
+                    spacing=fill_pattern_spacing,
+                    angle=ring_idx * fill_pattern_angle,
+                    shape=PatternFillSettings._normalize_shape(fill_pattern_shape),
+                    rectangle_width=fill_pattern_rectangle_width,
+                )
                 group.to_svg_fill(context, debug=False, fill_opacity=0.25, pattern_fill=True, line_settings=line_settings, draw_outline=draw_group_outline, line_offset=fill_pattern_offset)
 
         #draw red outline if option is set
@@ -1682,7 +1774,7 @@ class DoyleSpiral:
             context.draw_scaled(c)  # Use default circle color
 
 
-    def to_svg(self, mode: str = "doyle", size: int = 800, debug_groups: bool = False, add_fill_pattern: bool = False, fill_pattern_spacing: float = 5.0, fill_pattern_angle: float = 0.0, red_outline: bool = False, draw_group_outline: bool = True, fill_pattern_offset: float = 0) -> str:
+    def to_svg(self, mode: str = "doyle", size: int = 800, debug_groups: bool = False, add_fill_pattern: bool = False, fill_pattern_spacing: float = 5.0, fill_pattern_angle: float = 0.0, red_outline: bool = False, draw_group_outline: bool = True, fill_pattern_offset: float = 0, fill_pattern_shape: str = "lines", fill_pattern_rectangle_width: float = 2.0) -> str:
         """
         Generates the SVG representation of the spiral in the specified mode.
 
@@ -1696,6 +1788,8 @@ class DoyleSpiral:
             red_outline: If True, draw red outline on specific arcs.
             draw_group_outline: If True, draw the arc group polygon outlines (default: True).
             fill_pattern_offset: Inset distance from polygon edge for line clipping (positive = shrink inward).
+            fill_pattern_shape: Shape of the pattern elements ("lines" or "rectangles").
+            fill_pattern_rectangle_width: Width of rectangles when ``fill_pattern_shape`` is "rectangles".
 
         Returns:
             A string containing the SVG representation of the spiral.
@@ -1714,7 +1808,7 @@ class DoyleSpiral:
         if mode == "doyle":
             self._render_doyle(context)
         elif mode == "arram_boyle":
-            self._render_arram_boyle(context, debug_groups=debug_groups, add_fill_pattern=add_fill_pattern, fill_pattern_spacing=fill_pattern_spacing, fill_pattern_angle=fill_pattern_angle, red_outline=red_outline, draw_group_outline=draw_group_outline, fill_pattern_offset=fill_pattern_offset)
+            self._render_arram_boyle(context, debug_groups=debug_groups, add_fill_pattern=add_fill_pattern, fill_pattern_spacing=fill_pattern_spacing, fill_pattern_angle=fill_pattern_angle, red_outline=red_outline, draw_group_outline=draw_group_outline, fill_pattern_offset=fill_pattern_offset, fill_pattern_shape=fill_pattern_shape, fill_pattern_rectangle_width=fill_pattern_rectangle_width)
         else:
             raise ValueError(f"Unknown rendering mode: {mode}")
 
@@ -2033,6 +2127,8 @@ def spiral_ui():
     fill_pattern_spacing = widgets.FloatSlider(value=5.0, min=0.5, max=20.0, step=0.5, description='Line spacing')
     fill_pattern_angle = widgets.FloatSlider(value=0.0, min=-90.0, max=90.0, step=1.0, description='Angle (deg)')
     fill_pattern_offset = widgets.FloatSlider(value=0.0, min=0.0, max=10.0, step=0.5, description='Line offset')
+    pattern_shape = widgets.Dropdown(options=['lines', 'rectangles'], value='lines', description='Pattern shape')
+    rectangle_width = widgets.FloatSlider(value=2.0, min=0.5, max=20.0, step=0.5, description='Rect width')
     draw_group_outline = widgets.Checkbox(value=True, description='Draw group outline')
     
     # Save controls
@@ -2066,7 +2162,9 @@ def spiral_ui():
                     fill_pattern_angle=fill_pattern_angle.value,
                     red_outline=red_outline.value,
                     draw_group_outline=draw_group_outline.value,
-                    fill_pattern_offset=fill_pattern_offset.value
+                    fill_pattern_offset=fill_pattern_offset.value,
+                    fill_pattern_shape=pattern_shape.value,
+                    fill_pattern_rectangle_width=rectangle_width.value
                 )
                 spiral_holder["svg_data"] = svg_data  # Store SVG data for saving
                 display(SVG(svg_data)) # Display the generated SVG
@@ -2135,7 +2233,7 @@ def spiral_ui():
     save_json_button.on_click(save_json)
 
     # Wire up observers / callbacks: call the render function when widget values change
-    for w in [p, q, t, mode, arc_mode, num_gaps, debug, add_fill_pattern, fill_pattern_spacing, fill_pattern_angle, fill_pattern_offset, red_outline, draw_group_outline]:
+    for w in [p, q, t, mode, arc_mode, num_gaps, debug, add_fill_pattern, fill_pattern_spacing, fill_pattern_angle, fill_pattern_offset, pattern_shape, rectangle_width, red_outline, draw_group_outline]:
         w.observe(render, names="value")
 
     # Initial render when the UI is first displayed
@@ -2144,7 +2242,7 @@ def spiral_ui():
     # Arrange the widgets in a vertical box
     controls_top = widgets.HBox([p, q, t, mode])
     controls_arc = widgets.HBox([arc_mode, num_gaps, debug, red_outline])
-    controls_fill = widgets.HBox([add_fill_pattern, fill_pattern_spacing, fill_pattern_angle, fill_pattern_offset, draw_group_outline])
+    controls_fill = widgets.HBox([add_fill_pattern, fill_pattern_spacing, fill_pattern_angle, fill_pattern_offset, pattern_shape, rectangle_width, draw_group_outline])
     controls_save = widgets.HBox([filename_input, save_button, filename_json_input, save_json_button])
     display(widgets.VBox([controls_top, controls_arc, controls_fill, controls_save, save_output, out]))
 
