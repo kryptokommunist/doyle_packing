@@ -16,6 +16,19 @@ const EPSILON = 1e-9; // Small value to prevent division by zero
 const TOLERANCE = 1e-6; // General tolerance for floating point comparisons
 const INTERSECTION_TOLERANCE = 1e-3; // Tolerance for circle intersection detection
 
+// Arc rendering constants
+const ARC_SEGMENT_RATIO = 0.12; // Ratio of circle radius to desired segment length
+const MIN_ARC_SEGMENT_LENGTH = 6; // Minimum segment length in pixels
+const MAX_ARC_SEGMENT_LENGTH = 30; // Maximum segment length in pixels
+const MIN_ARC_STEPS = 10; // Minimum number of steps for arc rendering
+const MAX_ARC_STEPS = 44; // Maximum number of steps for arc rendering
+
+// Circle intersection constants
+const STANDARD_INTERSECTION_COUNT = 6; // Expected intersection count for hexagonal packing
+
+// Default colors
+const DEFAULT_OUTLINE_COLOR = '#000000'; // Black outline for group boundaries
+
 // Validation constants
 const MIN_P = 2; // Minimum value for p parameter
 const MAX_P = 256; // Maximum value for p parameter (practical limit)
@@ -28,23 +41,57 @@ const MAX_MAX_DISTANCE = 50000; // Maximum max_d value (practical limit)
 // Complex arithmetic helpers
 // ------------------------------------------------------------
 
+/**
+ * Complex number utilities for geometric computations.
+ * All methods are pure functions that don't modify inputs.
+ * @namespace Complex
+ */
 const Complex = {
+  /**
+   * Creates a new complex number.
+   * @param {number} [re=0] - Real part
+   * @param {number} [im=0] - Imaginary part
+   * @returns {{re: number, im: number}} Complex number
+   */
   create(re = 0, im = 0) {
     return { re, im };
   },
 
+  /**
+   * Creates a copy of a complex number.
+   * @param {{re: number, im: number}} z - Complex number to clone
+   * @returns {{re: number, im: number}} New complex number
+   */
   clone(z) {
     return { re: z.re, im: z.im };
   },
 
+  /**
+   * Adds two complex numbers.
+   * @param {{re: number, im: number}} a - First operand
+   * @param {{re: number, im: number}} b - Second operand
+   * @returns {{re: number, im: number}} Sum a + b
+   */
   add(a, b) {
     return { re: a.re + b.re, im: a.im + b.im };
   },
 
+  /**
+   * Subtracts two complex numbers.
+   * @param {{re: number, im: number}} a - First operand
+   * @param {{re: number, im: number}} b - Second operand
+   * @returns {{re: number, im: number}} Difference a - b
+   */
   sub(a, b) {
     return { re: a.re - b.re, im: a.im - b.im };
   },
 
+  /**
+   * Multiplies two complex numbers.
+   * @param {{re: number, im: number}} a - First operand
+   * @param {{re: number, im: number}} b - Second operand
+   * @returns {{re: number, im: number}} Product a * b
+   */
   mul(a, b) {
     return {
       re: a.re * b.re - a.im * b.im,
@@ -656,9 +703,13 @@ function estimateArcSteps(circle, start, end) {
   if (!Number.isFinite(arcLength) || arcLength <= 0) {
     return 12;
   }
-  const desiredSegmentLength = clamp(circle.radius * 0.12, 6, 30);
+  const desiredSegmentLength = clamp(
+    circle.radius * ARC_SEGMENT_RATIO,
+    MIN_ARC_SEGMENT_LENGTH,
+    MAX_ARC_SEGMENT_LENGTH
+  );
   const rawSteps = Math.ceil(arcLength / desiredSegmentLength);
-  return clamp(rawSteps, 10, 44);
+  return clamp(rawSteps, MIN_ARC_STEPS, MAX_ARC_STEPS);
 }
 
 function lineSegmentIntersection(p1, p2, p3, p4) {
@@ -1540,7 +1591,7 @@ class ArcGroup {
     }
     if (debug) {
       const fill = this.debugFill || colorFromSeed(this.id);
-      const stroke = this.debugStroke || '#000000';
+      const stroke = this.debugStroke || 'DEFAULT_OUTLINE_COLOR';
       context.drawGroupOutline(outline, {
         fill,
         stroke,
@@ -1550,7 +1601,7 @@ class ArcGroup {
       return;
     }
     if (patternFill) {
-      const stroke = this.debugStroke || '#000000';
+      const stroke = this.debugStroke || 'DEFAULT_OUTLINE_COLOR';
       const [lineSpacingRaw, lineAngleDeg] = lineSettings;
       const scaleFactor = context?.scaleFactor ?? 0;
       const invScale = scaleFactor > 1e-9 ? 1 / scaleFactor : 0;
@@ -1589,7 +1640,7 @@ class ArcGroup {
     if (drawOutline) {
       context.drawGroupOutline(outline, {
         fill: null,
-        stroke: '#000000',
+        stroke: 'DEFAULT_OUTLINE_COLOR',
         strokeWidth: outlineStrokeWidth,
       });
     }
@@ -1810,7 +1861,7 @@ class DrawingContext {
     this.mainGroup.appendChild(element);
   }
 
-  drawScaledArc(arc, { color = '#000000', width = 1.2 } = {}) {
+  drawScaledArc(arc, { color = 'DEFAULT_OUTLINE_COLOR', width = 1.2 } = {}) {
     if (!arc.visible) {
       return;
     }
@@ -1854,7 +1905,7 @@ class DrawingContext {
   }
 
   drawPolyline(points, {
-    color = '#000000',
+    color = 'DEFAULT_OUTLINE_COLOR',
     width = 1.2,
     close = false,
   } = {}) {
@@ -1917,7 +1968,7 @@ class DrawingContext {
 
   drawGroupOutline(points, {
     fill = null,
-    stroke = '#000000',
+    stroke = 'DEFAULT_OUTLINE_COLOR',
     strokeWidth = 1.0,
     fillOpacity = 1.0,
     linePatternSettings = [3, 0],
@@ -2048,7 +2099,7 @@ class DrawingContext {
         emitOutlineSegments(outlineSegments, stroke);
       }
       if (segmentsToDraw && segmentsToDraw.length) {
-        const lineColor = stroke || '#000000';
+        const lineColor = stroke || 'DEFAULT_OUTLINE_COLOR';
         const patternStyle = patternType === 'rectangles' ? 'rectangles' : 'lines';
         if (patternStyle === 'rectangles') {
           const widthValue = Number.isFinite(rectWidth) ? Math.abs(rectWidth) : 0;
@@ -2789,7 +2840,7 @@ class DoyleSpiralEngine {
       group.baseCircle = circle;
       if (debugGroups) {
         group.debugFill = colorFromSeed(circle.id);
-        group.debugStroke = '#000000';
+        group.debugStroke = 'DEFAULT_OUTLINE_COLOR';
       }
       const arcs = [];
       for (const [i, j] of arcsToDraw) {
@@ -2798,7 +2849,7 @@ class DoyleSpiralEngine {
         const steps = estimateArcSteps(circle, start, end);
         const arc = new ArcElement(circle, start, end, steps, true);
         if (!addFillPattern && drawGroupOutline) {
-          context.drawScaledArc(arc, { color: '#000000', width: outlineStrokeWidth });
+          context.drawScaledArc(arc, { color: 'DEFAULT_OUTLINE_COLOR', width: outlineStrokeWidth });
         }
         group.addArc(arc);
         arcs.push(arc);
@@ -2810,15 +2861,16 @@ class DoyleSpiralEngine {
   }
 
   /**
-   * Creates arc groups using rotational symmetry optimization (when p == q).
-   * Exploits the fact that each ring has rotational symmetry - we compute the arc group
-   * for one representative circle per ring and reuse its outline template for others.
+   * Groups circles by their ring index based on radius.
+   * @private
+   * @param {Map<number, number>} radiusToRing - Map from quantized radius to ring index
+   * @returns {Map<number, Array>} Map from ring index to array of circles
    */
-  _createArcGroupsSymmetric(radiusToRing, spiralCenter, debugGroups, addFillPattern, drawGroupOutline, context, outlineStrokeWidth = 0) {
-    // Group circles by ring
+  _groupCirclesByRing(radiusToRing) {
     const ringCircles = new Map();
     for (const circle of this.circles) {
-      if (circle.intersections.length !== 6) {
+      // Only process circles with standard hexagonal packing
+      if (circle.intersections.length !== STANDARD_INTERSECTION_COUNT) {
         continue;
       }
       const ring = radiusToRing.get(Number(circle.radius.toFixed(6)));
@@ -2829,68 +2881,114 @@ class DoyleSpiralEngine {
       }
       ringCircles.get(ring).push(circle);
     }
+    return ringCircles;
+  }
 
-    // For each ring, find one representative circle and compute template once
-    const ringTemplates = new Map();
+  /**
+   * Sorts circles by their angular position around the origin.
+   * @private
+   * @param {Array} circles - Array of circles to sort
+   */
+  _sortCirclesByAngle(circles) {
+    circles.sort((a, b) => {
+      const angleA = Math.atan2(a.center.im, a.center.re);
+      const angleB = Math.atan2(b.center.im, b.center.re);
+      return angleA - angleB;
+    });
+  }
 
+  /**
+   * Creates arcs for a circle and adds them to its group.
+   * @private
+   * @param {Object} circle - Circle to create arcs for
+   * @param {Object} group - ArcGroup to add arcs to
+   * @param {Array} arcsToDraw - Array of [start, end] index pairs
+   * @param {boolean} addFillPattern - Whether pattern fill is enabled
+   * @param {boolean} drawGroupOutline - Whether to draw outline
+   * @param {Object} context - Drawing context
+   * @param {number} outlineStrokeWidth - Stroke width for outlines
+   */
+  _createArcsForGroup(circle, group, arcsToDraw, addFillPattern, drawGroupOutline, context, outlineStrokeWidth) {
+    for (const [idx, jdx] of arcsToDraw) {
+      const start = circle.intersections[idx][0];
+      const end = circle.intersections[jdx][0];
+      const steps = estimateArcSteps(circle, start, end);
+      const arc = new ArcElement(circle, start, end, steps, true);
+
+      // Draw outline if needed (but not in pattern fill mode)
+      if (!addFillPattern && drawGroupOutline) {
+        context.drawScaledArc(arc, { color: 'DEFAULT_OUTLINE_COLOR', width: outlineStrokeWidth });
+      }
+
+      group.addArc(arc);
+    }
+  }
+
+  /**
+   * Creates arc groups using rotational symmetry optimization (when p == q).
+   * Exploits rotational symmetry: each ring has identical shapes at different angles.
+   * Master groups compute outlines once; clone groups rotate the master outline.
+   *
+   * @private
+   * @param {Map<number, number>} radiusToRing - Map from quantized radius to ring index
+   * @param {Object} spiralCenter - Center point of spiral (usually origin)
+   * @param {boolean} debugGroups - Whether to enable debug rendering
+   * @param {boolean} addFillPattern - Whether pattern fill is enabled
+   * @param {boolean} drawGroupOutline - Whether to draw outlines
+   * @param {Object} context - Drawing context for SVG generation
+   * @param {number} [outlineStrokeWidth=0] - Stroke width for outlines
+   */
+  _createArcGroupsSymmetric(radiusToRing, spiralCenter, debugGroups, addFillPattern, drawGroupOutline, context, outlineStrokeWidth = 0) {
+    const ringCircles = this._groupCirclesByRing(radiusToRing);
+
+    // Process each ring independently
     for (const [ringIndex, circles] of ringCircles.entries()) {
       if (!circles.length) continue;
 
-      // Sort circles by angle
-      circles.sort((a, b) => {
-        const angleA = Math.atan2(a.center.im, a.center.re);
-        const angleB = Math.atan2(b.center.im, b.center.re);
-        return angleA - angleB;
-      });
+      // Sort by angle for consistent processing
+      this._sortCirclesByAngle(circles);
 
-      // Create arc groups for all circles
-      // Each circle computes its own arc selection (important for correct gap placement)
-      // but we optimize outline computation via master/clone relationship
+      // Track the master group for this ring (used for outline sharing)
       let masterGroup = null;
 
+      // Create arc groups for all circles in this ring
       for (let i = 0; i < circles.length; i++) {
         const circle = circles[i];
 
-        // Each circle selects its own arcs based on its position
+        // Each circle selects its own arcs based on position
+        // (Critical: arc selection depends on angle relative to spiral center)
         const arcsToDraw = ArcSelector.selectArcsForGaps(circle, spiralCenter, this.numGaps, this.arcMode);
         if (!arcsToDraw.length) continue;
 
+        // Create the arc group
         const key = `circle_${circle.id}`;
         const group = this.createGroupForCircle(circle, key);
         group.ringIndex = ringIndex;
         group.baseCircle = circle;
 
+        // Configure debug rendering if enabled
         if (debugGroups) {
           group.debugFill = colorFromSeed(circle.id);
-          group.debugStroke = '#000000';
+          group.debugStroke = 'DEFAULT_OUTLINE_COLOR';
         }
 
-        for (const [idx, jdx] of arcsToDraw) {
-          const start = circle.intersections[idx][0];
-          const end = circle.intersections[jdx][0];
-          const steps = estimateArcSteps(circle, start, end);
-          const arc = new ArcElement(circle, start, end, steps, true);
-          if (!addFillPattern && drawGroupOutline) {
-            context.drawScaledArc(arc, { color: '#000000', width: outlineStrokeWidth });
-          }
-          group.addArc(arc);
-        }
+        // Create all arcs for this circle
+        this._createArcsForGroup(circle, group, arcsToDraw, addFillPattern, drawGroupOutline, context, outlineStrokeWidth);
 
+        // Set template metadata
         const templateKey = this._ringTemplateKey(ringIndex, arcsToDraw);
         group.templateKey = templateKey;
         group.originalArcsToDraw = arcsToDraw;
 
         // Set up master/clone relationship for outline computation optimization
-        // Only groups with same arc selection pattern can share outlines
         if (i === 0) {
           // First circle in ring is the master
           masterGroup = group;
-          // Pre-compute outline for master to warm cache before clones need it
-          // This avoids cascading cache misses when clones try to access master outline
+          // Pre-warm cache: compute outline immediately to avoid cascading misses
           masterGroup.getClosedOutline();
         } else if (masterGroup && arcsToDraw.length === masterGroup.originalArcsToDraw.length) {
-          // Check if arc patterns match (same number of arcs)
-          // All other circles are clones of the master for outline computation
+          // Subsequent circles with matching arc count are clones
+          // They will rotate the master's outline instead of computing from scratch
           group.cloneOf = masterGroup;
         }
       }
@@ -2932,7 +3030,7 @@ class DoyleSpiralEngine {
           group.ringIndex = -1;
           if (debugGroups) {
             group.debugFill = colorFromSeed(circle.id + 1000);
-            group.debugStroke = '#000000';
+            group.debugStroke = 'DEFAULT_OUTLINE_COLOR';
           }
           this.arcGroups.set(key, group);
         }
@@ -2943,7 +3041,7 @@ class DoyleSpiralEngine {
         const shouldDrawBaseOutline = !addFillPattern && drawGroupOutline && outlineStrokeWidth > 0;
         if (shouldDrawBaseOutline) {
           for (const path of paths) {
-            context.drawPolyline(path, { color: '#000000', width: outlineStrokeWidth });
+            context.drawPolyline(path, { color: 'DEFAULT_OUTLINE_COLOR', width: outlineStrokeWidth });
           }
         }
         if (redOutline && highlightStrokeWidth > 0) {
@@ -3369,6 +3467,23 @@ class DoyleSpiralEngine {
 // High level helpers
 // ------------------------------------------------------------
 
+/**
+ * Normalizes and validates spiral parameters.
+ * Converts user input into a consistent format with validated ranges.
+ *
+ * @param {Object} [params={}] - Raw parameters from user input
+ * @param {number} [params.p] - First spiral parameter (families)
+ * @param {number} [params.q] - Second spiral parameter (circles per family)
+ * @param {number} [params.t] - Rotation parameter (-1 to 1)
+ * @param {string} [params.mode] - Rendering mode ('arram_boyle' or 'classic')
+ * @param {string} [params.arc_mode] - Arc selection mode
+ * @param {number} [params.num_gaps] - Number of gaps in each circle
+ * @param {number} [params.size] - Canvas size in pixels
+ * @param {boolean} [params.add_fill_pattern] - Whether to add pattern fills
+ * @param {boolean} [params.draw_group_outline] - Whether to draw group outlines
+ * @param {boolean} [params.use_symmetric] - Enable symmetric optimization for p==q
+ * @returns {Object} Normalized parameters with all defaults applied
+ */
 function normaliseParams(params = {}) {
   const patternTypeRaw = typeof params.fill_pattern_type === 'string'
     ? params.fill_pattern_type.toLowerCase()
