@@ -10,6 +10,20 @@ const SVG_NS = 'http://www.w3.org/2000/svg';
 
 const RING_TEMPLATE_CACHE = new Map();
 
+// Performance and safety constants
+const MAX_ITERATIONS_PER_FAMILY = 10000; // Maximum iterations per spiral family to prevent infinite loops
+const EPSILON = 1e-9; // Small value to prevent division by zero
+const TOLERANCE = 1e-6; // General tolerance for floating point comparisons
+const INTERSECTION_TOLERANCE = 1e-3; // Tolerance for circle intersection detection
+
+// Validation constants
+const MIN_P = 2; // Minimum value for p parameter
+const MAX_P = 256; // Maximum value for p parameter (practical limit)
+const MIN_Q = 2; // Minimum value for q parameter
+const MAX_Q = 256; // Maximum value for q parameter (practical limit)
+const MIN_MAX_DISTANCE = 10; // Minimum max_d value
+const MAX_MAX_DISTANCE = 50000; // Maximum max_d value (practical limit)
+
 // ------------------------------------------------------------
 // Complex arithmetic helpers
 // ------------------------------------------------------------
@@ -1168,6 +1182,8 @@ class ArcGroup {
     this.templateTransform = null;
     this.patternAngles = [];
     this.primaryPatternAngle = 0;
+    this.cloneOf = null; // Reference to master group for symmetric optimization
+    this._rotationCache = null; // Cache for rotation parameters (cos, sin, angle)
   }
 
   addArc(arc) {
@@ -1262,10 +1278,45 @@ class ArcGroup {
     return ordered.concat(reversed.slice(1));
   }
 
-  getClosedOutline(tol = 1e-3) {
+  getClosedOutline(tol = INTERSECTION_TOLERANCE) {
     if (this._outlineCache) {
       return this._outlineCache.slice();
     }
+
+    // Symmetric optimization: if this is a clone, compute rotated version of master outline
+    if (this.cloneOf && this.baseCircle && this.cloneOf.baseCircle) {
+      const masterOutline = this.cloneOf.getClosedOutline(tol);
+      if (masterOutline && masterOutline.length > 0) {
+        // Cache rotation parameters to avoid recomputation
+        if (!this._rotationCache) {
+          const masterCenter = this.cloneOf.baseCircle.center;
+          const myCenter = this.baseCircle.center;
+          const masterAngle = Math.atan2(masterCenter.im, masterCenter.re);
+          const myAngle = Math.atan2(myCenter.im, myCenter.re);
+          const rotationAngle = myAngle - masterAngle;
+          this._rotationCache = {
+            angle: rotationAngle,
+            cos: Math.cos(rotationAngle),
+            sin: Math.sin(rotationAngle)
+          };
+        }
+
+        const { cos: cosTheta, sin: sinTheta } = this._rotationCache;
+
+        // Apply rotation to each point
+        const rotatedOutline = [];
+        for (const pt of masterOutline) {
+          rotatedOutline.push({
+            re: pt.re * cosTheta - pt.im * sinTheta,
+            im: pt.re * sinTheta + pt.im * cosTheta
+          });
+        }
+
+        this._outlineCache = rotatedOutline.slice();
+        return rotatedOutline.slice();
+      }
+    }
+
     const templateArcCount = this.template?.arcPointCounts?.length
       ?? this.template?.normalizedArcs?.length
       ?? null;
@@ -1671,6 +1722,12 @@ class DrawingContext {
     }
   }
 
+  /**
+   * Calculates and sets the scale factor to normalize spiral elements to fit within the canvas.
+   * The scale factor ensures the spiral maximally uses the available bounding box space.
+   *
+   * @param {Array} elements - Array of circle elements to normalize
+   */
   setNormalizationScale(elements) {
     if (!elements || !elements.length) {
       this.scaleFactor = 1;
@@ -1695,7 +1752,8 @@ class DrawingContext {
       this.scaleFactor = 1;
       return;
     }
-    this.scaleFactor = (minDimension / 2.1) / maxExtent;
+    // Use full bounding box (divide by 2.0 instead of 2.1) to maximize space usage
+    this.scaleFactor = (minDimension / 2.0) / maxExtent;
   }
 
   _scaled(point) {
@@ -1873,7 +1931,14 @@ class DrawingContext {
     if (!points || !points.length) {
       return;
     }
-    const scaled = points.map(pt => this._scaled(pt));
+    // Pre-allocate array and reuse scaleFactor to reduce allocations
+    const len = points.length;
+    const scaled = new Array(len);
+    const sf = this.scaleFactor;
+    for (let i = 0; i < len; i++) {
+      const pt = points[i];
+      scaled[i] = { x: pt.re * sf, y: pt.im * sf };
+    }
     const outlineStrokeWidth = Number.isFinite(strokeWidth) ? strokeWidth : 0;
     const outlineStrokeWidthStr = outlineStrokeWidth.toString();
     const patternStroke = Number.isFinite(patternStrokeWidth)
@@ -1885,14 +1950,15 @@ class DrawingContext {
       if (!pts.length) {
         return '';
       }
-      const commands = pts.map((pt, idx) => {
-        const prefix = idx === 0 ? 'M' : 'L';
-        return `${prefix}${pt.x.toFixed(4)},${pt.y.toFixed(4)}`;
-      });
-      if (closePath && pts.length > 1) {
-        commands.push('Z');
+      // Optimize by building string directly instead of creating intermediate arrays
+      let path = `M${pts[0].x.toFixed(4)},${pts[0].y.toFixed(4)}`;
+      for (let i = 1; i < pts.length; i++) {
+        path += ` L${pts[i].x.toFixed(4)},${pts[i].y.toFixed(4)}`;
       }
-      return commands.join(' ');
+      if (closePath && pts.length > 1) {
+        path += ' Z';
+      }
+      return path;
     };
 
     const createOutlineSegments = (pts, closeLoop = true) => {
@@ -2327,12 +2393,40 @@ class ArcSelector {
 // Doyle spiral engine
 // ------------------------------------------------------------
 
+/**
+ * DoyleSpiralEngine generates and renders Doyle spirals based on Apollonian circle packings.
+ *
+ * @class DoyleSpiralEngine
+ * @param {number} p - First parameter for Doyle spiral generation (controls spiral structure)
+ * @param {number} q - Second parameter for Doyle spiral generation (controls spiral structure)
+ * @param {number} t - Time/evolution parameter for animating the spiral
+ * @param {Object} options - Additional configuration options
+ * @param {number} options.maxDistance - Maximum distance for circle generation (affects spiral extent)
+ * @param {string} options.arcMode - Arc selection mode: 'closest', 'furthest', or 'average'
+ * @param {number} options.numGaps - Number of gaps in the spiral pattern
+ */
 class DoyleSpiralEngine {
   constructor(p = 7, q = 32, t = 0, {
     maxDistance = 2000,
     arcMode = 'closest',
     numGaps = 2,
   } = {}) {
+    // Validate parameters
+    if (!Number.isFinite(p) || p < MIN_P || p > MAX_P) {
+      throw new Error(`Parameter p must be between ${MIN_P} and ${MAX_P}, got ${p}`);
+    }
+    if (!Number.isFinite(q) || q < MIN_Q || q > MAX_Q) {
+      throw new Error(`Parameter q must be between ${MIN_Q} and ${MAX_Q}, got ${q}`);
+    }
+    if (!Number.isFinite(t)) {
+      throw new Error(`Parameter t must be a finite number, got ${t}`);
+    }
+    if (!Number.isFinite(maxDistance) || maxDistance < MIN_MAX_DISTANCE || maxDistance > MAX_MAX_DISTANCE) {
+      throw new Error(
+        `Parameter maxDistance must be between ${MIN_MAX_DISTANCE} and ${MAX_MAX_DISTANCE}, got ${maxDistance}`
+      );
+    }
+
     this.p = p;
     this.q = q;
     this.t = t;
@@ -2349,11 +2443,17 @@ class DoyleSpiralEngine {
     this._ringTemplates = new Map();
   }
 
+  /**
+   * Generates all circles in the Doyle spiral based on the current parameters.
+   * Creates both forward and backward spirals for each family.
+   *
+   * @throws {Error} If iteration limit is exceeded (prevents infinite loops)
+   */
   generateCircles() {
     const { r, a, b, mod_a: modA, arg_a: argA } = this.root;
     const scale = Math.pow(modA, this.t);
     const alpha = argA * this.t;
-    const minD = 1 / Math.max(scale, 1e-9);
+    const minD = 1 / Math.max(scale, EPSILON);
     const unit = Complex.expi(alpha);
 
     const circles = [];
@@ -2363,20 +2463,44 @@ class DoyleSpiralEngine {
     for (let family = 0; family < this.q; family += 1) {
       let qv = Complex.clone(start);
       let modQ = Complex.abs(qv);
-      while (modQ * scale < this.maxDistance) {
+      let iterations = 0;
+
+      // Forward spiral
+      while (modQ * scale < this.maxDistance && iterations < MAX_ITERATIONS_PER_FAMILY) {
         const scaled = Complex.mulScalar(Complex.mul(qv, unit), scale);
         circles.push(new CircleElement(scaled, r * scale * modQ));
         qv = Complex.mul(qv, a);
         modQ *= absA;
+        iterations++;
       }
+
+      if (iterations >= MAX_ITERATIONS_PER_FAMILY) {
+        throw new Error(
+          `Circle generation exceeded iteration limit (${MAX_ITERATIONS_PER_FAMILY} per family). ` +
+          `Try reducing p (${this.p}), q (${this.q}), or max_d (${this.maxDistance}).`
+        );
+      }
+
+      // Backward spiral
       qv = Complex.div(start, a);
       modQ = Complex.abs(qv);
-      while (modQ > minD) {
+      iterations = 0;
+
+      while (modQ > minD && iterations < MAX_ITERATIONS_PER_FAMILY) {
         const scaled = Complex.mulScalar(Complex.mul(qv, unit), scale);
         circles.push(new CircleElement(scaled, r * scale * modQ));
         qv = Complex.div(qv, a);
         modQ /= absA;
+        iterations++;
       }
+
+      if (iterations >= MAX_ITERATIONS_PER_FAMILY) {
+        throw new Error(
+          `Circle generation exceeded iteration limit (${MAX_ITERATIONS_PER_FAMILY} per family). ` +
+          `Try reducing p (${this.p}), q (${this.q}), or increasing max_d (${this.maxDistance}).`
+        );
+      }
+
       start = Complex.mul(start, b);
     }
 
@@ -2384,6 +2508,12 @@ class DoyleSpiralEngine {
     this._generated = true;
   }
 
+  /**
+   * Generates outer boundary circles for the spiral.
+   * These circles help define the outer edge of the pattern.
+   *
+   * @throws {Error} If iteration limit is exceeded
+   */
   generateOuterCircles() {
     const { r, a, b, mod_a: modA, arg_a: argA } = this.root;
     const scale = Math.pow(modA, this.t);
@@ -2394,9 +2524,21 @@ class DoyleSpiralEngine {
 
     for (let family = 0; family < this.q; family += 1) {
       let qv = Complex.clone(start);
-      while (Complex.abs(qv) * scale < this.maxDistance) {
+      let iterations = 0;
+
+      // Find outer circle boundary
+      while (Complex.abs(qv) * scale < this.maxDistance && iterations < MAX_ITERATIONS_PER_FAMILY) {
         qv = Complex.mul(qv, a);
+        iterations++;
       }
+
+      if (iterations >= MAX_ITERATIONS_PER_FAMILY) {
+        throw new Error(
+          `Outer circle generation exceeded iteration limit (${MAX_ITERATIONS_PER_FAMILY} per family). ` +
+          `Try reducing p (${this.p}), q (${this.q}), or max_d (${this.maxDistance}).`
+        );
+      }
+
       const modQ = Complex.abs(qv);
       if (modQ * scale < this.maxDistance * absA * 2) {
         const scaled = Complex.mulScalar(Complex.mul(qv, unit), scale);
@@ -2408,12 +2550,16 @@ class DoyleSpiralEngine {
     this.outerCircles = outer;
   }
 
+  /**
+   * Computes intersection points between all circles in the spiral.
+   * Uses spatial indexing for efficient intersection detection.
+   */
   computeAllIntersections() {
     const all = this.circles.concat(this.outerCircles);
     if (!all.length) {
       return;
     }
-    const tol = 1e-3;
+    const tol = INTERSECTION_TOLERANCE;
 
     for (const circle of all) {
       circle.resetIntersections();
@@ -2450,7 +2596,7 @@ class DoyleSpiralEngine {
       const x1 = xs[i];
       const y1 = ys[i];
       const r1 = radii[i];
-      const r1Sq = r1 * r1;
+      const r1Sq = radiiSq[i];
       const maxReachBase = r1 + tol;
 
       for (let j = i + 1; j < total; j += 1) {
@@ -2464,19 +2610,15 @@ class DoyleSpiralEngine {
         }
         const reach = r1 + r2 + tol;
         const dy = ys[j] - y1;
-        if (Math.abs(dy) > reach) {
-          continue;
-        }
-
+        // Quick rejection: use reach squared to avoid sqrt
+        const reachSq = reach * reach;
         const distSq = dx * dx + dy * dy;
-        if (distSq <= tolSq) {
+
+        if (distSq <= tolSq || distSq > reachSq) {
           continue;
         }
 
         const dist = Math.sqrt(distSq);
-        if (dist > reach) {
-          continue;
-        }
 
         const diffR = Math.abs(r1 - r2);
         if (dist < diffR - tol) {
@@ -2664,6 +2806,94 @@ class DoyleSpiralEngine {
 
       group.templateKey = this._ringTemplateKey(group.ringIndex ?? -1, arcsToDraw);
       group.originalArcsToDraw = arcsToDraw;
+    }
+  }
+
+  /**
+   * Creates arc groups using rotational symmetry optimization (when p == q).
+   * Exploits the fact that each ring has rotational symmetry - we compute the arc group
+   * for one representative circle per ring and reuse its outline template for others.
+   */
+  _createArcGroupsSymmetric(radiusToRing, spiralCenter, debugGroups, addFillPattern, drawGroupOutline, context, outlineStrokeWidth = 0) {
+    // Group circles by ring
+    const ringCircles = new Map();
+    for (const circle of this.circles) {
+      if (circle.intersections.length !== 6) {
+        continue;
+      }
+      const ring = radiusToRing.get(Number(circle.radius.toFixed(6)));
+      if (ring === undefined) continue;
+
+      if (!ringCircles.has(ring)) {
+        ringCircles.set(ring, []);
+      }
+      ringCircles.get(ring).push(circle);
+    }
+
+    // For each ring, find one representative circle and compute template once
+    const ringTemplates = new Map();
+
+    for (const [ringIndex, circles] of ringCircles.entries()) {
+      if (!circles.length) continue;
+
+      // Sort circles by angle
+      circles.sort((a, b) => {
+        const angleA = Math.atan2(a.center.im, a.center.re);
+        const angleB = Math.atan2(b.center.im, b.center.re);
+        return angleA - angleB;
+      });
+
+      // Create arc groups for all circles
+      // Each circle computes its own arc selection (important for correct gap placement)
+      // but we optimize outline computation via master/clone relationship
+      let masterGroup = null;
+
+      for (let i = 0; i < circles.length; i++) {
+        const circle = circles[i];
+
+        // Each circle selects its own arcs based on its position
+        const arcsToDraw = ArcSelector.selectArcsForGaps(circle, spiralCenter, this.numGaps, this.arcMode);
+        if (!arcsToDraw.length) continue;
+
+        const key = `circle_${circle.id}`;
+        const group = this.createGroupForCircle(circle, key);
+        group.ringIndex = ringIndex;
+        group.baseCircle = circle;
+
+        if (debugGroups) {
+          group.debugFill = colorFromSeed(circle.id);
+          group.debugStroke = '#000000';
+        }
+
+        for (const [idx, jdx] of arcsToDraw) {
+          const start = circle.intersections[idx][0];
+          const end = circle.intersections[jdx][0];
+          const steps = estimateArcSteps(circle, start, end);
+          const arc = new ArcElement(circle, start, end, steps, true);
+          if (!addFillPattern && drawGroupOutline) {
+            context.drawScaledArc(arc, { color: '#000000', width: outlineStrokeWidth });
+          }
+          group.addArc(arc);
+        }
+
+        const templateKey = this._ringTemplateKey(ringIndex, arcsToDraw);
+        group.templateKey = templateKey;
+        group.originalArcsToDraw = arcsToDraw;
+
+        // Set up master/clone relationship for outline computation optimization
+        // Only groups with same arc selection pattern can share outlines
+        if (i === 0) {
+          // First circle in ring is the master
+          masterGroup = group;
+          // Pre-compute outline for master to warm cache before clones need it
+          // This avoids cascading cache misses when clones try to access master outline
+          masterGroup.getClosedOutline();
+        } else if (masterGroup && arcsToDraw.length === masterGroup.originalArcsToDraw.length) {
+          // Check if arc patterns match (same number of arcs)
+          // All other circles are clones of the master for outline computation
+          group.cloneOf = masterGroup;
+        }
+      }
     }
   }
 
@@ -2867,6 +3097,7 @@ class DoyleSpiralEngine {
     highlightRimWidth = 1.2,
     groupOutlineWidth = 0.6,
     patternStrokeWidth = 0.5,
+    useSymmetric = true,
   } = {}) {
     this.generateOuterCircles();
     this.computeAllIntersections();
@@ -2891,15 +3122,30 @@ class DoyleSpiralEngine {
     const spiralCenter = Complex.ZERO;
     const radiusToRing = this._computeRingIndices();
 
-    this._createArcGroupsForCircles(
-      radiusToRing,
-      spiralCenter,
-      debugGroups,
-      addFillPattern,
-      drawGroupOutline,
-      context,
-      outlineStrokeWidth,
-    );
+    // Use symmetric optimization when p == q
+    const canUseSymmetric = useSymmetric && this.p === this.q;
+
+    if (canUseSymmetric) {
+      this._createArcGroupsSymmetric(
+        radiusToRing,
+        spiralCenter,
+        debugGroups,
+        addFillPattern,
+        drawGroupOutline,
+        context,
+        outlineStrokeWidth,
+      );
+    } else {
+      this._createArcGroupsForCircles(
+        radiusToRing,
+        spiralCenter,
+        debugGroups,
+        addFillPattern,
+        drawGroupOutline,
+        context,
+        outlineStrokeWidth,
+      );
+    }
     this._drawOuterClosureArcs(
       spiralCenter,
       debugGroups,
@@ -3030,6 +3276,7 @@ class DoyleSpiralEngine {
     boundingBoxWidth = null,
     boundingBoxHeight = null,
     lengthUnits = '',
+    useSymmetric = true,
   } = {}) {
     if (!this._generated) {
       this.generateCircles();
@@ -3063,6 +3310,7 @@ class DoyleSpiralEngine {
         highlightRimWidth,
         groupOutlineWidth,
         patternStrokeWidth,
+        useSymmetric,
       });
       return {
         svg: context.toElement(),
@@ -3170,9 +3418,27 @@ function normaliseParams(params = {}) {
     max_d: Number(params.max_d ?? 2000),
     bounding_box_width_mm: boundingWidthMm,
     bounding_box_height_mm: boundingHeightMm,
+    use_symmetric: params.use_symmetric !== undefined ? Boolean(params.use_symmetric) : true,
   };
 }
 
+/**
+ * High-level function to render a Doyle spiral with the specified parameters.
+ * This is the main entry point for generating spiral SVGs.
+ *
+ * @param {Object} params - Rendering parameters (will be normalized)
+ * @param {number} params.p - First spiral parameter (default: 16)
+ * @param {number} params.q - Second spiral parameter (default: 16)
+ * @param {number} params.t - Time/evolution parameter (default: 0)
+ * @param {number} params.max_d - Maximum distance for circle generation (default: 2000)
+ * @param {string} params.mode - Rendering mode: 'arram_boyle' or 'classic'
+ * @param {number} params.size - Canvas size in pixels (default: 800)
+ * @param {number} params.bounding_box_width_mm - Bounding box width in mm (default: 200)
+ * @param {number} params.bounding_box_height_mm - Bounding box height in mm (default: 200)
+ * @param {string|null} overrideMode - Optional mode override
+ * @returns {Object} Result object containing engine, svg, geometry, and metadata
+ * @throws {Error} If parameters are invalid or generation exceeds limits
+ */
 function renderSpiral(params = {}, overrideMode = null) {
   const opts = normaliseParams(params);
   const engine = new DoyleSpiralEngine(opts.p, opts.q, opts.t, {
@@ -3199,6 +3465,7 @@ function renderSpiral(params = {}, overrideMode = null) {
     boundingBoxWidth: opts.bounding_box_width_mm,
     boundingBoxHeight: opts.bounding_box_height_mm,
     lengthUnits: 'mm',
+    useSymmetric: opts.use_symmetric,
   });
   return {
     engine,

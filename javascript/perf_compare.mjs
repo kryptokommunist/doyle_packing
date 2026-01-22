@@ -145,7 +145,7 @@ function formatDuration(ms) {
   return `${ms.toFixed(2)} ms`;
 }
 
-function logSummary(title, summary, limit = 6) {
+function logSummary(title, summary, limit = 10) {
   if (!summary || !summary.phases || !summary.phases.length) {
     return;
   }
@@ -153,35 +153,103 @@ function logSummary(title, summary, limit = 6) {
   const entries = summary.phases.slice(0, limit);
   for (const entry of entries) {
     console.log(
-      `    ${entry.label.padEnd(28)} ${formatDuration(entry.total)} (${entry.count}x)`,
+      `    ${entry.label.padEnd(30)} ${formatDuration(entry.total).padStart(12)} (${entry.count}x)`,
     );
   }
   if (summary.patternFill.calls) {
     console.log(
-      `    patternFill(total)             ${formatDuration(summary.patternFill.time)} (${summary.patternFill.calls} calls)`,
+      `    ${'patternFill(total)'.padEnd(30)} ${formatDuration(summary.patternFill.time).padStart(12)} (${summary.patternFill.calls} calls)`,
     );
   }
   if (summary.outlines.calls) {
     console.log(
-      `    outlines(computed)             ${summary.outlines.calls} calls, ${formatDuration(summary.outlines.time)}`,
+      `    ${'getClosedOutline(total)'.padEnd(30)} ${formatDuration(summary.outlines.time).padStart(12)} (${summary.outlines.calls} calls)`,
     );
   }
 }
 
-const cases = [16, 32, 64];
-for (const spacing of [5, 2]) {
-  console.log(`Spacing ${spacing}`);
-  for (const value of cases) {
-    // Explicitly enable symmetric mode for p==q to use optimizations
-    const params = { p: value, q: value, fill_pattern_spacing: spacing, use_symmetric: true };
-    const withPattern = measure(params, true);
-    const withoutPattern = measure(params, false);
-    console.log(
-      `  p=q=${value}: pattern ${formatDuration(withPattern.duration)}, plain ${formatDuration(withoutPattern.duration)}`,
-    );
-    if (value === 64 && spacing === 5) {
-      logSummary('    pattern breakdown', withPattern.summary);
-      logSummary('    plain breakdown', withoutPattern.summary);
-    }
+console.log('='.repeat(80));
+console.log('PERFORMANCE COMPARISON: p==q (Symmetric) vs p!=q (Non-symmetric)');
+console.log('='.repeat(80));
+console.log();
+
+// Test p==q (symmetric mode should use optimizations)
+console.log('━'.repeat(80));
+console.log('TEST 1: p==q (SYMMETRIC MODE - Should use optimizations)');
+console.log('━'.repeat(80));
+const symmetricCases = [
+  { p: 16, q: 16, desc: 'Small (16x16)' },
+  { p: 32, q: 32, desc: 'Medium (32x32)' },
+  { p: 64, q: 64, desc: 'Large (64x64)' },
+];
+
+for (const { p, q, desc } of symmetricCases) {
+  const params = { p, q, fill_pattern_spacing: 5, use_symmetric: true };
+  const withPattern = measure(params, true);
+  const withoutPattern = measure(params, false);
+  console.log();
+  console.log(`${desc}:`);
+  console.log(`  Pattern mode: ${formatDuration(withPattern.duration)}`);
+  console.log(`  Plain mode:   ${formatDuration(withoutPattern.duration)}`);
+
+  if (p === 64) {
+    console.log();
+    logSummary('  Pattern mode breakdown:', withPattern.summary);
+    console.log();
+    logSummary('  Plain mode breakdown:', withoutPattern.summary);
   }
 }
+
+console.log();
+console.log('━'.repeat(80));
+console.log('TEST 2: p!=q (NON-SYMMETRIC MODE - No optimizations)');
+console.log('━'.repeat(80));
+
+const asymmetricCases = [
+  { p: 16, q: 18, desc: 'Small (16x18)' },
+  { p: 32, q: 36, desc: 'Medium (32x36)' },
+  { p: 64, q: 68, desc: 'Large (64x68)' },
+];
+
+for (const { p, q, desc } of asymmetricCases) {
+  const params = { p, q, fill_pattern_spacing: 5, use_symmetric: true };
+  const withPattern = measure(params, true);
+  const withoutPattern = measure(params, false);
+  console.log();
+  console.log(`${desc}:`);
+  console.log(`  Pattern mode: ${formatDuration(withPattern.duration)}`);
+  console.log(`  Plain mode:   ${formatDuration(withoutPattern.duration)}`);
+
+  if (p === 64) {
+    console.log();
+    logSummary('  Pattern mode breakdown:', withPattern.summary);
+    console.log();
+    logSummary('  Plain mode breakdown:', withoutPattern.summary);
+  }
+}
+
+console.log();
+console.log('━'.repeat(80));
+console.log('TEST 3: DIRECT COMPARISON at p=q=64');
+console.log('━'.repeat(80));
+console.log();
+
+const symResult = measure({ p: 64, q: 64, fill_pattern_spacing: 5, use_symmetric: true }, false);
+const asymResult = measure({ p: 64, q: 68, fill_pattern_spacing: 5, use_symmetric: true }, false);
+
+console.log(`Symmetric (p=q=64):     ${formatDuration(symResult.duration)}`);
+console.log(`Non-symmetric (p=64, q=68): ${formatDuration(asymResult.duration)}`);
+console.log();
+
+const speedup = ((asymResult.duration - symResult.duration) / asymResult.duration * 100);
+console.log(`Speedup from symmetric optimization: ${speedup.toFixed(1)}%`);
+console.log();
+
+console.log('Outline computation comparison:');
+console.log(`  Symmetric:     ${symResult.summary.outlines.calls} calls in ${formatDuration(symResult.summary.outlines.time)}`);
+console.log(`  Non-symmetric: ${asymResult.summary.outlines.calls} calls in ${formatDuration(asymResult.summary.outlines.time)}`);
+const outlineReduction = ((asymResult.summary.outlines.calls - symResult.summary.outlines.calls) / asymResult.summary.outlines.calls * 100);
+console.log(`  Outline call reduction: ${outlineReduction.toFixed(1)}%`);
+
+console.log();
+console.log('='.repeat(80));

@@ -17,6 +17,8 @@ const fillPatternTypeSelect = document.getElementById('fillPatternType');
 const fillRectWidthGroup = document.getElementById('rectWidthGroup');
 const outlineToggle = document.getElementById('toggleOutline');
 const redToggle = document.getElementById('toggleRed');
+const symmetricToggle = document.getElementById('toggleSymmetric');
+const symmetricHint = document.getElementById('symmetricHint');
 const viewButtons = Array.from(document.querySelectorAll('[data-view]'));
 const view2d = document.getElementById('view2d');
 const view3d = document.getElementById('view3d');
@@ -190,10 +192,20 @@ function collectParams() {
   raw.add_fill_pattern = fillToggle.checked;
   raw.draw_group_outline = outlineToggle.checked;
   raw.red_outline = redToggle.checked;
+  raw.use_symmetric = symmetricToggle?.checked ?? true;
   const params = normaliseParams(raw);
   // Preserve mode exactly as selected (normaliseParams already handles but ensure string)
   params.mode = raw.mode || params.mode;
   return params;
+}
+
+function updateSymmetricHint() {
+  if (!symmetricHint || !symmetricToggle) return;
+  const formData = new FormData(form);
+  const p = Number(formData.get('p'));
+  const q = Number(formData.get('q'));
+  const isSymmetric = p === q && symmetricToggle.checked;
+  symmetricHint.style.display = isSymmetric ? 'block' : 'none';
 }
 
 function debounce(fn, delay) {
@@ -360,7 +372,17 @@ function startRenderJob(params, showLoading) {
         terminateRenderWorker();
         activeRenderJob = null;
         const timeoutSeconds = Math.round(renderTimeoutMs / 100) / 10;
-        handleRenderFailure(`Render cancelled for exceeding the ${timeoutSeconds}s time limit. Adjust detail or increase the timeout in Advanced settings.`);
+        const suggestions = [];
+        if (params.p > 32) suggestions.push(`reduce p from ${params.p} to ${Math.floor(params.p / 2)}`);
+        if (params.q > 32) suggestions.push(`reduce q from ${params.q} to ${Math.floor(params.q / 2)}`);
+        if (params.max_d > 5000) suggestions.push(`reduce max_d from ${params.max_d} to ${Math.floor(params.max_d / 2)}`);
+        const suggestionText = suggestions.length > 0
+          ? ` Try: ${suggestions.join(', ')}.`
+          : ' Try reducing p, q, or max_d parameters.';
+        handleRenderFailure(
+          `Render cancelled for exceeding the ${timeoutSeconds}s time limit.${suggestionText} ` +
+          `Or increase timeout in Advanced settings.`
+        );
       }
     }, renderTimeoutMs);
     activeRenderJob = { type: 'worker', requestId: token, handle: worker, timeoutId: watchdogId };
@@ -437,6 +459,35 @@ function renderCurrentSpiral(showLoading = true) {
 
 const debouncedRender = debounce(() => renderCurrentSpiral(false), 200);
 
+// Synchronize p and q inputs when symmetric mode is enabled
+function syncPQ(sourceInput, targetInput) {
+  if (symmetricToggle && symmetricToggle.checked) {
+    targetInput.value = sourceInput.value;
+    updateSymmetricHint();
+  }
+}
+
+// Get p and q inputs for synchronization
+const inputP = document.getElementById('inputP');
+const inputQ = document.getElementById('inputQ');
+
+// Add individual listeners for p/q synchronization
+if (inputP && inputQ) {
+  inputP.addEventListener('input', () => syncPQ(inputP, inputQ));
+  inputQ.addEventListener('input', () => syncPQ(inputQ, inputP));
+}
+
+// When symmetric toggle changes, sync values immediately
+if (symmetricToggle && inputP && inputQ) {
+  symmetricToggle.addEventListener('change', () => {
+    if (symmetricToggle.checked && inputP.value !== inputQ.value) {
+      inputQ.value = inputP.value;
+      updateSymmetricHint();
+      debouncedRender();
+    }
+  });
+}
+
 form.addEventListener('input', event => {
   if (event.target.name === 't') {
     updateTValue();
@@ -446,6 +497,9 @@ form.addEventListener('input', event => {
   }
   if (event.target === fillPatternTypeSelect) {
     updatePatternTypeVisibility();
+  }
+  if (event.target.name === 'p' || event.target.name === 'q' || event.target === symmetricToggle) {
+    updateSymmetricHint();
   }
   debouncedRender();
   if (threeApp) {
@@ -513,4 +567,5 @@ if (fillPatternTypeSelect) {
 updateExportAvailability(false);
 toggleFillSettings();
 updateTValue();
+updateSymmetricHint();
 renderCurrentSpiral(true);
