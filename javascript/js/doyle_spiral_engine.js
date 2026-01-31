@@ -512,11 +512,76 @@ function patternAnimationCAWavefront(context, opts = {}) {
   return assignments;
 }
 
+/**
+ * Spiral vortex: angles follow the polar angle (theta) creating a spinning vortex effect.
+ * Groups at the same angular position light up together, creating radial spokes that rotate.
+ */
+function patternAnimationSpiralVortex(context, opts = {}) {
+  const assignments = new Map();
+  const baseAngle = Number.isFinite(opts.baseAngle) ? opts.baseAngle : 0;
+  context.metaList.forEach(meta => {
+    // Convert theta to degrees and use it directly for angle
+    const thetaDeg = normaliseAngle360(meta.theta * (180 / Math.PI));
+    // Add ring-based offset for depth effect
+    const ringOffset = meta.ringIndex * 3;
+    const angle = thetaDeg + ringOffset + meta.ringIndex * baseAngle;
+    assignments.set(meta.id, { primaryAngle: angle, angles: [angle] });
+  });
+  return assignments;
+}
+
+/**
+ * Diamond pulse: creates a diamond/checkerboard pattern that pulses outward.
+ * Alternates based on ring index and position within ring.
+ */
+function patternAnimationDiamondPulse(context, opts = {}) {
+  const assignments = new Map();
+  const baseAngle = Number.isFinite(opts.baseAngle) ? opts.baseAngle : 0;
+  for (const ring of context.sortedRings) {
+    const metas = context.ringMap.get(ring) || [];
+    metas.forEach((meta, index) => {
+      // Create checkerboard pattern: alternate based on ring + position parity
+      const parity = (ring + index) % 2;
+      const phase = parity * 45; // 45-degree offset between alternating cells
+      const radialPulse = meta.radius * 15; // Pulse outward based on distance
+      const angle = phase + radialPulse + meta.ringIndex * baseAngle;
+      assignments.set(meta.id, { primaryAngle: angle, angles: [angle] });
+    });
+  }
+  return assignments;
+}
+
+/**
+ * Fibonacci spiral: angles follow a golden spiral pattern, creating organic flow.
+ * Uses the golden angle (~137.5°) to distribute angles naturally.
+ */
+function patternAnimationFibonacciSpiral(context, opts = {}) {
+  const assignments = new Map();
+  const baseAngle = Number.isFinite(opts.baseAngle) ? opts.baseAngle : 0;
+  const goldenAngle = 137.507764; // Golden angle in degrees
+
+  // Sort by distance from center for consistent ordering
+  const sorted = [...context.metaList].sort((a, b) => a.radius - b.radius);
+
+  sorted.forEach((meta, index) => {
+    // Each successive element rotates by the golden angle
+    const fibAngle = (index * goldenAngle) % 360;
+    // Add subtle ring-based variation
+    const ringVar = Math.sin(meta.ringIndex * 0.5) * 10;
+    const angle = fibAngle + ringVar + meta.ringIndex * baseAngle;
+    assignments.set(meta.id, { primaryAngle: angle, angles: [angle] });
+  });
+  return assignments;
+}
+
 const PATTERN_ANIMATION_DEFINITIONS = {
   radial_bloom: { label: 'Radial bloom', generator: patternAnimationRadialBloom },
   ring_cycle: { label: 'Ring cycle chase', generator: patternAnimationRingCycle },
   ring_pingpong: { label: 'Alternating ring sweep', generator: patternAnimationRingPingPong },
   ca_wavefront: { label: 'Cellular wavefront', generator: patternAnimationCAWavefront },
+  spiral_vortex: { label: 'Spiral vortex', generator: patternAnimationSpiralVortex },
+  diamond_pulse: { label: 'Diamond pulse', generator: patternAnimationDiamondPulse },
+  fibonacci_spiral: { label: 'Fibonacci spiral', generator: patternAnimationFibonacciSpiral },
 };
 
 const DEFAULT_PATTERN_ANIMATION = 'radial_bloom';
