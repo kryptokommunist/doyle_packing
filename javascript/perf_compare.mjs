@@ -101,6 +101,10 @@ class FakeElement {
     this.attributes.set(name, String(value));
   }
 
+  setAttributeNS(_ns, name, value) {
+    this.attributes.set(name, String(value));
+  }
+
   appendChild(child) {
     this.children.push(child);
     return child;

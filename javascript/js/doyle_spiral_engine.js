@@ -3397,8 +3397,9 @@ class DoyleSpiralEngine {
       .map(group => group.ringIndex);
     const maxIndex = ringIndices.length ? Math.max(...ringIndices) : null;
 
-    // Use symbol optimization when symmetric mode is active and displayMode is true
-    const useSymbolOptimization = canUseSymmetric && context.displayMode;
+    // Use symbol optimization when symmetric mode is active, displayMode is true,
+    // AND we have a real DOM (not virtual DOM for server-side rendering)
+    const useSymbolOptimization = canUseSymmetric && context.displayMode && context.hasDOM;
 
     if (debugGroups) {
       for (const [key, group] of this.arcGroups.entries()) {
