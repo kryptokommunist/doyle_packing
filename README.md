@@ -8,6 +8,10 @@ Design and preview light-reflective patterns that can be etched onto metal surfa
 - **Performance hooks:** The `javascript/js` and `javascript/perf_measure.mjs` modules provide the rendering and timing utilities that drive the preview experience without extra build steps.
 - **Running the UI:** Open `javascript/index.html` directly in a modern browser or serve the `javascript/` folder with any static file server to try the designer. No bundling is required; all dependencies are pulled from CDNs.
 
+## Technical details
+- **Bounding box:** The spiral is scaled so the outermost petal tips align with the viewport boundary. This is achieved by using the outer circle centers (the invisible ring surrounding the visible pattern) to define the bounding diameter.
+- **SVG export:** Exported SVGs contain fully expanded elements for maximum compatibility with external tools and laser software.
+
 ## Python services (briefly)
 A minimal Flask app in `app.py` mirrors the same spiral generation logic server-side. You can start it with `python app.py` if you prefer an API-driven workflow, but the primary interaction model is the JavaScript UI described above.
 

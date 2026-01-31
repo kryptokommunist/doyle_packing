@@ -1770,10 +1770,6 @@ class DrawingContext {
     this.height = resolvedHeight;
     this.units = typeof units === 'string' ? units : '';
     this.scaleFactor = 1;
-    // Display mode: true uses <symbol>/<use> for clones, false expands all elements (for export)
-    this.displayMode = true;
-    this._symbolsCreated = new Map();
-    this._currentSymbolId = null;
     this.hasDOM = typeof document !== 'undefined' && !!document.createElementNS;
     if (this.hasDOM) {
       this.svg = document.createElementNS(SVG_NS, 'svg');
@@ -1828,90 +1824,41 @@ class DrawingContext {
     this.scaleFactor = (minDimension / 2.0) / maxExtent;
   }
 
-  setDisplayMode(isDisplay) {
-    this.displayMode = isDisplay;
-    this._symbolsCreated = new Map();
-    this._currentSymbolId = null;
-  }
-
-  beginSymbol(symbolId) {
-    if (this._symbolsCreated.has(symbolId)) {
+  /**
+   * Sets the scale factor using outer circle centers to define the bounding box.
+   * The outer circles form a ring around the visible pattern, and their centers
+   * define a bounding circle whose diameter determines the scale.
+   *
+   * @param {Array} outerCircles - Array of outer circle elements
+   */
+  setNormalizationScaleFromOuterCircles(outerCircles) {
+    if (!outerCircles || !outerCircles.length) {
+      this.scaleFactor = 1;
       return;
     }
-    if (this.hasDOM) {
-      const symbol = document.createElementNS(SVG_NS, 'symbol');
-      symbol.setAttribute('id', symbolId);
-      symbol.setAttribute('overflow', 'visible');
-      const group = document.createElementNS(SVG_NS, 'g');
-      symbol.appendChild(group);
-      this.defs.appendChild(symbol);
-      this._symbolsCreated.set(symbolId, { element: symbol, group });
-    } else {
-      this._symbolsCreated.set(symbolId, { content: [] });
-    }
-    this._currentSymbolId = symbolId;
-  }
 
-  endSymbol() {
-    this._currentSymbolId = null;
-  }
-
-  useSymbol(symbolId, rotationAngle) {
-    const angleDeg = rotationAngle * (180 / Math.PI);
-    if (this.hasDOM) {
-      const use = document.createElementNS(SVG_NS, 'use');
-      use.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', `#${symbolId}`);
-      use.setAttribute('href', `#${symbolId}`);
-      use.setAttribute('transform', `rotate(${angleDeg.toFixed(6)})`);
-      this.mainGroup.appendChild(use);
-    } else {
-      this._pushVirtual('use', {
-        'xlink:href': `#${symbolId}`,
-        href: `#${symbolId}`,
-        transform: `rotate(${angleDeg.toFixed(6)})`,
-      });
+    // Find maximum distance from origin to any outer circle center
+    // This effectively finds the radius of the bounding circle
+    let maxDistance = 0;
+    for (const circle of outerCircles) {
+      const center = circle.center;
+      const dist = Math.sqrt(center.re * center.re + center.im * center.im);
+      maxDistance = Math.max(maxDistance, dist);
     }
-  }
 
-  _getCurrentTarget() {
-    if (this._currentSymbolId) {
-      const entry = this._symbolsCreated.get(this._currentSymbolId);
-      if (entry) {
-        return this.hasDOM ? entry.group : entry.content;
-      }
+    if (maxDistance === 0) {
+      this.scaleFactor = 1;
+      return;
     }
-    return this.hasDOM ? this.mainGroup : this._virtualMain;
-  }
 
-  _appendElement(element) {
-    const target = this._getCurrentTarget();
-    if (this.hasDOM && target) {
-      target.appendChild(element);
+    const minDimension = Math.min(Math.abs(this.width), Math.abs(this.height));
+    if (!Number.isFinite(minDimension) || minDimension <= 0) {
+      this.scaleFactor = 1;
+      return;
     }
-  }
 
-  _pushToCurrentTarget(tag, attributes) {
-    if (!this.hasDOM) {
-      const target = this._getCurrentTarget();
-      if (target) {
-        const attrString = Object.entries(attributes)
-          .filter(([, value]) => value !== null && value !== undefined)
-          .map(([key, value]) => `${key}="${String(value)}"`)
-          .join(' ');
-        target.push(`<${tag}${attrString ? ` ${attrString}` : ''} />`);
-      }
-    }
-  }
-
-  _finalizeSymbols() {
-    if (!this.hasDOM && this._symbolsCreated.size > 0) {
-      for (const [symbolId, entry] of this._symbolsCreated.entries()) {
-        if (entry.content && entry.content.length > 0) {
-          const symbolStr = `<symbol id="${symbolId}" overflow="visible"><g>${entry.content.join('')}</g></symbol>`;
-          this._virtualDefs.push(symbolStr);
-        }
-      }
-    }
+    // The bounding diameter is 2 * maxDistance, so radius is maxDistance
+    this.scaleFactor = (minDimension / 2.0) / maxDistance;
   }
 
   _scaled(point) {
@@ -2156,7 +2103,7 @@ class DrawingContext {
       const strokeColor = color || 'none';
       if (!this.hasDOM) {
         for (const [start, end] of segments) {
-          this._pushToCurrentTarget('line', {
+          this._pushVirtual('line', {
             x1: start.x.toFixed(4),
             y1: start.y.toFixed(4),
             x2: end.x.toFixed(4),
@@ -2177,7 +2124,7 @@ class DrawingContext {
         line.setAttribute('stroke', strokeColor);
         line.setAttribute('stroke-width', outlineStrokeWidthStr);
         line.setAttribute('stroke-linecap', 'round');
-        this._appendElement(line);
+        this.mainGroup.appendChild(line);
       }
     };
 
@@ -2244,13 +2191,13 @@ class DrawingContext {
                 'stroke-width': patternStrokeStr,
               };
               if (!this.hasDOM) {
-                this._pushToCurrentTarget('path', rectAttributes);
+                this._pushVirtual('path', rectAttributes);
               } else {
                 const path = document.createElementNS(SVG_NS, 'path');
                 for (const [key, value] of Object.entries(rectAttributes)) {
                   path.setAttribute(key, value);
                 }
-                this._appendElement(path);
+                this.mainGroup.appendChild(path);
               }
             }
           }
@@ -2258,7 +2205,7 @@ class DrawingContext {
           if (patternStroke > 0) {
             for (const [p1, p2] of segmentsToDraw) {
               if (!this.hasDOM) {
-                this._pushToCurrentTarget('line', {
+                this._pushVirtual('line', {
                   x1: p1.x.toFixed(4),
                   y1: p1.y.toFixed(4),
                   x2: p2.x.toFixed(4),
@@ -2276,7 +2223,7 @@ class DrawingContext {
                 line.setAttribute('stroke', lineColor);
                 line.setAttribute('stroke-width', patternStrokeStr);
                 line.setAttribute('stroke-linecap', 'round');
-                this._appendElement(line);
+                this.mainGroup.appendChild(line);
               }
             }
           }
@@ -2294,14 +2241,14 @@ class DrawingContext {
           'fill-opacity': fillOpacity.toString(),
           stroke: 'none',
         };
-        this._pushToCurrentTarget('path', attrs);
+        this._pushVirtual('path', attrs);
       } else {
         const path = document.createElementNS(SVG_NS, 'path');
         path.setAttribute('d', pathData);
         path.setAttribute('fill', fill);
         path.setAttribute('fill-opacity', fillOpacity.toString());
         path.setAttribute('stroke', 'none');
-        this._appendElement(path);
+        this.mainGroup.appendChild(path);
       }
     }
 
@@ -2311,7 +2258,6 @@ class DrawingContext {
   }
 
   toString() {
-    this._finalizeSymbols();
     if (this.hasDOM && this.svg) {
       return new XMLSerializer().serializeToString(this.svg);
     }
@@ -3307,9 +3253,9 @@ class DoyleSpiralEngine {
   } = {}) {
     this.generateOuterCircles();
     this.computeAllIntersections();
-    // The outer circles are generated solely to derive the closure arcs on the rim
-    // and should not influence the scaling used for the visible outline.
-    context.setNormalizationScale(this.circles);
+    // Use outer circle centers to define the bounding box - this ensures
+    // the petal tips align with the viewport boundary
+    context.setNormalizationScaleFromOuterCircles(this.outerCircles);
     this.fillPatternAngle = fillPatternAngle;
     this.fillPatternAnimationId = normalisePatternAnimationId(fillPatternAnimation);
     this.arcGroups.clear();
@@ -3397,10 +3343,6 @@ class DoyleSpiralEngine {
       .map(group => group.ringIndex);
     const maxIndex = ringIndices.length ? Math.max(...ringIndices) : null;
 
-    // Use symbol optimization when symmetric mode is active, displayMode is true,
-    // AND we have a real DOM (not virtual DOM for server-side rendering)
-    const useSymbolOptimization = canUseSymmetric && context.displayMode && context.hasDOM;
-
     if (debugGroups) {
       for (const [key, group] of this.arcGroups.entries()) {
         if (key.startsWith('outer_')) {
@@ -3415,85 +3357,18 @@ class DoyleSpiralEngine {
     }
 
     if (addFillPattern) {
-      if (useSymbolOptimization) {
-        // Symbol-based rendering: render master groups into symbols, use <use> for clones
-        const ringGroups = new Map();
-        for (const [key, group] of this.arcGroups.entries()) {
-          if (key.startsWith('outer_')) continue;
-          const ringIdx = group.ringIndex ?? 0;
-          if (!ringGroups.has(ringIdx)) ringGroups.set(ringIdx, []);
-          ringGroups.get(ringIdx).push(group);
-        }
-
-        for (const [ringIdx, groups] of ringGroups.entries()) {
-          const masterGroup = groups.find(g => !g.cloneOf);
-          if (!masterGroup) {
-            // No master, render all normally
-            for (const group of groups) {
-              const angle = Number.isFinite(group.primaryPatternAngle)
-                ? group.primaryPatternAngle : ringIdx * fillPatternAngle;
-              group.toSVGFill(context, {
-                debug: false, patternFill: true, lineSettings: [spacingInternal, angle],
-                drawOutline: drawGroupOutline, lineOffset: offsetInternal,
-                patternType: fillPatternType, rectWidth: rectWidthForGroups,
-                patternSpacingOverride: spacingForGroups, patternOffsetOverride: offsetForGroups,
-                outlineStrokeWidth, patternStrokeWidth: patternStroke,
-              });
-            }
-            continue;
-          }
-
-          // Render master into a symbol
-          const symbolId = `ring_${ringIdx}_master`;
-          context.beginSymbol(symbolId);
-          const masterAngle = Number.isFinite(masterGroup.primaryPatternAngle)
-            ? masterGroup.primaryPatternAngle : ringIdx * fillPatternAngle;
-          masterGroup.toSVGFill(context, {
-            debug: false, patternFill: true, lineSettings: [spacingInternal, masterAngle],
-            drawOutline: drawGroupOutline, lineOffset: offsetInternal,
-            patternType: fillPatternType, rectWidth: rectWidthForGroups,
-            patternSpacingOverride: spacingForGroups, patternOffsetOverride: offsetForGroups,
-            outlineStrokeWidth, patternStrokeWidth: patternStroke,
-          });
-          context.endSymbol();
-
-          // Use symbol at master position (0 rotation)
-          context.useSymbol(symbolId, 0);
-
-          // Use <use> elements for clones with their rotation
-          for (const group of groups) {
-            if (group === masterGroup) continue;
-            if (group._rotationCache) {
-              context.useSymbol(symbolId, group._rotationCache.angle);
-            } else {
-              // Fallback: render normally
-              const angle = Number.isFinite(group.primaryPatternAngle)
-                ? group.primaryPatternAngle : ringIdx * fillPatternAngle;
-              group.toSVGFill(context, {
-                debug: false, patternFill: true, lineSettings: [spacingInternal, angle],
-                drawOutline: drawGroupOutline, lineOffset: offsetInternal,
-                patternType: fillPatternType, rectWidth: rectWidthForGroups,
-                patternSpacingOverride: spacingForGroups, patternOffsetOverride: offsetForGroups,
-                outlineStrokeWidth, patternStrokeWidth: patternStroke,
-              });
-            }
-          }
-        }
-      } else {
-        // Standard rendering
-        for (const [key, group] of this.arcGroups.entries()) {
-          if (key.startsWith('outer_')) continue;
-          const ringIdx = group.ringIndex ?? 0;
-          const angle = Number.isFinite(group.primaryPatternAngle)
-            ? group.primaryPatternAngle : ringIdx * fillPatternAngle;
-          group.toSVGFill(context, {
-            debug: false, patternFill: true, lineSettings: [spacingInternal, angle],
-            drawOutline: drawGroupOutline, lineOffset: offsetInternal,
-            patternType: fillPatternType, rectWidth: rectWidthForGroups,
-            patternSpacingOverride: spacingForGroups, patternOffsetOverride: offsetForGroups,
-            outlineStrokeWidth, patternStrokeWidth: patternStroke,
-          });
-        }
+      for (const [key, group] of this.arcGroups.entries()) {
+        if (key.startsWith('outer_')) continue;
+        const ringIdx = group.ringIndex ?? 0;
+        const angle = Number.isFinite(group.primaryPatternAngle)
+          ? group.primaryPatternAngle : ringIdx * fillPatternAngle;
+        group.toSVGFill(context, {
+          debug: false, patternFill: true, lineSettings: [spacingInternal, angle],
+          drawOutline: drawGroupOutline, lineOffset: offsetInternal,
+          patternType: fillPatternType, rectWidth: rectWidthForGroups,
+          patternSpacingOverride: spacingForGroups, patternOffsetOverride: offsetForGroups,
+          outlineStrokeWidth, patternStrokeWidth: patternStroke,
+        });
       }
     }
 
@@ -3545,7 +3420,6 @@ class DoyleSpiralEngine {
     boundingBoxHeight = null,
     lengthUnits = '',
     useSymmetric = true,
-    displayMode = true,
   } = {}) {
     if (!this._generated) {
       this.generateCircles();
@@ -3558,7 +3432,6 @@ class DoyleSpiralEngine {
       ? boundingBoxHeight
       : fallbackSize;
     const context = new DrawingContext(resolvedWidth, resolvedHeight, lengthUnits);
-    context.setDisplayMode(displayMode);
     this.arcGroups.clear();
 
     if (mode === 'doyle') {
@@ -3726,7 +3599,7 @@ function normaliseParams(params = {}) {
  * @returns {Object} Result object containing engine, svg, geometry, and metadata
  * @throws {Error} If parameters are invalid or generation exceeds limits
  */
-function renderSpiral(params = {}, overrideMode = null, options = {}) {
+function renderSpiral(params = {}, overrideMode = null) {
   const opts = normaliseParams(params);
   const engine = new DoyleSpiralEngine(opts.p, opts.q, opts.t, {
     maxDistance: opts.max_d,
@@ -3734,8 +3607,6 @@ function renderSpiral(params = {}, overrideMode = null, options = {}) {
     numGaps: opts.num_gaps,
   });
   const mode = overrideMode || opts.mode;
-  // displayMode: true for display (uses <symbol>/<use>), false for export (fully expanded)
-  const displayMode = options.displayMode !== undefined ? options.displayMode : true;
   const result = engine.render(mode, {
     size: opts.size,
     debugGroups: opts.debug_groups,
@@ -3755,7 +3626,6 @@ function renderSpiral(params = {}, overrideMode = null, options = {}) {
     boundingBoxHeight: opts.bounding_box_height_mm,
     lengthUnits: 'mm',
     useSymmetric: opts.use_symmetric,
-    displayMode,
   });
   return {
     engine,
