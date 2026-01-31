@@ -101,7 +101,22 @@ function downloadCurrentSvg() {
     return;
   }
 
-  let svgContent = lastRender.svgString || '';
+  // Re-render with displayMode: false to ensure exported SVG has no <use> elements
+  // This ensures maximum compatibility with external SVG tools
+  let svgContent = '';
+  if (lastRender.params) {
+    try {
+      const exportResult = renderSpiral(lastRender.params, lastRender.mode, { displayMode: false });
+      svgContent = exportResult.svgString || '';
+    } catch (error) {
+      console.error('Export re-render failed:', error);
+    }
+  }
+
+  // Fallback to cached SVG if re-render fails
+  if (!svgContent) {
+    svgContent = lastRender.svgString || '';
+  }
   if (!svgContent) {
     const svgElement = svgPreview.querySelector('svg');
     if (svgElement) {

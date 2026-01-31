@@ -1436,6 +1436,23 @@ class ArcGroup {
   }
 
   _getPatternSegments(spacing, angleDeg, offset) {
+    // Symmetric optimization: if this is a clone, rotate master's pattern segments
+    if (this.cloneOf && this._rotationCache) {
+      const masterSegments = this.cloneOf._getPatternSegments(spacing, angleDeg, offset);
+      if (masterSegments && masterSegments.length > 0) {
+        const { cos, sin } = this._rotationCache;
+        const rotated = [];
+        for (let i = 0; i < masterSegments.length; i++) {
+          const [start, end] = masterSegments[i];
+          rotated.push([
+            { re: start.re * cos - start.im * sin, im: start.re * sin + start.im * cos },
+            { re: end.re * cos - end.im * sin, im: end.re * sin + end.im * cos },
+          ]);
+        }
+        return rotated;
+      }
+    }
+
     const template = this.template;
     const transform = this.templateTransform;
     if (!template || !transform) {
@@ -1591,7 +1608,7 @@ class ArcGroup {
     }
     if (debug) {
       const fill = this.debugFill || colorFromSeed(this.id);
-      const stroke = this.debugStroke || 'DEFAULT_OUTLINE_COLOR';
+      const stroke = this.debugStroke || DEFAULT_OUTLINE_COLOR;
       context.drawGroupOutline(outline, {
         fill,
         stroke,
@@ -1601,7 +1618,7 @@ class ArcGroup {
       return;
     }
     if (patternFill) {
-      const stroke = this.debugStroke || 'DEFAULT_OUTLINE_COLOR';
+      const stroke = this.debugStroke || DEFAULT_OUTLINE_COLOR;
       const [lineSpacingRaw, lineAngleDeg] = lineSettings;
       const scaleFactor = context?.scaleFactor ?? 0;
       const invScale = scaleFactor > 1e-9 ? 1 / scaleFactor : 0;
@@ -1640,7 +1657,7 @@ class ArcGroup {
     if (drawOutline) {
       context.drawGroupOutline(outline, {
         fill: null,
-        stroke: 'DEFAULT_OUTLINE_COLOR',
+        stroke: DEFAULT_OUTLINE_COLOR,
         strokeWidth: outlineStrokeWidth,
       });
     }
@@ -1753,6 +1770,10 @@ class DrawingContext {
     this.height = resolvedHeight;
     this.units = typeof units === 'string' ? units : '';
     this.scaleFactor = 1;
+    // Display mode: true uses <symbol>/<use> for clones, false expands all elements (for export)
+    this.displayMode = true;
+    this._symbolsCreated = new Map();
+    this._currentSymbolId = null;
     this.hasDOM = typeof document !== 'undefined' && !!document.createElementNS;
     if (this.hasDOM) {
       this.svg = document.createElementNS(SVG_NS, 'svg');
@@ -1805,6 +1826,92 @@ class DrawingContext {
     }
     // Use full bounding box (divide by 2.0 instead of 2.1) to maximize space usage
     this.scaleFactor = (minDimension / 2.0) / maxExtent;
+  }
+
+  setDisplayMode(isDisplay) {
+    this.displayMode = isDisplay;
+    this._symbolsCreated = new Map();
+    this._currentSymbolId = null;
+  }
+
+  beginSymbol(symbolId) {
+    if (this._symbolsCreated.has(symbolId)) {
+      return;
+    }
+    if (this.hasDOM) {
+      const symbol = document.createElementNS(SVG_NS, 'symbol');
+      symbol.setAttribute('id', symbolId);
+      symbol.setAttribute('overflow', 'visible');
+      const group = document.createElementNS(SVG_NS, 'g');
+      symbol.appendChild(group);
+      this.defs.appendChild(symbol);
+      this._symbolsCreated.set(symbolId, { element: symbol, group });
+    } else {
+      this._symbolsCreated.set(symbolId, { content: [] });
+    }
+    this._currentSymbolId = symbolId;
+  }
+
+  endSymbol() {
+    this._currentSymbolId = null;
+  }
+
+  useSymbol(symbolId, rotationAngle) {
+    const angleDeg = rotationAngle * (180 / Math.PI);
+    if (this.hasDOM) {
+      const use = document.createElementNS(SVG_NS, 'use');
+      use.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', `#${symbolId}`);
+      use.setAttribute('href', `#${symbolId}`);
+      use.setAttribute('transform', `rotate(${angleDeg.toFixed(6)})`);
+      this.mainGroup.appendChild(use);
+    } else {
+      this._pushVirtual('use', {
+        'xlink:href': `#${symbolId}`,
+        href: `#${symbolId}`,
+        transform: `rotate(${angleDeg.toFixed(6)})`,
+      });
+    }
+  }
+
+  _getCurrentTarget() {
+    if (this._currentSymbolId) {
+      const entry = this._symbolsCreated.get(this._currentSymbolId);
+      if (entry) {
+        return this.hasDOM ? entry.group : entry.content;
+      }
+    }
+    return this.hasDOM ? this.mainGroup : this._virtualMain;
+  }
+
+  _appendElement(element) {
+    const target = this._getCurrentTarget();
+    if (this.hasDOM && target) {
+      target.appendChild(element);
+    }
+  }
+
+  _pushToCurrentTarget(tag, attributes) {
+    if (!this.hasDOM) {
+      const target = this._getCurrentTarget();
+      if (target) {
+        const attrString = Object.entries(attributes)
+          .filter(([, value]) => value !== null && value !== undefined)
+          .map(([key, value]) => `${key}="${String(value)}"`)
+          .join(' ');
+        target.push(`<${tag}${attrString ? ` ${attrString}` : ''} />`);
+      }
+    }
+  }
+
+  _finalizeSymbols() {
+    if (!this.hasDOM && this._symbolsCreated.size > 0) {
+      for (const [symbolId, entry] of this._symbolsCreated.entries()) {
+        if (entry.content && entry.content.length > 0) {
+          const symbolStr = `<symbol id="${symbolId}" overflow="visible"><g>${entry.content.join('')}</g></symbol>`;
+          this._virtualDefs.push(symbolStr);
+        }
+      }
+    }
   }
 
   _scaled(point) {
@@ -1861,7 +1968,7 @@ class DrawingContext {
     this.mainGroup.appendChild(element);
   }
 
-  drawScaledArc(arc, { color = 'DEFAULT_OUTLINE_COLOR', width = 1.2 } = {}) {
+  drawScaledArc(arc, { color = DEFAULT_OUTLINE_COLOR, width = 1.2 } = {}) {
     if (!arc.visible) {
       return;
     }
@@ -1905,7 +2012,7 @@ class DrawingContext {
   }
 
   drawPolyline(points, {
-    color = 'DEFAULT_OUTLINE_COLOR',
+    color = DEFAULT_OUTLINE_COLOR,
     width = 1.2,
     close = false,
   } = {}) {
@@ -1968,7 +2075,7 @@ class DrawingContext {
 
   drawGroupOutline(points, {
     fill = null,
-    stroke = 'DEFAULT_OUTLINE_COLOR',
+    stroke = DEFAULT_OUTLINE_COLOR,
     strokeWidth = 1.0,
     fillOpacity = 1.0,
     linePatternSettings = [3, 0],
@@ -2049,7 +2156,7 @@ class DrawingContext {
       const strokeColor = color || 'none';
       if (!this.hasDOM) {
         for (const [start, end] of segments) {
-          this._pushVirtual('line', {
+          this._pushToCurrentTarget('line', {
             x1: start.x.toFixed(4),
             y1: start.y.toFixed(4),
             x2: end.x.toFixed(4),
@@ -2070,7 +2177,7 @@ class DrawingContext {
         line.setAttribute('stroke', strokeColor);
         line.setAttribute('stroke-width', outlineStrokeWidthStr);
         line.setAttribute('stroke-linecap', 'round');
-        this.mainGroup.appendChild(line);
+        this._appendElement(line);
       }
     };
 
@@ -2099,7 +2206,7 @@ class DrawingContext {
         emitOutlineSegments(outlineSegments, stroke);
       }
       if (segmentsToDraw && segmentsToDraw.length) {
-        const lineColor = stroke || 'DEFAULT_OUTLINE_COLOR';
+        const lineColor = stroke || DEFAULT_OUTLINE_COLOR;
         const patternStyle = patternType === 'rectangles' ? 'rectangles' : 'lines';
         if (patternStyle === 'rectangles') {
           const widthValue = Number.isFinite(rectWidth) ? Math.abs(rectWidth) : 0;
@@ -2137,13 +2244,13 @@ class DrawingContext {
                 'stroke-width': patternStrokeStr,
               };
               if (!this.hasDOM) {
-                this._pushVirtual('path', rectAttributes);
+                this._pushToCurrentTarget('path', rectAttributes);
               } else {
                 const path = document.createElementNS(SVG_NS, 'path');
                 for (const [key, value] of Object.entries(rectAttributes)) {
                   path.setAttribute(key, value);
                 }
-                this.mainGroup.appendChild(path);
+                this._appendElement(path);
               }
             }
           }
@@ -2151,7 +2258,7 @@ class DrawingContext {
           if (patternStroke > 0) {
             for (const [p1, p2] of segmentsToDraw) {
               if (!this.hasDOM) {
-                this._pushVirtual('line', {
+                this._pushToCurrentTarget('line', {
                   x1: p1.x.toFixed(4),
                   y1: p1.y.toFixed(4),
                   x2: p2.x.toFixed(4),
@@ -2169,7 +2276,7 @@ class DrawingContext {
                 line.setAttribute('stroke', lineColor);
                 line.setAttribute('stroke-width', patternStrokeStr);
                 line.setAttribute('stroke-linecap', 'round');
-                this.mainGroup.appendChild(line);
+                this._appendElement(line);
               }
             }
           }
@@ -2187,14 +2294,14 @@ class DrawingContext {
           'fill-opacity': fillOpacity.toString(),
           stroke: 'none',
         };
-        this._pushVirtual('path', attrs);
+        this._pushToCurrentTarget('path', attrs);
       } else {
         const path = document.createElementNS(SVG_NS, 'path');
         path.setAttribute('d', pathData);
         path.setAttribute('fill', fill);
         path.setAttribute('fill-opacity', fillOpacity.toString());
         path.setAttribute('stroke', 'none');
-        this.mainGroup.appendChild(path);
+        this._appendElement(path);
       }
     }
 
@@ -2204,6 +2311,7 @@ class DrawingContext {
   }
 
   toString() {
+    this._finalizeSymbols();
     if (this.hasDOM && this.svg) {
       return new XMLSerializer().serializeToString(this.svg);
     }
@@ -2840,7 +2948,7 @@ class DoyleSpiralEngine {
       group.baseCircle = circle;
       if (debugGroups) {
         group.debugFill = colorFromSeed(circle.id);
-        group.debugStroke = 'DEFAULT_OUTLINE_COLOR';
+        group.debugStroke = DEFAULT_OUTLINE_COLOR;
       }
       const arcs = [];
       for (const [i, j] of arcsToDraw) {
@@ -2849,7 +2957,7 @@ class DoyleSpiralEngine {
         const steps = estimateArcSteps(circle, start, end);
         const arc = new ArcElement(circle, start, end, steps, true);
         if (!addFillPattern && drawGroupOutline) {
-          context.drawScaledArc(arc, { color: 'DEFAULT_OUTLINE_COLOR', width: outlineStrokeWidth });
+          context.drawScaledArc(arc, { color: DEFAULT_OUTLINE_COLOR, width: outlineStrokeWidth });
         }
         group.addArc(arc);
         arcs.push(arc);
@@ -2917,7 +3025,7 @@ class DoyleSpiralEngine {
 
       // Draw outline if needed (but not in pattern fill mode)
       if (!addFillPattern && drawGroupOutline) {
-        context.drawScaledArc(arc, { color: 'DEFAULT_OUTLINE_COLOR', width: outlineStrokeWidth });
+        context.drawScaledArc(arc, { color: DEFAULT_OUTLINE_COLOR, width: outlineStrokeWidth });
       }
 
       group.addArc(arc);
@@ -2969,7 +3077,7 @@ class DoyleSpiralEngine {
         // Configure debug rendering if enabled
         if (debugGroups) {
           group.debugFill = colorFromSeed(circle.id);
-          group.debugStroke = 'DEFAULT_OUTLINE_COLOR';
+          group.debugStroke = DEFAULT_OUTLINE_COLOR;
         }
 
         // Create all arcs for this circle
@@ -3030,7 +3138,7 @@ class DoyleSpiralEngine {
           group.ringIndex = -1;
           if (debugGroups) {
             group.debugFill = colorFromSeed(circle.id + 1000);
-            group.debugStroke = 'DEFAULT_OUTLINE_COLOR';
+            group.debugStroke = DEFAULT_OUTLINE_COLOR;
           }
           this.arcGroups.set(key, group);
         }
@@ -3041,7 +3149,7 @@ class DoyleSpiralEngine {
         const shouldDrawBaseOutline = !addFillPattern && drawGroupOutline && outlineStrokeWidth > 0;
         if (shouldDrawBaseOutline) {
           for (const path of paths) {
-            context.drawPolyline(path, { color: 'DEFAULT_OUTLINE_COLOR', width: outlineStrokeWidth });
+            context.drawPolyline(path, { color: DEFAULT_OUTLINE_COLOR, width: outlineStrokeWidth });
           }
         }
         if (redOutline && highlightStrokeWidth > 0) {
@@ -3289,6 +3397,9 @@ class DoyleSpiralEngine {
       .map(group => group.ringIndex);
     const maxIndex = ringIndices.length ? Math.max(...ringIndices) : null;
 
+    // Use symbol optimization when symmetric mode is active and displayMode is true
+    const useSymbolOptimization = canUseSymmetric && context.displayMode;
+
     if (debugGroups) {
       for (const [key, group] of this.arcGroups.entries()) {
         if (key.startsWith('outer_')) {
@@ -3303,27 +3414,85 @@ class DoyleSpiralEngine {
     }
 
     if (addFillPattern) {
-      for (const [key, group] of this.arcGroups.entries()) {
-        if (key.startsWith('outer_')) {
-          continue;
+      if (useSymbolOptimization) {
+        // Symbol-based rendering: render master groups into symbols, use <use> for clones
+        const ringGroups = new Map();
+        for (const [key, group] of this.arcGroups.entries()) {
+          if (key.startsWith('outer_')) continue;
+          const ringIdx = group.ringIndex ?? 0;
+          if (!ringGroups.has(ringIdx)) ringGroups.set(ringIdx, []);
+          ringGroups.get(ringIdx).push(group);
         }
-        const ringIdx = group.ringIndex ?? 0;
-        const angle = Number.isFinite(group.primaryPatternAngle)
-          ? group.primaryPatternAngle
-          : ringIdx * fillPatternAngle;
-        group.toSVGFill(context, {
-          debug: false,
-          patternFill: true,
-          lineSettings: [spacingInternal, angle],
-          drawOutline: drawGroupOutline,
-          lineOffset: offsetInternal,
-          patternType: fillPatternType,
-          rectWidth: rectWidthForGroups,
-          patternSpacingOverride: spacingForGroups,
-          patternOffsetOverride: offsetForGroups,
-          outlineStrokeWidth: outlineStrokeWidth,
-          patternStrokeWidth: patternStroke,
-        });
+
+        for (const [ringIdx, groups] of ringGroups.entries()) {
+          const masterGroup = groups.find(g => !g.cloneOf);
+          if (!masterGroup) {
+            // No master, render all normally
+            for (const group of groups) {
+              const angle = Number.isFinite(group.primaryPatternAngle)
+                ? group.primaryPatternAngle : ringIdx * fillPatternAngle;
+              group.toSVGFill(context, {
+                debug: false, patternFill: true, lineSettings: [spacingInternal, angle],
+                drawOutline: drawGroupOutline, lineOffset: offsetInternal,
+                patternType: fillPatternType, rectWidth: rectWidthForGroups,
+                patternSpacingOverride: spacingForGroups, patternOffsetOverride: offsetForGroups,
+                outlineStrokeWidth, patternStrokeWidth: patternStroke,
+              });
+            }
+            continue;
+          }
+
+          // Render master into a symbol
+          const symbolId = `ring_${ringIdx}_master`;
+          context.beginSymbol(symbolId);
+          const masterAngle = Number.isFinite(masterGroup.primaryPatternAngle)
+            ? masterGroup.primaryPatternAngle : ringIdx * fillPatternAngle;
+          masterGroup.toSVGFill(context, {
+            debug: false, patternFill: true, lineSettings: [spacingInternal, masterAngle],
+            drawOutline: drawGroupOutline, lineOffset: offsetInternal,
+            patternType: fillPatternType, rectWidth: rectWidthForGroups,
+            patternSpacingOverride: spacingForGroups, patternOffsetOverride: offsetForGroups,
+            outlineStrokeWidth, patternStrokeWidth: patternStroke,
+          });
+          context.endSymbol();
+
+          // Use symbol at master position (0 rotation)
+          context.useSymbol(symbolId, 0);
+
+          // Use <use> elements for clones with their rotation
+          for (const group of groups) {
+            if (group === masterGroup) continue;
+            if (group._rotationCache) {
+              context.useSymbol(symbolId, group._rotationCache.angle);
+            } else {
+              // Fallback: render normally
+              const angle = Number.isFinite(group.primaryPatternAngle)
+                ? group.primaryPatternAngle : ringIdx * fillPatternAngle;
+              group.toSVGFill(context, {
+                debug: false, patternFill: true, lineSettings: [spacingInternal, angle],
+                drawOutline: drawGroupOutline, lineOffset: offsetInternal,
+                patternType: fillPatternType, rectWidth: rectWidthForGroups,
+                patternSpacingOverride: spacingForGroups, patternOffsetOverride: offsetForGroups,
+                outlineStrokeWidth, patternStrokeWidth: patternStroke,
+              });
+            }
+          }
+        }
+      } else {
+        // Standard rendering
+        for (const [key, group] of this.arcGroups.entries()) {
+          if (key.startsWith('outer_')) continue;
+          const ringIdx = group.ringIndex ?? 0;
+          const angle = Number.isFinite(group.primaryPatternAngle)
+            ? group.primaryPatternAngle : ringIdx * fillPatternAngle;
+          group.toSVGFill(context, {
+            debug: false, patternFill: true, lineSettings: [spacingInternal, angle],
+            drawOutline: drawGroupOutline, lineOffset: offsetInternal,
+            patternType: fillPatternType, rectWidth: rectWidthForGroups,
+            patternSpacingOverride: spacingForGroups, patternOffsetOverride: offsetForGroups,
+            outlineStrokeWidth, patternStrokeWidth: patternStroke,
+          });
+        }
       }
     }
 
@@ -3375,6 +3544,7 @@ class DoyleSpiralEngine {
     boundingBoxHeight = null,
     lengthUnits = '',
     useSymmetric = true,
+    displayMode = true,
   } = {}) {
     if (!this._generated) {
       this.generateCircles();
@@ -3387,6 +3557,7 @@ class DoyleSpiralEngine {
       ? boundingBoxHeight
       : fallbackSize;
     const context = new DrawingContext(resolvedWidth, resolvedHeight, lengthUnits);
+    context.setDisplayMode(displayMode);
     this.arcGroups.clear();
 
     if (mode === 'doyle') {
@@ -3554,7 +3725,7 @@ function normaliseParams(params = {}) {
  * @returns {Object} Result object containing engine, svg, geometry, and metadata
  * @throws {Error} If parameters are invalid or generation exceeds limits
  */
-function renderSpiral(params = {}, overrideMode = null) {
+function renderSpiral(params = {}, overrideMode = null, options = {}) {
   const opts = normaliseParams(params);
   const engine = new DoyleSpiralEngine(opts.p, opts.q, opts.t, {
     maxDistance: opts.max_d,
@@ -3562,6 +3733,8 @@ function renderSpiral(params = {}, overrideMode = null) {
     numGaps: opts.num_gaps,
   });
   const mode = overrideMode || opts.mode;
+  // displayMode: true for display (uses <symbol>/<use>), false for export (fully expanded)
+  const displayMode = options.displayMode !== undefined ? options.displayMode : true;
   const result = engine.render(mode, {
     size: opts.size,
     debugGroups: opts.debug_groups,
@@ -3581,6 +3754,7 @@ function renderSpiral(params = {}, overrideMode = null) {
     boundingBoxHeight: opts.bounding_box_height_mm,
     lengthUnits: 'mm',
     useSymmetric: opts.use_symmetric,
+    displayMode,
   });
   return {
     engine,
