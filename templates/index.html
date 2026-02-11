@@ -274,10 +274,216 @@
       height: 100%;
     }
 
+    .svg-animate-container {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 1.25rem;
+      width: 100%;
+      height: 100%;
+      transition: grid-template-columns 0.3s ease;
+    }
+
+    .svg-animate-container.animate-mode {
+      grid-template-columns: minmax(0, 1fr) minmax(260px, 320px);
+      align-items: stretch;
+    }
+
+    .animate-panel {
+      background: rgba(248, 250, 252, 0.94);
+      border-radius: 1.1rem;
+      border: 1px solid rgba(148, 163, 184, 0.35);
+      padding: 1.1rem;
+      display: grid;
+      gap: 0.9rem;
+      align-content: start;
+      max-height: 100%;
+      overflow-y: auto;
+    }
+
+    .animate-panel[hidden] {
+      display: none !important;
+    }
+
+    .animate-panel__intro {
+      display: grid;
+      gap: 0.35rem;
+    }
+
+    .animate-panel__intro h2 {
+      font-size: 0.95rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+    }
+
+    .animate-panel__intro p {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+
+    .animate-panel__controls {
+      display: grid;
+      gap: 0.85rem;
+    }
+
+    .animate-panel__controls .control-group {
+      display: grid;
+      gap: 0.5rem;
+    }
+
+    .animate-panel__controls select,
+    .animate-panel__controls input[type="number"] {
+      width: 100%;
+      padding: 0.6rem 0.75rem;
+      border-radius: 0.75rem;
+      border: 1px solid rgba(148, 163, 184, 0.35);
+      background: rgba(255, 255, 255, 0.92);
+      font-size: 0.9rem;
+    }
+
+    .animate-panel__actions {
+      display: flex;
+      gap: 0.6rem;
+      flex-wrap: wrap;
+    }
+
+    .animate-panel__actions button {
+      flex: 1 1 120px;
+      font-size: 0.85rem;
+      padding: 0.75rem 1rem;
+    }
+
+    .frame-list {
+      display: grid;
+      gap: 0.75rem;
+      margin-top: 0.4rem;
+    }
+
+    .frame-card {
+      border: 1px solid rgba(148, 163, 184, 0.35);
+      border-radius: 0.95rem;
+      padding: 0.85rem 0.9rem;
+      background: rgba(255, 255, 255, 0.82);
+      display: grid;
+      gap: 0.6rem;
+      cursor: pointer;
+      transition: border-color 0.25s ease, box-shadow 0.25s ease, transform 0.25s ease;
+    }
+
+    .frame-card--selected {
+      border-color: var(--accent);
+      box-shadow: 0 12px 22px rgba(37, 99, 235, 0.18);
+      transform: translateY(-1px);
+    }
+
+    .frame-card__chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.45rem;
+      min-height: 1.75rem;
+    }
+
+    .frame-card__empty {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      background: rgba(148, 163, 184, 0.14);
+      border-radius: 0.6rem;
+      padding: 0.45rem 0.6rem;
+    }
+
+    .frame-chip {
+      border: none;
+      border-radius: 999px;
+      padding: 0.35rem 0.75rem;
+      font-size: 0.8rem;
+      font-weight: 500;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      cursor: pointer;
+      background: rgba(253, 224, 71, 0.24);
+      color: var(--text-strong);
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .frame-chip:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 8px 14px rgba(148, 163, 184, 0.22);
+    }
+
+    .frame-card__label {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .frame-card__angle {
+      font-weight: 600;
+      color: var(--text-strong);
+      letter-spacing: 0;
+      text-transform: none;
+    }
+
+    .animate-status {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      background: rgba(148, 163, 184, 0.14);
+      border-radius: 0.75rem;
+      padding: 0.7rem 0.85rem;
+    }
+
+    .animate-status.success {
+      color: var(--accent);
+      background: rgba(37, 99, 235, 0.16);
+    }
+
+    .animate-status.error {
+      color: var(--danger);
+      background: rgba(220, 38, 38, 0.18);
+    }
+
     .empty-state {
       text-align: center;
       color: var(--text-muted);
       padding: 3rem;
+    }
+
+    .arc-group {
+      transition: filter 0.2s ease;
+    }
+
+    .arc-group.is-highlighted {
+      filter: drop-shadow(0 0 6px rgba(255, 215, 0, 0.35));
+    }
+
+    .arc-group-hit {
+      fill: transparent;
+      stroke: transparent;
+      stroke-width: 1.4;
+      pointer-events: fill;
+      cursor: pointer;
+      transition: fill 0.25s ease, stroke 0.25s ease, stroke-width 0.25s ease;
+    }
+
+    .arc-group.is-selected .arc-group-hit {
+      fill: rgba(255, 215, 0, 0.24);
+      stroke: rgba(255, 215, 0, 0.7);
+    }
+
+    .arc-group.is-highlighted .arc-group-hit {
+      fill: rgba(255, 215, 0, 0.32);
+      stroke: rgba(255, 215, 0, 0.95);
+    }
+
+    .arc-group.is-pulsing .arc-group-hit {
+      fill: rgba(255, 215, 0, 0.45);
+      stroke: rgba(255, 215, 0, 1);
+      animation: svgPulse 0.9s ease;
     }
 
     .stats {
@@ -400,6 +606,21 @@
       0% { box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.45); }
       70% { box-shadow: 0 0 0 12px rgba(37, 99, 235, 0); }
       100% { box-shadow: 0 0 0 0 rgba(37, 99, 235, 0); }
+    }
+
+    @keyframes svgPulse {
+      0% {
+        fill-opacity: 0.25;
+        stroke-width: 1.4;
+      }
+      50% {
+        fill-opacity: 0.55;
+        stroke-width: 2.3;
+      }
+      100% {
+        fill-opacity: 0.25;
+        stroke-width: 1.4;
+      }
     }
 
     .three-stats {
@@ -553,10 +774,42 @@
         <div class="view-toggle" role="group" aria-label="Preview mode">
           <button type="button" class="active" data-view="2d" aria-pressed="true">2D SVG</button>
           <button type="button" data-view="3d" aria-pressed="false">3D View</button>
+          <button type="button" data-view="animate" aria-pressed="false">Animate</button>
         </div>
 
         <div class="preview-card" id="view2d">
-          <div id="svgPreview" class="empty-state">Rendering spiral…</div>
+          <div class="svg-animate-container" id="svgAnimateContainer">
+            <div id="svgPreview" class="empty-state">Rendering spiral…</div>
+            <aside class="animate-panel" id="animatePanel" hidden>
+              <div class="animate-panel__intro">
+                <h2>Animate arc groups</h2>
+                <p>Pick a frame, then click shapes in the SVG to choreograph the pulse. Each shape can appear once.</p>
+              </div>
+              <div class="animate-panel__controls">
+                <div class="control-group">
+                  <label for="frameCountInput">Frames</label>
+                  <input type="number" id="frameCountInput" min="1" max="24" step="1" value="6" />
+                </div>
+                <div class="control-group">
+                  <label for="animationPreset">Preset patterns</label>
+                  <select id="animationPreset">
+                    <option value="ring-alternate">Alternating rings sweep</option>
+                    <option value="spiral-out">Spiral arms outward</option>
+                    <option value="ring-wave">Ring wavefront</option>
+                    <option value="sine-ripple">Sine ripple around rings</option>
+                    <option value="random-spark">Random spark burst</option>
+                  </select>
+                  <button type="button" class="secondary" id="applyPresetButton">Apply preset</button>
+                </div>
+              </div>
+              <div class="animate-panel__actions">
+                <button type="button" class="secondary" id="clearAnimationButton">Clear selections</button>
+                <button type="button" id="animateSequenceButton">Animate sequence</button>
+              </div>
+              <div class="frame-list" id="frameList"></div>
+              <div class="animate-status" id="animationStatus">Select a frame and click arcs to add them to the timeline.</div>
+            </aside>
+          </div>
         </div>
 
         <div class="stats" id="stats" hidden>
