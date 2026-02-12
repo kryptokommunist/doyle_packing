@@ -44,6 +44,12 @@ const DEFAULTS = {
 let activeView = '2d';
 let lastRender = null;
 let threeApp = null;
+const workerSupported = typeof Worker !== 'undefined';
+const renderWorkerURL = workerSupported ? new URL('./render_worker.js', import.meta.url) : null;
+let renderWorkerHandle = null;
+let currentRenderToken = 0;
+const svgParser = typeof DOMParser !== 'undefined' ? new DOMParser() : null;
+let backgroundRequestCounter = 0;
 
 function sanitiseFileName(name) {
   return name.replace(/[\\/:*?"<>|]+/g, '-');
@@ -114,6 +120,28 @@ function setStatus(message, state = 'idle') {
   if (state !== 'idle') {
     statusEl.classList.add(state);
   }
+}
+
+function terminateRenderWorker() {
+  if (renderWorkerHandle) {
+    renderWorkerHandle.terminate();
+    renderWorkerHandle = null;
+  }
+}
+
+function materializeSvg(result) {
+  if (result && result.svg) {
+    return result.svg;
+  }
+  if (!result || !result.svgString || !svgParser) {
+    return null;
+  }
+  const doc = svgParser.parseFromString(result.svgString, 'image/svg+xml');
+  const element = doc.documentElement;
+  if (!element || element.nodeName.toLowerCase() !== 'svg') {
+    return null;
+  }
+  return document.importNode(element, true);
 }
 
 function collectParams() {
@@ -197,7 +225,8 @@ function ensureThreeApp() {
       fileInput,
     },
     geometryFetcher: async params => {
-      const result = renderSpiral({ ...params, mode: 'arram_boyle' }, 'arram_boyle');
+      const jobParams = { ...params, mode: 'arram_boyle' };
+      const result = await renderInWorker(jobParams, 'arram_boyle');
       if (!result.geometry || !Array.isArray(result.geometry.arcgroups)) {
         throw new Error('Geometry generation failed');
       }
@@ -231,38 +260,152 @@ function showSVG(svgElement) {
   svgPreview.classList.remove('empty-state');
 }
 
-async function renderCurrentSpiral(showLoading = true) {
-  const params = collectParams();
-  if (showLoading) {
-    setStatus('Rendering spiral…', 'loading');
+function handleRenderSuccess(result, fallbackParams) {
+  const svgElement = materializeSvg(result);
+  if (!svgElement) {
+    throw new Error('Renderer produced no SVG content');
   }
-  try {
-    const result = renderSpiral(params);
-    showSVG(result.svg);
 
-    const geometry = hasGeometry(result.geometry) ? result.geometry : null;
-    lastRender = { params, geometry, mode: params.mode, svgString: result.svgString };
+  const params = result.params || fallbackParams || null;
+  const paramsCopy = params ? { ...params } : null;
+  const geometry = hasGeometry(result.geometry) ? result.geometry : null;
+  const mode = result.mode || (params && params.mode) || DEFAULTS.mode;
+  const svgString = result.svgString || (result.svg ? new XMLSerializer().serializeToString(result.svg) : '') || '';
 
-    updateStats(geometry);
-    statMode.textContent = params.mode === 'arram_boyle' ? 'Arram-Boyle' : 'Classic Doyle';
-    setStatus('Spiral updated. Switch views to explore it in 3D.');
-    updateExportAvailability(true);
+  showSVG(svgElement);
 
-    if (threeApp) {
-      if (geometry) {
-        threeApp.useGeometryFromPayload(params, geometry);
+  lastRender = { params: paramsCopy, geometry, mode, svgString };
+
+  updateStats(geometry);
+  statMode.textContent = mode === 'arram_boyle' ? 'Arram-Boyle' : 'Classic Doyle';
+  setStatus('Spiral updated. Switch views to explore it in 3D.');
+  updateExportAvailability(true);
+
+  if (threeApp && paramsCopy) {
+    if (geometry) {
+      threeApp.useGeometryFromPayload(paramsCopy, geometry);
+    } else {
+      threeApp.queueGeometryUpdate(paramsCopy, true);
+    }
+  }
+}
+
+function handleRenderFailure(message) {
+  svgPreview.innerHTML = '<div class="empty-state">Unable to render spiral.</div>';
+  svgPreview.classList.add('empty-state');
+  setStatus(message || 'Unexpected error', 'error');
+  lastRender = null;
+  updateExportAvailability(false);
+}
+
+function renderInWorker(params, overrideMode = null) {
+  if (!(workerSupported && renderWorkerURL)) {
+    return new Promise((resolve, reject) => {
+      setTimeout(() => {
+        try {
+          resolve(renderSpiral(params, overrideMode));
+        } catch (error) {
+          reject(error);
+        }
+      }, 0);
+    });
+  }
+
+  const requestId = `bg-${++backgroundRequestCounter}`;
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(renderWorkerURL, { type: 'module' });
+
+    worker.onmessage = event => {
+      const data = event.data || {};
+      if (data.requestId !== requestId) {
+        return;
+      }
+      worker.terminate();
+      if (data.type === 'result') {
+        resolve(data);
       } else {
-        threeApp.queueGeometryUpdate(params, true);
+        reject(new Error(data.message || 'Render failed'));
+      }
+    };
+
+    worker.onerror = event => {
+      worker.terminate();
+      const message = event?.message || 'Render failed';
+      const error = event?.error instanceof Error ? event.error : new Error(message);
+      reject(error);
+    };
+
+    worker.postMessage({ type: 'render', requestId, params, overrideMode });
+  });
+}
+
+function startRenderJob(params, showLoading) {
+  const token = ++currentRenderToken;
+  const statusMessage = showLoading ? 'Rendering spiral…' : 'Updating spiral…';
+  setStatus(statusMessage, 'loading');
+  updateExportAvailability(false);
+
+  if (workerSupported && renderWorkerURL && svgParser) {
+    terminateRenderWorker();
+    const worker = new Worker(renderWorkerURL, { type: 'module' });
+    renderWorkerHandle = worker;
+
+    worker.onmessage = event => {
+      const data = event.data || {};
+      if (data.requestId !== token) {
+        return;
+      }
+      if (renderWorkerHandle === worker) {
+        worker.terminate();
+        renderWorkerHandle = null;
+      }
+      if (data.type === 'result') {
+        try {
+          handleRenderSuccess(data, params);
+        } catch (error) {
+          console.error(error);
+          handleRenderFailure(error.message || 'Unexpected error');
+        }
+      } else if (data.type === 'error') {
+        const message = data.message || 'Render failed';
+        console.error(message);
+        handleRenderFailure(message);
+      }
+    };
+
+    worker.onerror = event => {
+      const message = event?.message || 'Render failed';
+      if (renderWorkerHandle === worker) {
+        worker.terminate();
+        renderWorkerHandle = null;
+      }
+      console.error(event?.error || message);
+      handleRenderFailure(message);
+    };
+
+    worker.postMessage({ type: 'render', requestId: token, params, overrideMode: null });
+    return;
+  }
+
+  setTimeout(() => {
+    try {
+      const result = renderSpiral(params);
+      if (token !== currentRenderToken) {
+        return;
+      }
+      handleRenderSuccess(result, params);
+    } catch (error) {
+      console.error(error);
+      if (token === currentRenderToken) {
+        handleRenderFailure(error.message || 'Unexpected error');
       }
     }
-  } catch (error) {
-    console.error(error);
-    svgPreview.innerHTML = '<div class="empty-state">Unable to render spiral.</div>';
-    svgPreview.classList.add('empty-state');
-    setStatus(error.message || 'Unexpected error', 'error');
-    lastRender = null;
-    updateExportAvailability(false);
-  }
+  }, 0);
+}
+
+function renderCurrentSpiral(showLoading = true) {
+  const params = collectParams();
+  startRenderJob(params, showLoading);
 }
 
 const debouncedRender = debounce(() => renderCurrentSpiral(false), 200);
