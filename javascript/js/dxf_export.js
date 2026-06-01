@@ -45,11 +45,21 @@ export function generateDXF(arcGroups, scaleFactor, canvasSizePx, boundingWidthM
   const needSpirals = drawGroupOutline;
   const needHighlight = redOutline;
 
-  // Build highlight rim geometry: arcs at index 2 and 3 of the outermost ring group
+  // Build highlight rim geometry — two sources, matching SVG _renderArramBoyle:
+  // 1. outer_* groups: outer closure arcs (from _drawOuterClosureArcs)
+  // 2. arcs at index 2 and 3 of the outermost circle_* ring group
   let highlightPaths = [];
   if (needHighlight) {
+    // Source 1: outer_* group arcs
+    for (const [key, group] of arcGroups.entries()) {
+      if (!key.startsWith('outer_')) continue;
+      const paths = buildContinuousPathsFromArcs(group.arcs);
+      highlightPaths = highlightPaths.concat(paths);
+    }
+
+    // Source 2: arcs at index 2 and 3 of the outermost ring
     const ringIndices = Array.from(arcGroups.values())
-      .filter(g => g.ringIndex !== null && g.ringIndex !== undefined)
+      .filter(g => g.ringIndex !== null && g.ringIndex !== undefined && g.ringIndex >= 0)
       .map(g => g.ringIndex);
     const maxIndex = ringIndices.length ? Math.max(...ringIndices) : null;
     if (maxIndex !== null) {
