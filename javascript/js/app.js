@@ -170,11 +170,10 @@ function downloadCurrentDxf() {
     scaleFactor = result.scaleFactor;
   }
 
-  const size = params.size || DEFAULTS.size;
   const bbW = params.bounding_box_width_mm || DEFAULTS.bounding_box_width_mm;
   const bbH = params.bounding_box_height_mm || DEFAULTS.bounding_box_height_mm;
 
-  const dxfContent = generateDXF(engine.arcGroups, scaleFactor ?? 1, size, bbW, bbH, {
+  const dxfContent = generateDXF(engine.arcGroups, scaleFactor ?? 1, bbW, bbH, {
     drawGroupOutline: params.draw_group_outline !== false,
     redOutline: Boolean(params.red_outline),
   });

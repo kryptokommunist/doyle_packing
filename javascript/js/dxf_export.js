@@ -4,9 +4,9 @@
  * Produces a DXF R2000 file with one LWPOLYLINE per arc group, with coordinates
  * in millimetres matching the bounding box the user configured.
  *
- * The engine works in an internal coordinate space where the spiral fits inside
- * a unit-ish radius.  scaleFactor converts from that space to SVG pixels.
- * We then divide by pixelsPerMm to reach mm.
+ * renderSpiral uses lengthUnits='mm', so scaleFactor is already mm/internal-unit
+ * and the DrawingContext origin is at the centre of the bounding box.
+ * We only need to shift to bottom-left origin and flip Y for DXF.
  *
  * Options mirror the SVG export toggles:
  *   drawGroupOutline  – export spiral outlines on layer SPIRALS
@@ -16,32 +16,29 @@
 import { buildContinuousPathsFromArcs } from './doyle_spiral_engine.js';
 
 /**
- * @param {Map<string, ArcGroup>} arcGroups - from engine.arcGroups
- * @param {number} scaleFactor             - from the render result (SVG pixels per internal unit)
- * @param {number} canvasSizePx            - SVG canvas width/height in pixels
- * @param {number} boundingWidthMm         - desired output width in mm
- * @param {number} boundingHeightMm        - desired output height in mm
+ * @param {Map<string, ArcGroup>} arcGroups    - from engine.arcGroups
+ * @param {number} scaleFactor                 - mm per internal unit (from render result)
+ * @param {number} boundingWidthMm             - output width in mm
+ * @param {number} boundingHeightMm            - output height in mm
  * @param {Object} [opts]
  * @param {boolean} [opts.drawGroupOutline=true]  - export spiral outlines
  * @param {boolean} [opts.redOutline=false]       - export highlight rim arcs
  * @returns {string} DXF file contents
  */
-export function generateDXF(arcGroups, scaleFactor, canvasSizePx, boundingWidthMm, boundingHeightMm, opts = {}) {
+export function generateDXF(arcGroups, scaleFactor, boundingWidthMm, boundingHeightMm, opts = {}) {
   const drawGroupOutline = opts.drawGroupOutline !== false;
   const redOutline = Boolean(opts.redOutline);
 
-  const pixelsPerMm = canvasSizePx / Math.max(boundingWidthMm, boundingHeightMm);
-
-  // DXF Y axis is up; SVG Y axis is down.  Flip Y so geometry isn't mirrored.
+  // scaleFactor is mm/internal-unit; origin is at centre of bounding box.
+  // DXF Y axis is up; SVG/internal Y axis is down — flip Y.
+  // Shift origin from centre to bottom-left corner.
   function ptToMm(re, im) {
-    const px = re * scaleFactor + canvasSizePx / 2;
-    const py = im * scaleFactor + canvasSizePx / 2; // square canvas
-    const x = (px / canvasSizePx) * boundingWidthMm;
-    const y = ((canvasSizePx - py) / canvasSizePx) * boundingHeightMm;
-    return { x, y };
+    return {
+      x: re * scaleFactor + boundingWidthMm / 2,
+      y: -(im * scaleFactor) + boundingHeightMm / 2,
+    };
   }
 
-  // Collect layers actually needed
   const needSpirals = drawGroupOutline;
   const needHighlight = redOutline;
 
@@ -50,14 +47,12 @@ export function generateDXF(arcGroups, scaleFactor, canvasSizePx, boundingWidthM
   // 2. arcs at index 2 and 3 of the outermost circle_* ring group
   let highlightPaths = [];
   if (needHighlight) {
-    // Source 1: outer_* group arcs
     for (const [key, group] of arcGroups.entries()) {
       if (!key.startsWith('outer_')) continue;
       const paths = buildContinuousPathsFromArcs(group.arcs);
       highlightPaths = highlightPaths.concat(paths);
     }
 
-    // Source 2: arcs at index 2 and 3 of the outermost ring
     const ringIndices = Array.from(arcGroups.values())
       .filter(g => g.ringIndex !== null && g.ringIndex !== undefined && g.ringIndex >= 0)
       .map(g => g.ringIndex);
