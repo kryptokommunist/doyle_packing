@@ -190,19 +190,22 @@
 
     .export-controls {
       display: flex;
-      gap: 0.6rem;
-      flex: 1 1 240px;
-      align-items: center;
+      flex-direction: column;
+      gap: 0.5rem;
+      width: 100%;
     }
 
     .export-controls input {
-      flex: 1 1 auto;
-      min-width: 0;
+      width: 100%;
     }
 
-    .export-controls button {
-      flex: 0 0 auto;
-      white-space: nowrap;
+    .export-buttons {
+      display: flex;
+      gap: 0.5rem;
+    }
+
+    .export-buttons button {
+      flex: 1;
     }
 
     button {
@@ -1240,15 +1243,17 @@
 
           <div class="actions">
             <button type="submit" id="renderButton">Refresh preview</button>
-            <div class="export-controls">
-              <input
-                type="text"
-                id="exportFilename"
-                value="doyle-spiral"
-                aria-label="SVG file name"
-                autocomplete="off"
-                spellcheck="false"
-              />
+          </div>
+          <div class="export-controls">
+            <input
+              type="text"
+              id="exportFilename"
+              value="doyle-spiral"
+              aria-label="File name"
+              autocomplete="off"
+              spellcheck="false"
+            />
+            <div class="export-buttons">
               <button type="button" class="secondary" id="exportSvgButton" disabled>
                 Download SVG
               </button>
