@@ -1704,19 +1704,41 @@ class ArcGroup {
           offsetForSegments += rectWidthValue / 2;
         }
       }
-      const segments = this._getPatternSegments(spacingForSegments, lineAngleDeg, offsetForSegments);
-      context.drawGroupOutline(outline, {
-        fill: 'pattern',
-        stroke,
-        strokeWidth: outlineStrokeWidth,
-        linePatternSettings: [lineSpacingRaw, lineAngleDeg],
-        drawOutline,
-        lineOffset,
-        patternSegments: segments,
-        patternType,
-        rectWidth,
-        patternStrokeWidth,
-      });
+
+      // Support multiple angles from patternAngles array (up to 4)
+      // If patternAngles is explicitly empty, skip pattern rendering (cell is OFF)
+      const hasExplicitAngles = Array.isArray(this.patternAngles);
+      const anglesToRender = hasExplicitAngles && this.patternAngles.length > 0
+        ? this.patternAngles.slice(0, 4)
+        : hasExplicitAngles && this.patternAngles.length === 0
+          ? [] // Explicitly OFF - no pattern
+          : [lineAngleDeg]; // Default behavior
+
+      // Draw outline once first if needed
+      if (drawOutline) {
+        context.drawGroupOutline(outline, {
+          fill: null,
+          stroke,
+          strokeWidth: outlineStrokeWidth,
+        });
+      }
+
+      // Draw pattern lines for each angle (skip if cell is OFF)
+      for (const angleValue of anglesToRender) {
+        const segments = this._getPatternSegments(spacingForSegments, angleValue, offsetForSegments);
+        context.drawGroupOutline(outline, {
+          fill: 'pattern',
+          stroke: null,
+          strokeWidth: 0,
+          linePatternSettings: [lineSpacingRaw, angleValue],
+          drawOutline: false, // Already drawn above
+          lineOffset,
+          patternSegments: segments,
+          patternType,
+          rectWidth,
+          patternStrokeWidth,
+        });
+      }
       return;
     }
     if (drawOutline) {
@@ -3501,7 +3523,7 @@ class DoyleSpiralEngine {
 
     if (mode === 'doyle') {
       this._renderDoyle(context);
-      return { svg: context.toElement(), svgString: context.toString(), geometry: null };
+      return { svg: context.toElement(), svgString: context.toString(), geometry: null, scaleFactor: context.scaleFactor };
     }
     if (mode === 'arram_boyle') {
       this._renderArramBoyle(context, {
@@ -3524,6 +3546,7 @@ class DoyleSpiralEngine {
         svg: context.toElement(),
         svgString: context.toString(),
         geometry: this.toJSON(),
+        scaleFactor: context.scaleFactor,
       };
     }
     throw new Error(`Unknown render mode "${mode}"`);
@@ -3699,6 +3722,7 @@ function renderSpiral(params = {}, overrideMode = null) {
     svgString: result.svgString,
     geometry: result.geometry,
     params: opts,
+    scaleFactor: result.scaleFactor || 1,
   };
 }
 
@@ -3715,4 +3739,6 @@ export {
   renderSpiral,
   computeGeometry,
   normaliseParams,
+  buildPatternAnimationContext,
+  buildContinuousPathsFromArcs,
 };
