@@ -478,6 +478,559 @@
         align-items: stretch;
       }
     }
+
+    /* Animator Tab Styles */
+    .preview-card.animator-card {
+      padding: 1.5rem;
+      gap: 1.25rem;
+      justify-content: flex-start;
+      align-items: stretch;
+      overflow: visible;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .animator-stage {
+      display: grid !important;
+      grid-template-columns: minmax(0, 1fr) minmax(280px, 320px);
+      gap: 1.5rem;
+      align-items: stretch;
+      width: 100%;
+      flex: 1;
+      min-height: 450px;
+    }
+
+    .cell-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+    }
+
+    .cell-overlay svg {
+      width: 100%;
+      height: 100%;
+    }
+
+    .cell-marker {
+      pointer-events: auto;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .cell-marker circle {
+      fill: rgba(255, 255, 255, 0.6);
+      stroke: rgba(100, 116, 139, 0.5);
+      stroke-width: 1;
+      transition: all 0.15s ease;
+    }
+
+    .cell-marker:hover circle {
+      fill: rgba(37, 99, 235, 0.3);
+      stroke: var(--accent);
+      stroke-width: 2;
+    }
+
+    .cell-marker.selected circle {
+      fill: rgba(37, 99, 235, 0.7);
+      stroke: var(--accent);
+      stroke-width: 2;
+    }
+
+    .cell-marker text {
+      fill: var(--text-muted);
+      font-size: 8px;
+      font-weight: 600;
+      pointer-events: none;
+      user-select: none;
+    }
+
+    .cell-marker.selected text {
+      fill: white;
+    }
+
+    .animator-settings {
+      background: rgba(248, 250, 252, 0.88);
+      border-radius: 1.25rem;
+      border: 1px solid rgba(148, 163, 184, 0.25);
+      padding: 1.2rem 1.4rem;
+      display: flex !important;
+      flex-direction: column;
+      gap: 1rem;
+      min-width: 280px;
+    }
+
+    .animator-header h2 {
+      font-size: 1rem;
+      margin-bottom: 0.25rem;
+    }
+
+    .animator-header p {
+      color: var(--text-muted);
+      font-size: 0.85rem;
+    }
+
+    .animator-section {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+
+    .animator-section h3 {
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: var(--text-strong);
+    }
+
+    .animator-section-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .seed-count {
+      font-size: 0.75rem;
+      color: var(--accent);
+      font-weight: 500;
+    }
+
+    .animator-hint {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      font-style: italic;
+    }
+
+    .seed-presets {
+      display: flex;
+      gap: 0.4rem;
+      flex-wrap: wrap;
+    }
+
+    .preset-btn {
+      padding: 0.4rem 0.7rem;
+      font-size: 0.75rem;
+      background: rgba(148, 163, 184, 0.16);
+      color: var(--text-strong);
+      box-shadow: none;
+      border-radius: 0.5rem;
+    }
+
+    .preset-btn:hover {
+      background: var(--accent-soft);
+      color: var(--accent);
+    }
+
+    .animator-frames {
+      display: flex;
+      flex-direction: row;
+      gap: 0.75rem;
+      overflow-x: auto;
+      overflow-y: hidden;
+      flex: 1;
+      padding-bottom: 0.5rem;
+    }
+
+    .animator-frame {
+      border: 1px solid var(--panel-border);
+      border-radius: 0.75rem;
+      padding: 0.5rem;
+      background: rgba(255,255,255,0.5);
+      flex: 0 0 auto;
+      min-width: 200px;
+      max-width: 220px;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .frame-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 0.4rem;
+      padding-bottom: 0.4rem;
+      border-bottom: 1px solid var(--panel-border);
+    }
+
+    .frame-header span {
+      font-weight: 600;
+      font-size: 0.85rem;
+    }
+
+    .frame-header-actions {
+      display: flex;
+      gap: 0.25rem;
+    }
+
+    .frame-header .frame-action-btn {
+      background: transparent;
+      color: var(--text-muted);
+      padding: 0.15rem 0.4rem;
+      font-size: 0.75rem;
+      box-shadow: none;
+      border-radius: 0.3rem;
+    }
+
+    .frame-header .frame-action-btn:hover {
+      background: var(--accent-soft);
+      color: var(--accent);
+    }
+
+    .frame-header .remove-frame:hover {
+      background: rgba(220, 38, 38, 0.1);
+      color: var(--danger);
+    }
+
+    .frame-rules {
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+      min-height: 80px;
+      flex: 1;
+      overflow-y: auto;
+      max-height: 300px;
+    }
+
+    .frame-rules.drag-over {
+      background: var(--accent-soft);
+      border-radius: 0.5rem;
+    }
+
+    .rule-item {
+      border: 1px solid rgba(148, 163, 184, 0.2);
+      border-radius: 0.5rem;
+      padding: 0.4rem;
+      background: rgba(255,255,255,0.7);
+      cursor: grab;
+      transition: all 0.15s ease;
+    }
+
+    .rule-item:hover {
+      border-color: var(--accent);
+      box-shadow: 0 2px 8px rgba(37, 99, 235, 0.1);
+    }
+
+    .rule-item.dragging {
+      opacity: 0.5;
+      cursor: grabbing;
+    }
+
+    .rule-item-header {
+      display: flex;
+      justify-content: flex-end;
+      gap: 0.2rem;
+      margin-bottom: 0.25rem;
+    }
+
+    .rule-action-btn {
+      background: transparent;
+      color: var(--text-muted);
+      padding: 0.1rem 0.3rem;
+      font-size: 0.65rem;
+      box-shadow: none;
+      border-radius: 0.25rem;
+    }
+
+    .rule-action-btn:hover {
+      background: var(--accent-soft);
+      color: var(--accent);
+    }
+
+    .rule-action-btn.remove-rule:hover {
+      background: rgba(220, 38, 38, 0.1);
+      color: var(--danger);
+    }
+
+    .rule-container {
+      display: flex;
+      gap: 0.5rem;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .rule-section {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.2rem;
+    }
+
+    .rule-section-label {
+      font-size: 0.6rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      font-weight: 600;
+    }
+
+    .rule-arrow {
+      font-size: 1.2rem;
+      color: var(--text-muted);
+      padding: 0 0.25rem;
+    }
+
+    .cell-honeycomb {
+      position: relative;
+      width: 90px;
+      height: 85px;
+    }
+
+    .cell-honeycomb.large {
+      width: 140px;
+      height: 130px;
+    }
+
+    .cell-btn {
+      position: absolute;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      border: 2px solid var(--panel-border);
+      background: rgba(255, 255, 255, 0.8);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.5rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      transition: all 0.15s ease;
+      padding: 0;
+      box-shadow: none;
+    }
+
+    .cell-honeycomb.large .cell-btn {
+      width: 34px;
+      height: 34px;
+      font-size: 0.65rem;
+    }
+
+    .cell-btn:hover {
+      border-color: var(--accent);
+      background: var(--accent-soft);
+      transform: scale(1.1);
+    }
+
+    .cell-btn.active {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: white;
+      box-shadow: 0 2px 8px rgba(37, 99, 235, 0.3);
+    }
+
+    /* "Don't care" state for input patterns */
+    .cell-btn.wildcard {
+      background: rgba(148, 163, 184, 0.3);
+      border-style: dashed;
+      color: var(--text-muted);
+    }
+
+    /* Center cell - use attribute substring matching for prefixed data-cell values */
+    .cell-btn[data-cell$="-center"],
+    .cell-btn[data-cell="center"] {
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      width: 26px;
+      height: 26px;
+      font-size: 0.55rem;
+    }
+
+    .cell-honeycomb.large .cell-btn[data-cell$="-center"],
+    .cell-honeycomb.large .cell-btn[data-cell="center"] {
+      width: 38px;
+      height: 38px;
+      font-size: 0.7rem;
+    }
+
+    .cell-btn[data-cell$="-center"]:hover,
+    .cell-btn[data-cell="center"]:hover {
+      transform: translate(-50%, -50%) scale(1.1);
+    }
+
+    .cell-btn[data-cell$="-center"].active,
+    .cell-btn[data-cell$="-center"].wildcard,
+    .cell-btn[data-cell="center"].active,
+    .cell-btn[data-cell="center"].wildcard {
+      transform: translate(-50%, -50%);
+    }
+
+    /* Outer ring neighbors (top) - toward boundary */
+    .cell-btn[data-cell$="-n0"], .cell-btn[data-cell="n0"] { left: 30%; top: 2px; }
+    .cell-btn[data-cell$="-n1"], .cell-btn[data-cell="n1"] { left: 70%; top: 2px; transform: translateX(-100%); }
+
+    /* Same ring neighbors (sides) - angular */
+    .cell-btn[data-cell$="-n2"], .cell-btn[data-cell="n2"] { right: 2px; top: 50%; transform: translateY(-50%); }
+    .cell-btn[data-cell$="-n5"], .cell-btn[data-cell="n5"] { left: 2px; top: 50%; transform: translateY(-50%); }
+
+    /* Inner ring neighbors (bottom) - toward center */
+    .cell-btn[data-cell$="-n3"], .cell-btn[data-cell="n3"] { left: 70%; bottom: 2px; transform: translateX(-100%); }
+    .cell-btn[data-cell$="-n4"], .cell-btn[data-cell="n4"] { left: 30%; bottom: 2px; }
+
+    .cell-btn[data-cell$="-n2"]:hover,
+    .cell-btn[data-cell$="-n5"]:hover,
+    .cell-btn[data-cell="n2"]:hover,
+    .cell-btn[data-cell="n5"]:hover { transform: translateY(-50%) scale(1.1); }
+    .cell-btn[data-cell$="-n2"].active,
+    .cell-btn[data-cell$="-n2"].wildcard,
+    .cell-btn[data-cell$="-n5"].active,
+    .cell-btn[data-cell$="-n5"].wildcard,
+    .cell-btn[data-cell="n2"].active,
+    .cell-btn[data-cell="n2"].wildcard,
+    .cell-btn[data-cell="n5"].active,
+    .cell-btn[data-cell="n5"].wildcard { transform: translateY(-50%); }
+
+    .cell-btn[data-cell$="-n1"]:hover,
+    .cell-btn[data-cell$="-n3"]:hover,
+    .cell-btn[data-cell="n1"]:hover,
+    .cell-btn[data-cell="n3"]:hover { transform: translateX(-100%) scale(1.1); }
+    .cell-btn[data-cell$="-n1"].active,
+    .cell-btn[data-cell$="-n1"].wildcard,
+    .cell-btn[data-cell$="-n3"].active,
+    .cell-btn[data-cell$="-n3"].wildcard,
+    .cell-btn[data-cell="n1"].active,
+    .cell-btn[data-cell="n1"].wildcard,
+    .cell-btn[data-cell="n3"].active,
+    .cell-btn[data-cell="n3"].wildcard { transform: translateX(-100%); }
+
+    .animator-controls, .animator-actions {
+      display: flex;
+      gap: 0.5rem;
+    }
+
+    .animator-actions button {
+      flex: 1;
+    }
+
+    /* Animator Preview Tabs */
+    .animator-preview-container {
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      min-height: 0;
+    }
+
+    .animator-preview-tabs {
+      display: flex;
+      gap: 0.25rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .animator-tab {
+      background: rgba(148, 163, 184, 0.16);
+      color: var(--text-muted);
+      padding: 0.4rem 0.8rem;
+      font-size: 0.8rem;
+      border-radius: 0.5rem;
+      box-shadow: none;
+    }
+
+    .animator-tab.active {
+      background: var(--accent);
+      color: white;
+    }
+
+    .animator-tab:hover:not(.active) {
+      background: var(--accent-soft);
+      color: var(--accent);
+    }
+
+    .animator-svg-preview {
+      background: rgba(255, 255, 255, 0.7);
+      border-radius: 1.25rem;
+      border: 1px solid var(--panel-border);
+      min-height: 400px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      position: relative;
+      flex: 1;
+    }
+
+    .animator-svg-preview svg {
+      width: 100%;
+      height: 100%;
+    }
+
+    .animator-frame-preview {
+      background: rgba(255, 255, 255, 0.7);
+      border-radius: 1.25rem;
+      border: 1px solid var(--panel-border);
+      min-height: 400px;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      flex: 1;
+    }
+
+    .frame-preview-scroll {
+      display: flex;
+      flex-direction: row;
+      gap: 1rem;
+      padding: 1rem;
+      overflow-x: auto;
+      overflow-y: hidden;
+      flex: 1;
+      align-items: stretch;
+    }
+
+    .frame-preview-item {
+      flex: 0 0 auto;
+      min-width: 200px;
+      max-width: 280px;
+      border: 1px solid var(--panel-border);
+      border-radius: 0.75rem;
+      background: rgba(255, 255, 255, 0.9);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .frame-preview-header {
+      padding: 0.5rem 0.75rem;
+      background: rgba(148, 163, 184, 0.1);
+      border-bottom: 1px solid var(--panel-border);
+      font-weight: 600;
+      font-size: 0.85rem;
+      color: var(--text-strong);
+    }
+
+    .frame-preview-svg {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0.5rem;
+      min-height: 180px;
+    }
+
+    .frame-preview-svg svg {
+      width: 100%;
+      height: 100%;
+      max-height: 200px;
+    }
+
+    .frame-preview-info {
+      padding: 0.4rem 0.75rem;
+      background: rgba(148, 163, 184, 0.05);
+      border-top: 1px solid var(--panel-border);
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+
+    /* Golden color for activated cells */
+    .activated-cell {
+      fill: #D4AF37 !important;
+      stroke: #B8960C !important;
+    }
+
+    @media (max-width: 980px) {
+      .animator-stage {
+        grid-template-columns: 1fr;
+      }
+    }
   </style>
 </head>
 <body>
@@ -699,6 +1252,9 @@
               <button type="button" class="secondary" id="exportSvgButton" disabled>
                 Download SVG
               </button>
+              <button type="button" class="secondary" id="exportDxfButton" disabled>
+                Download DXF
+              </button>
             </div>
           </div>
         </form>
@@ -708,6 +1264,7 @@
         <div class="view-toggle" role="group" aria-label="Preview mode">
           <button type="button" class="active" data-view="2d" aria-pressed="true">2D SVG</button>
           <button type="button" data-view="3d" aria-pressed="false">3D View</button>
+          <button type="button" data-view="animator" aria-pressed="false">Animator</button>
         </div>
 
         <div class="preview-card" id="view2d">
@@ -767,6 +1324,63 @@
             <div class="stat-card"><strong id="threeStatArcGroups">0</strong>Arc groups</div>
             <div class="stat-card"><strong id="threeStatPolygons">0</strong>Polygons extruded</div>
             <div class="stat-card"><strong id="threeStatParameters">–</strong>Parameters</div>
+          </div>
+        </div>
+
+        <div class="preview-card animator-card" id="viewAnimator" hidden>
+          <div class="animator-stage">
+            <div class="animator-preview-container">
+              <div class="animator-preview-tabs">
+                <button type="button" class="animator-tab active" data-animator-view="svg">2D SVG</button>
+                <button type="button" class="animator-tab" data-animator-view="frames">Frame Preview</button>
+              </div>
+              <div id="animatorSvgPreview" class="animator-svg-preview">
+                <div class="empty-state">Add frames and click "Load Animation" to see results</div>
+              </div>
+              <div id="animatorFramePreview" class="animator-frame-preview" hidden>
+                <div class="frame-preview-scroll">
+                  <!-- Frame thumbnails will be rendered here -->
+                </div>
+              </div>
+            </div>
+            <aside class="animator-settings">
+              <div class="animator-header">
+                <h2>Cellular Animator</h2>
+                <p>Define rules for how cells activate their neighbors</p>
+              </div>
+
+              <div class="animator-section">
+                <div class="animator-section-header">
+                  <h3>Initial Seeds</h3>
+                  <span class="seed-count" id="seedCount">0 selected</span>
+                </div>
+                <p class="animator-hint">Click cells in the preview to select initial seeds</p>
+                <div class="seed-presets">
+                  <button type="button" class="preset-btn" data-preset="center">Center Ring</button>
+                  <button type="button" class="preset-btn" data-preset="outer">Outer Ring</button>
+                  <button type="button" class="preset-btn" data-preset="all">Select All</button>
+                  <button type="button" class="preset-btn" data-preset="clear">Clear</button>
+                </div>
+                <button type="button" class="secondary" id="refreshAnimatorBtn" style="margin-top: 0.5rem; padding: 0.5rem 0.8rem; font-size: 0.8rem;">Refresh Preview</button>
+              </div>
+
+              <div class="animator-section">
+                <h3>Frames &amp; Rules</h3>
+                <p class="animator-hint">Each frame runs its rules in sequence. Drag rules to reorder.</p>
+                <div class="animator-frames" id="animatorFrames">
+                  <!-- Frame entries added dynamically -->
+                </div>
+
+                <div class="animator-controls">
+                  <button type="button" id="addFrameBtn">+ Add Frame</button>
+                  <button type="button" id="clearFramesBtn" class="secondary">Clear All</button>
+                </div>
+              </div>
+
+              <div class="animator-actions">
+                <button type="button" id="loadAnimationBtn">Load Animation</button>
+              </div>
+            </aside>
           </div>
         </div>
       </section>
