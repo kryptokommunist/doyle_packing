@@ -43,6 +43,7 @@ const fileInput = document.getElementById('threeFileInput');
 const exportButton = document.getElementById('exportSvgButton');
 const exportDxfButton = document.getElementById('exportDxfButton');
 const exportStepButton = document.getElementById('exportStepButton');
+const stepThicknessInput = document.getElementById('stepThickness');
 const exportFilenameInput = document.getElementById('exportFilename');
 const breakdownModeCheckbox = document.getElementById('breakdownMode');
 const breakdownSettings = document.getElementById('breakdownSettings');
@@ -162,6 +163,7 @@ async function downloadBreakdownZip(format) {
 
   const wpW = Number(workpieceWidthInput?.value) || 100;
   const wpH = Number(workpieceHeightInput?.value) || 100;
+  const stepThickness = Math.max(0.01, Number(stepThicknessInput?.value) || 1);
 
   const outerRequired = getOuterBoundsRequired(engine.arcGroups, scaleFactor ?? 1);
   if (outerRequired && (wpW < outerRequired.w || wpH < outerRequired.h)) {
@@ -212,7 +214,7 @@ async function downloadBreakdownZip(format) {
       format === 'svg'
         ? generateBreakdownSVG([gOutlineCentred], [gOutlineCentred], scaleFactor ?? 1, wpW, wpH, patLines)
         : format === 'step'
-          ? generateSingleGroupSTEP([], [gOutlineCentred], scaleFactor ?? 1, wpW, wpH, `${base}_ring_${ringIdx}`)
+          ? generateSingleGroupSTEP([gOutlineCentred], [], scaleFactor ?? 1, wpW, wpH, `${base}_ring_${ringIdx}`, stepThickness)
           : generateSingleGroupDXF([], [gOutlineCentred], scaleFactor ?? 1, wpW, wpH)
     );
   }
@@ -254,7 +256,7 @@ async function downloadBreakdownZip(format) {
       format === 'svg'
         ? generateBreakdownSVG(fittingOutlines, stitchedHighlight, scaleFactor ?? 1, wpW, wpH, fittingPatternLines)
         : format === 'step'
-          ? generateSingleGroupSTEP([], stitchedHighlight, scaleFactor ?? 1, wpW, wpH, `${base}_workpiece`)
+          ? generateSingleGroupSTEP(fittingOutlines, [], scaleFactor ?? 1, wpW, wpH, `${base}_workpiece`, stepThickness)
           : generateSingleGroupDXF([], stitchedHighlight, scaleFactor ?? 1, wpW, wpH)
     );
   }
@@ -424,7 +426,7 @@ function downloadCurrentStep() {
 
   const stepContent = generateSTEP(engine.arcGroups, scaleFactor ?? 1, bbW, bbH, {
     drawGroupOutline: params.draw_group_outline !== false,
-    redOutline: Boolean(params.red_outline),
+    thickness: Math.max(0.01, Number(stepThicknessInput?.value) || 1),
     name,
   });
 
@@ -2155,10 +2157,9 @@ async function runBulkExport() {
       added++;
     }
     if (wantDxf) {
-      const { bounding_box_width_mm: bbW, bounding_box_height_mm: bbH,
-              draw_group_outline, red_outline } = baseParams;
+      const { bounding_box_width_mm: bbW, bounding_box_height_mm: bbH } = baseParams;
       const dxf = generateDXF(result.engine.arcGroups, result.scaleFactor ?? 1, bbW, bbH,
-        { drawGroupOutline: draw_group_outline !== false, redOutline: Boolean(red_outline) });
+        { drawGroupOutline: false, redOutline: true });
       zip.file(`${name}.dxf`, dxf);
       bulkLogLine(`  + ${name}.dxf`);
       added++;
@@ -2167,7 +2168,7 @@ async function runBulkExport() {
       const { bounding_box_width_mm: bbW, bounding_box_height_mm: bbH,
               draw_group_outline, red_outline } = baseParams;
       const step = generateSTEP(result.engine.arcGroups, result.scaleFactor ?? 1, bbW, bbH,
-        { drawGroupOutline: draw_group_outline !== false, redOutline: Boolean(red_outline), name });
+        { drawGroupOutline: draw_group_outline !== false, thickness: Math.max(0.01, Number(stepThicknessInput?.value) || 1), name });
       zip.file(`${name}.step`, step);
       bulkLogLine(`  + ${name}.step`);
       added++;
