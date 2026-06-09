@@ -1747,3 +1747,142 @@ function renderFramePreviews() {
     scrollContainer.appendChild(frameItem);
   });
 }
+
+// ============================================================
+// Bulk Export
+// ============================================================
+const bulkStartBtn      = document.getElementById('bulkStartBtn');
+const bulkCancelBtn     = document.getElementById('bulkCancelBtn');
+const bulkPMin          = document.getElementById('bulkPMin');
+const bulkPMax          = document.getElementById('bulkPMax');
+const bulkQMin          = document.getElementById('bulkQMin');
+const bulkQMax          = document.getElementById('bulkQMax');
+const bulkDiagonal      = document.getElementById('bulkDiagonal');
+const bulkExportSvg     = document.getElementById('bulkExportSvg');
+const bulkExportDxf     = document.getElementById('bulkExportDxf');
+const bulkProgress      = document.getElementById('bulkProgress');
+const bulkProgressLabel = document.getElementById('bulkProgressLabel');
+const bulkProgressCount = document.getElementById('bulkProgressCount');
+const bulkProgressBar   = document.getElementById('bulkProgressBar');
+const bulkLogEl         = document.getElementById('bulkLog');
+const bulkQRangeRow     = document.getElementById('bulkQRangeRow');
+
+let bulkCancelled = false;
+
+function triggerBulkDownload(content, mimeType, filename) {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function bulkLogLine(msg) {
+  const d = document.createElement('div');
+  d.textContent = msg;
+  bulkLogEl.appendChild(d);
+  bulkLogEl.scrollTop = bulkLogEl.scrollHeight;
+}
+
+function updateBulkProgress(done, total, text) {
+  bulkProgressLabel.textContent = text;
+  bulkProgressCount.textContent = `${done} / ${total}`;
+  bulkProgressBar.style.width = total > 0 ? `${Math.round(done / total * 100)}%` : '0%';
+}
+
+function buildPairList() {
+  const pMin = Math.max(2, Math.min(128, Number(bulkPMin.value) || 2));
+  const pMax = Math.max(pMin, Math.min(128, Number(bulkPMax.value) || 16));
+  if (bulkDiagonal.checked) {
+    return Array.from({ length: pMax - pMin + 1 }, (_, i) => ({ p: pMin + i, q: pMin + i }));
+  }
+  const qMin = Math.max(2, Math.min(256, Number(bulkQMin.value) || 2));
+  const qMax = Math.max(qMin, Math.min(256, Number(bulkQMax.value) || 16));
+  const pairs = [];
+  for (let p = pMin; p <= pMax; p++)
+    for (let q = qMin; q <= qMax; q++)
+      pairs.push({ p, q });
+  return pairs;
+}
+
+function bulkSleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+async function runBulkExport() {
+  const pairs = buildPairList();
+  if (!pairs.length) { bulkLogLine('Nothing to export — check your range.'); return; }
+  const wantSvg = bulkExportSvg.checked;
+  const wantDxf = bulkExportDxf.checked;
+  if (!wantSvg && !wantDxf) { bulkLogLine('Select at least one format.'); return; }
+
+  const formatsPerPair = (wantSvg ? 1 : 0) + (wantDxf ? 1 : 0);
+  const total = pairs.length * formatsPerPair;
+  const baseParams = collectParams();
+
+  bulkCancelled = false;
+  bulkStartBtn.hidden = true;
+  bulkCancelBtn.hidden = false;
+  bulkCancelBtn.disabled = false;
+  bulkCancelBtn.textContent = 'Cancel';
+  bulkProgress.hidden = false;
+  bulkLogEl.innerHTML = '';
+  updateBulkProgress(0, total, `Starting — ${pairs.length} spiral(s)…`);
+
+  let done = 0;
+  for (const { p, q } of pairs) {
+    if (bulkCancelled) { bulkLogLine(`Cancelled after ${done} / ${total}.`); break; }
+    const label = `p=${p}, q=${q}`;
+    updateBulkProgress(done, total, `Rendering ${label}…`);
+    bulkLogLine(`${label}…`);
+
+    let result;
+    try { result = renderSpiral({ ...baseParams, p, q }); }
+    catch (err) { bulkLogLine(`  ERROR: ${err.message}`); await bulkSleep(0); continue; }
+
+    const name = `doyle_p${p}_q${q}`;
+    if (wantSvg && result.svgString) {
+      triggerBulkDownload(result.svgString, 'image/svg+xml;charset=utf-8', `${name}.svg`);
+      bulkLogLine(`  ↓ ${name}.svg`);
+      done++;
+      updateBulkProgress(done, total, `↓ ${name}.svg`);
+      await bulkSleep(600);
+    }
+    if (bulkCancelled) break;
+    if (wantDxf) {
+      if (result.engine?.arcGroups?.size) {
+        const { bounding_box_width_mm: bbW, bounding_box_height_mm: bbH,
+                draw_group_outline, red_outline } = baseParams;
+        const dxf = generateDXF(result.engine.arcGroups, result.scaleFactor ?? 1, bbW, bbH,
+          { drawGroupOutline: draw_group_outline !== false, redOutline: Boolean(red_outline) });
+        triggerBulkDownload(dxf, 'application/dxf', `${name}.dxf`);
+        bulkLogLine(`  ↓ ${name}.dxf`);
+        done++;
+        updateBulkProgress(done, total, `↓ ${name}.dxf`);
+        await bulkSleep(600);
+      } else {
+        bulkLogLine(`  SKIPPED ${name}.dxf — needs arram_boyle mode`);
+      }
+    }
+    await bulkSleep(0);
+  }
+
+  if (!bulkCancelled) {
+    updateBulkProgress(total, total, `Done — ${done} file(s) downloaded.`);
+    bulkLogLine(`Complete. ${done} file(s) downloaded.`);
+  }
+  bulkStartBtn.hidden = false;
+  bulkCancelBtn.hidden = true;
+}
+
+bulkStartBtn?.addEventListener('click', runBulkExport);
+bulkCancelBtn?.addEventListener('click', () => {
+  bulkCancelled = true;
+  bulkCancelBtn.disabled = true;
+  bulkCancelBtn.textContent = 'Cancelling…';
+});
+bulkDiagonal?.addEventListener('change', () => {
+  if (bulkQRangeRow) bulkQRangeRow.hidden = bulkDiagonal.checked;
+});

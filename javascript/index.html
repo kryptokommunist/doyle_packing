@@ -195,6 +195,19 @@
       width: 100%;
     }
 
+    #bulkExportDetails > summary {
+      cursor: pointer;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      user-select: none;
+      padding: 0.35rem 0;
+      list-style: disclosure-closed;
+    }
+    #bulkExportDetails[open] > summary {
+      color: var(--accent);
+      list-style: disclosure-open;
+    }
+
     .export-controls input {
       width: 100%;
     }
@@ -1261,6 +1274,63 @@
                 Download DXF
               </button>
             </div>
+
+            <details id="bulkExportDetails">
+              <summary>Bulk Export</summary>
+
+              <div class="field-group" style="margin-top:0.75rem;">
+                <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer;text-transform:none;letter-spacing:normal;font-size:0.85rem;font-weight:500;">
+                  <input type="checkbox" id="bulkDiagonal" checked />
+                  <span>Diagonal only (p = q)</span>
+                </label>
+              </div>
+
+              <div class="inline-fields">
+                <div class="field-group">
+                  <label for="bulkPMin">p min</label>
+                  <input id="bulkPMin" type="number" min="2" max="128" step="1" value="2" />
+                </div>
+                <div class="field-group">
+                  <label for="bulkPMax">p max</label>
+                  <input id="bulkPMax" type="number" min="2" max="128" step="1" value="16" />
+                </div>
+              </div>
+
+              <div id="bulkQRangeRow" class="inline-fields" hidden>
+                <div class="field-group">
+                  <label for="bulkQMin">q min</label>
+                  <input id="bulkQMin" type="number" min="2" max="256" step="1" value="2" />
+                </div>
+                <div class="field-group">
+                  <label for="bulkQMax">q max</label>
+                  <input id="bulkQMax" type="number" min="2" max="256" step="1" value="16" />
+                </div>
+              </div>
+
+              <div class="field-group">
+                <label>Formats</label>
+                <div class="checkbox-row">
+                  <label><input type="checkbox" id="bulkExportSvg" checked> SVG</label>
+                  <label><input type="checkbox" id="bulkExportDxf"> DXF</label>
+                </div>
+              </div>
+
+              <div class="actions" style="margin-top:0.5rem;">
+                <button type="button" id="bulkStartBtn" class="secondary">Export All</button>
+                <button type="button" id="bulkCancelBtn" class="secondary" hidden>Cancel</button>
+              </div>
+
+              <div id="bulkProgress" hidden style="margin-top:0.75rem;display:flex;flex-direction:column;gap:0.5rem;">
+                <div style="display:flex;justify-content:space-between;align-items:center;">
+                  <span id="bulkProgressLabel" style="font-size:0.78rem;color:var(--text-muted);">Idle</span>
+                  <span id="bulkProgressCount" style="font-size:0.78rem;font-weight:600;color:var(--text-strong);">0 / 0</span>
+                </div>
+                <div style="height:5px;border-radius:999px;background:rgba(148,163,184,0.2);overflow:hidden;">
+                  <div id="bulkProgressBar" style="height:100%;width:0%;border-radius:999px;background:var(--accent);transition:width 0.3s ease;"></div>
+                </div>
+                <div id="bulkLog" style="font-size:0.75rem;color:var(--text-muted);max-height:110px;overflow-y:auto;font-family:monospace;line-height:1.55;"></div>
+              </div>
+            </details>
           </div>
         </form>
       </section>
