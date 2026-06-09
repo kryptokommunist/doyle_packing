@@ -181,29 +181,41 @@ async function downloadBreakdownZip(format) {
   const withPattern = Boolean(params.add_fill_pattern);
   const withHighlight = true; // always show cut boundary in breakdown exports
 
-  // --- Beyond-box rings: one file per arc group, centred in workpiece box ---
-  // Compute these first so we know the exact ring IDs exported individually.
+  // --- Beyond-box rings: one file per ring layer (all groups combined), centred in workpiece box ---
   const overflowGroups = getOverflowGroups(engine.arcGroups, rings);
   const overflowRingIds = new Set(overflowGroups.map(g => g.ringIndex));
+
+  // Group overflow entries by ring index
+  const overflowByRing = new Map();
   for (const g of overflowGroups) {
-    const gOutline = g.getClosedOutline();
-    if (!gOutline || gOutline.length < 2) continue;
-    const cx = gOutline.reduce((s, p) => s + p.re, 0) / gOutline.length;
-    const cy = gOutline.reduce((s, p) => s + p.im, 0) / gOutline.length;
-    const gOutlineCentred = centreOutline(gOutline);
-    const highlightPaths = [gOutlineCentred];
-    const rawPatSegs = withPattern && typeof g._getPatternSegments === 'function'
-      ? (g._getPatternSegments((params.fill_pattern_spacing ?? 8) / (scaleFactor ?? 1), g.primaryPatternAngle ?? params.fill_pattern_angle, (params.fill_pattern_offset ?? 0) / (scaleFactor ?? 1)) ?? [])
-      : [];
-    const patLines = rawPatSegs.map(([p1, p2]) => ({
-      p1: { re: p1.re - cx, im: p1.im - cy },
-      p2: { re: p2.re - cx, im: p2.im - cy },
-    }));
-    const fname = `${base}_ring_${g.ringIndex}_group_${g.id}.${format}`;
+    if (!overflowByRing.has(g.ringIndex)) overflowByRing.set(g.ringIndex, []);
+    overflowByRing.get(g.ringIndex).push(g);
+  }
+
+  for (const [ringIdx, ringGroups] of overflowByRing.entries()) {
+    const ringOutlines = [];
+    const ringPatLines = [];
+    for (const g of ringGroups) {
+      const gOutline = g.getClosedOutline();
+      if (!gOutline || gOutline.length < 2) continue;
+      const cx = gOutline.reduce((s, p) => s + p.re, 0) / gOutline.length;
+      const cy = gOutline.reduce((s, p) => s + p.im, 0) / gOutline.length;
+      const gOutlineCentred = centreOutline(gOutline);
+      ringOutlines.push(gOutlineCentred);
+      if (withPattern && typeof g._getPatternSegments === 'function') {
+        const rawPatSegs = g._getPatternSegments((params.fill_pattern_spacing ?? 8) / (scaleFactor ?? 1), g.primaryPatternAngle ?? params.fill_pattern_angle, (params.fill_pattern_offset ?? 0) / (scaleFactor ?? 1)) ?? [];
+        ringPatLines.push(...rawPatSegs.map(([p1, p2]) => ({
+          p1: { re: p1.re - cx, im: p1.im - cy },
+          p2: { re: p2.re - cx, im: p2.im - cy },
+        })));
+      }
+    }
+    if (ringOutlines.length === 0) continue;
+    const fname = `${base}_ring_${ringIdx}_x${ringOutlines.length}.${format}`;
     zipFiles[fname] = strToU8(
       format === 'svg'
-        ? generateBreakdownSVG([gOutlineCentred], highlightPaths, scaleFactor ?? 1, wpW, wpH, patLines)
-        : generateSingleGroupDXF([gOutlineCentred], [], scaleFactor ?? 1, wpW, wpH)
+        ? generateBreakdownSVG(ringOutlines, ringOutlines, scaleFactor ?? 1, wpW, wpH, ringPatLines)
+        : generateSingleGroupDXF(ringOutlines, [], scaleFactor ?? 1, wpW, wpH)
     );
   }
 
