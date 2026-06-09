@@ -176,6 +176,56 @@ export function countWorkpieces(arcGroups, fittingRings, _withPattern) {
 }
 
 /**
+ * Stitches an array of open polyline paths into as few continuous paths as
+ * possible by chaining them at matching endpoints (within `tol` internal
+ * units). A resulting path whose first and last points are within `tol` of
+ * each other is treated as closed (the duplicate endpoint is left in place
+ * so callers can detect closure with the same tolerance check).
+ *
+ * @param {Array<Array<{re: number, im: number}>>} paths
+ * @param {number} [tol=1e-3]
+ * @returns {Array<Array<{re: number, im: number}>>}
+ */
+export function stitchPaths(paths, tol = 1e-3) {
+  if (!paths || paths.length === 0) return paths;
+  const used = new Array(paths.length).fill(false);
+  const result = [];
+
+  for (let seed = 0; seed < paths.length; seed++) {
+    if (used[seed]) continue;
+    let current = [...paths[seed]];
+    used[seed] = true;
+    let changed = true;
+    while (changed) {
+      changed = false;
+      const ce = current[current.length - 1];
+      const cs = current[0];
+      for (let i = 0; i < paths.length; i++) {
+        if (used[i]) continue;
+        const p = paths[i];
+        const ps = p[0];
+        const pe = p[p.length - 1];
+        if (Math.abs(ce.re - ps.re) < tol && Math.abs(ce.im - ps.im) < tol) {
+          current.push(...p.slice(1));
+          used[i] = true; changed = true;
+        } else if (Math.abs(ce.re - pe.re) < tol && Math.abs(ce.im - pe.im) < tol) {
+          current.push(...[...p].reverse().slice(1));
+          used[i] = true; changed = true;
+        } else if (Math.abs(cs.re - pe.re) < tol && Math.abs(cs.im - pe.im) < tol) {
+          current = [...p.slice(0, -1), ...current];
+          used[i] = true; changed = true;
+        } else if (Math.abs(cs.re - ps.re) < tol && Math.abs(cs.im - ps.im) < tol) {
+          current = [...[...p].reverse().slice(0, -1), ...current];
+          used[i] = true; changed = true;
+        }
+      }
+    }
+    result.push(current);
+  }
+  return result;
+}
+
+/**
  * Generates a standalone SVG string for one or more arc group outlines.
  * All outlines are centred in the workpiece box.
  *

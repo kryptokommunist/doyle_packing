@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getBreakdownRings, generateBreakdownSVG, countWorkpieces, getOuterBoundsRequired, centreOutline, getFittingGroups } from '../js/breakdown.js';
+import { getBreakdownRings, generateBreakdownSVG, countWorkpieces, getOuterBoundsRequired, centreOutline, getFittingGroups, stitchPaths } from '../js/breakdown.js';
 import { generateSingleGroupDXF } from '../js/dxf_export.js';
 import { renderSpiral } from '../js/doyle_spiral_engine.js';
 
@@ -679,5 +679,47 @@ describe('workpiece SVG with real engine: p=q=16, bbox=1000mm, workpiece=250mm',
     for (const id of overflowRingIds) {
       expect(id).toBeGreaterThan(maxFitting);
     }
+  });
+});
+
+describe('stitchPaths', () => {
+  it('single path returned unchanged', () => {
+    const p = [{re:0,im:0},{re:1,im:0},{re:1,im:1}];
+    const result = stitchPaths([p]);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toEqual(p);
+  });
+
+  it('two head-to-tail paths are merged into one', () => {
+    const a = [{re:0,im:0},{re:1,im:0}];
+    const b = [{re:1,im:0},{re:2,im:0}];
+    const result = stitchPaths([a, b]);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toHaveLength(3); // duplicate junction removed
+    expect(result[0][0]).toEqual({re:0,im:0});
+    expect(result[0][2]).toEqual({re:2,im:0});
+  });
+
+  it('four arc segments forming a ring stitch into one closed path', () => {
+    const seg = n => [{re: Math.cos(n*Math.PI/2), im: Math.sin(n*Math.PI/2)},
+                      {re: Math.cos((n+0.5)*Math.PI/2), im: Math.sin((n+0.5)*Math.PI/2)},
+                      {re: Math.cos((n+1)*Math.PI/2), im: Math.sin((n+1)*Math.PI/2)}];
+    const paths = [seg(0), seg(1), seg(2), seg(3)];
+    const result = stitchPaths(paths, 1e-10);
+    expect(result).toHaveLength(1);
+    const p = result[0];
+    const isClosed = Math.abs(p[0].re - p[p.length-1].re) < 1e-6 && Math.abs(p[0].im - p[p.length-1].im) < 1e-6;
+    expect(isClosed).toBe(true);
+  });
+
+  it('unconnected paths remain separate', () => {
+    const a = [{re:0,im:0},{re:1,im:0}];
+    const b = [{re:5,im:5},{re:6,im:5}];
+    const result = stitchPaths([a, b]);
+    expect(result).toHaveLength(2);
+  });
+
+  it('empty input returns empty array', () => {
+    expect(stitchPaths([])).toEqual([]);
   });
 });

@@ -2,7 +2,7 @@ import { renderSpiral, normaliseParams, buildPatternAnimationContext, buildConti
 import { createThreeViewer } from './three_viewer.js';
 import { generateDXF, generateSingleGroupDXF } from './dxf_export.js';
 import { zipSync, strToU8 } from 'https://cdn.jsdelivr.net/npm/fflate@0.8.2/esm/browser.js';
-import { getBreakdownRings, generateBreakdownSVG, countWorkpieces, getOuterBoundsRequired, centreOutline } from './breakdown.js';
+import { getBreakdownRings, generateBreakdownSVG, countWorkpieces, getOuterBoundsRequired, centreOutline, stitchPaths } from './breakdown.js';
 
 const form = document.getElementById('controlsForm');
 const statusEl = document.getElementById('statusMessage');
@@ -239,10 +239,11 @@ async function downloadBreakdownZip(format) {
 
   if (fittingOutlines.length > 0 || fittingHighlightPaths.length > 0) {
     const fname = `${base}_workpiece.${format}`;
+    const stitchedHighlight = stitchPaths(fittingHighlightPaths);
     zipFiles[fname] = strToU8(
       format === 'svg'
-        ? generateBreakdownSVG(fittingOutlines, fittingHighlightPaths, scaleFactor ?? 1, wpW, wpH, fittingPatternLines)
-        : generateSingleGroupDXF([], fittingHighlightPaths, scaleFactor ?? 1, wpW, wpH)
+        ? generateBreakdownSVG(fittingOutlines, stitchedHighlight, scaleFactor ?? 1, wpW, wpH, fittingPatternLines)
+        : generateSingleGroupDXF([], stitchedHighlight, scaleFactor ?? 1, wpW, wpH)
     );
   }
 
