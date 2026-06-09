@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getBreakdownRings, generateBreakdownSVG, countWorkpieces } from '../js/breakdown.js';
+import { getBreakdownRings, generateBreakdownSVG, countWorkpieces, getOuterBoundsRequired } from '../js/breakdown.js';
 import { generateSingleGroupDXF } from '../js/dxf_export.js';
 
 // Helper to build a mock arcGroups Map
@@ -262,5 +262,77 @@ describe('countWorkpieces', () => {
     const arcGroups = makeMultiGroupArcGroups([]);
     const fittingRings = getBreakdownRings(arcGroups, 1, 100, 100);
     expect(countWorkpieces(arcGroups, fittingRings, false)).toBe(0);
+  });
+});
+
+describe('getOuterBoundsRequired', () => {
+  function makeArcGroupsForBounds(circleEntries) {
+    const map = new Map();
+    for (const [key, ringIndex, outlinePoints] of circleEntries) {
+      map.set(key, { ringIndex, getClosedOutline: () => outlinePoints, arcs: [] });
+    }
+    return map;
+  }
+
+  it('returns null when no circle_ groups exist', () => {
+    expect(getOuterBoundsRequired(new Map(), 1)).toBeNull();
+  });
+
+  it('returns correct minimum box based on outermost ring (highest ringIndex)', () => {
+    // ring 0 half-size=5, ring 1 half-size=20 → outermost is ring 1 → box = 40×40mm
+    const arcGroups = makeArcGroupsForBounds([
+      ['circle_0', 0, squareOutline(5)],
+      ['circle_1', 1, squareOutline(20)],
+    ]);
+    const result = getOuterBoundsRequired(arcGroups, 1);
+    expect(result).not.toBeNull();
+    expect(result.w).toBeCloseTo(40);
+    expect(result.h).toBeCloseTo(40);
+  });
+
+  it('scales extents by scaleFactor', () => {
+    // ring 1 half-size=10 in internal units, scale=3 → extents ±30mm → box = 60×60mm
+    const arcGroups = makeArcGroupsForBounds([
+      ['circle_1', 1, squareOutline(10)],
+    ]);
+    const result = getOuterBoundsRequired(arcGroups, 3);
+    expect(result.w).toBeCloseTo(60);
+    expect(result.h).toBeCloseTo(60);
+  });
+
+  it('takes the maximum extent across all arc groups of the outermost ring', () => {
+    // ring 2 has two groups with different sizes — should use the larger
+    const arcGroups = makeArcGroupsForBounds([
+      ['circle_2a', 2, squareOutline(10)],
+      ['circle_2b', 2, squareOutline(25)],  // larger — dominates
+    ]);
+    const result = getOuterBoundsRequired(arcGroups, 1);
+    expect(result.w).toBeCloseTo(50);
+    expect(result.h).toBeCloseTo(50);
+  });
+
+  it('ignores lower rings when computing outermost bounds', () => {
+    // ring 1 is large but ring 2 is smaller; ring 2 is the outermost
+    const arcGroups = makeArcGroupsForBounds([
+      ['circle_1', 1, squareOutline(50)],  // not the outermost
+      ['circle_2', 2, squareOutline(10)],  // outermost ring
+    ]);
+    const result = getOuterBoundsRequired(arcGroups, 1);
+    expect(result.w).toBeCloseTo(20);
+    expect(result.h).toBeCloseTo(20);
+  });
+
+  it('indicates too-small box when workpiece < required outermost extent', () => {
+    // outermost ring extent = 40×40mm; workpiece = 30×30mm → required.w > 30
+    const arcGroups = makeArcGroupsForBounds([['circle_1', 1, squareOutline(20)]]);
+    const required = getOuterBoundsRequired(arcGroups, 1);
+    expect(required.w).toBeGreaterThan(30);
+  });
+
+  it('accepts a workpiece box that exactly matches the required size', () => {
+    // outermost ring extent = 40×40mm; workpiece = 40×40mm → required.w ≤ 40
+    const arcGroups = makeArcGroupsForBounds([['circle_1', 1, squareOutline(20)]]);
+    const required = getOuterBoundsRequired(arcGroups, 1);
+    expect(required.w <= 40).toBe(true);
   });
 });

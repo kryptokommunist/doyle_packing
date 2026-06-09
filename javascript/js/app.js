@@ -2,7 +2,7 @@ import { renderSpiral, normaliseParams, buildPatternAnimationContext, buildConti
 import { createThreeViewer } from './three_viewer.js';
 import { generateDXF, generateSingleGroupDXF } from './dxf_export.js';
 import { zipSync, strToU8 } from 'https://cdn.jsdelivr.net/npm/fflate@0.8.2/esm/browser.js';
-import { getBreakdownRings, generateBreakdownSVG, countWorkpieces } from './breakdown.js';
+import { getBreakdownRings, generateBreakdownSVG, countWorkpieces, getOuterBoundsRequired } from './breakdown.js';
 
 const form = document.getElementById('controlsForm');
 const statusEl = document.getElementById('statusMessage');
@@ -159,6 +159,15 @@ async function downloadBreakdownZip(format) {
 
   const wpW = Number(workpieceWidthInput?.value) || 100;
   const wpH = Number(workpieceHeightInput?.value) || 100;
+
+  const outerRequired = getOuterBoundsRequired(engine.arcGroups, scaleFactor ?? 1);
+  if (outerRequired && (wpW < outerRequired.w || wpH < outerRequired.h)) {
+    const needW = Math.ceil(outerRequired.w);
+    const needH = Math.ceil(outerRequired.h);
+    setStatus(`Workpiece box too small for outermost boundary. Minimum required: ${needW} × ${needH} mm.`, 'error');
+    return;
+  }
+
   const rings = getBreakdownRings(engine.arcGroups, scaleFactor ?? 1, wpW, wpH);
 
   if (!rings.length) {
@@ -589,10 +598,18 @@ function handleRenderSuccess(result) {
       if (res?.engine?.arcGroups) {
         const wpW = Number(workpieceWidthInput?.value) || 100;
         const wpH = Number(workpieceHeightInput?.value) || 100;
-        const rings = getBreakdownRings(res.engine.arcGroups, res.scaleFactor ?? 1, wpW, wpH);
         lastRender.engine = res.engine;
         lastRender.scaleFactor = res.scaleFactor;
-        updateBreakdownRingCount(countWorkpieces(res.engine.arcGroups, rings, Boolean(lastRender.params?.add_fill_pattern)));
+        const outerRequired = getOuterBoundsRequired(res.engine.arcGroups, res.scaleFactor ?? 1);
+        if (outerRequired && (wpW < outerRequired.w || wpH < outerRequired.h)) {
+          const needW = Math.ceil(outerRequired.w);
+          const needH = Math.ceil(outerRequired.h);
+          setStatus(`Workpiece box too small for outermost boundary. Minimum required: ${needW} × ${needH} mm.`, 'error');
+          updateBreakdownRingCount(null);
+        } else {
+          const rings = getBreakdownRings(res.engine.arcGroups, res.scaleFactor ?? 1, wpW, wpH);
+          updateBreakdownRingCount(countWorkpieces(res.engine.arcGroups, rings, Boolean(lastRender.params?.add_fill_pattern)));
+        }
       }
     } catch (_) {
       updateBreakdownRingCount(null);

@@ -4,6 +4,49 @@
  */
 
 /**
+ * Returns the minimum workpiece box (in mm) required to fit all arc group
+ * outlines of the outermost visible ring (highest circle_* ringIndex).
+ * This is the ring that must fit for a complete breakdown export to be valid.
+ *
+ * Returns null if no circle_* groups exist.
+ *
+ * @param {Map<string, {ringIndex: number|null, getClosedOutline: () => Array}>} arcGroups
+ * @param {number} scaleFactor  - mm per internal unit
+ * @returns {{w: number, h: number}|null}
+ */
+export function getOuterBoundsRequired(arcGroups, scaleFactor) {
+  // Find the highest ring index
+  let maxRing = -Infinity;
+  for (const [key, group] of arcGroups.entries()) {
+    if (!key.startsWith('circle_')) continue;
+    const r = group.ringIndex;
+    if (r === null || r === undefined || r < 0) continue;
+    if (r > maxRing) maxRing = r;
+  }
+  if (!Number.isFinite(maxRing) || maxRing < 0) return null;
+
+  // Measure the maximum extent across all arc groups of that ring
+  let maxAbsRe = 0;
+  let maxAbsIm = 0;
+  let found = false;
+  for (const [key, group] of arcGroups.entries()) {
+    if (!key.startsWith('circle_') || group.ringIndex !== maxRing) continue;
+    const outline = group.getClosedOutline();
+    if (!outline || outline.length < 2) continue;
+    found = true;
+    for (const pt of outline) {
+      const re = Math.abs(pt.re) * scaleFactor;
+      const im = Math.abs(pt.im) * scaleFactor;
+      if (re > maxAbsRe) maxAbsRe = re;
+      if (im > maxAbsIm) maxAbsIm = im;
+    }
+  }
+
+  if (!found) return null;
+  return { w: maxAbsRe * 2, h: maxAbsIm * 2 };
+}
+
+/**
  * Returns arc groups for each ring that fully fits inside the workpiece box,
  * stopping at the first ring whose outline intersects or exceeds the box.
  *
