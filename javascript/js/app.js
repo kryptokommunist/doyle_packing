@@ -1,6 +1,7 @@
-import { renderSpiral, normaliseParams, buildPatternAnimationContext } from './doyle_spiral_engine.js';
+import { renderSpiral, normaliseParams, buildPatternAnimationContext, buildContinuousPathsFromArcs } from './doyle_spiral_engine.js';
 import { createThreeViewer } from './three_viewer.js';
-import { generateDXF } from './dxf_export.js';
+import { generateDXF, generateSingleGroupDXF } from './dxf_export.js';
+import { zipSync, strToU8 } from 'https://cdn.jsdelivr.net/npm/fflate@0.8.2/esm/browser.js';
 
 const form = document.getElementById('controlsForm');
 const statusEl = document.getElementById('statusMessage');
@@ -40,6 +41,11 @@ const fileInput = document.getElementById('threeFileInput');
 const exportButton = document.getElementById('exportSvgButton');
 const exportDxfButton = document.getElementById('exportDxfButton');
 const exportFilenameInput = document.getElementById('exportFilename');
+const breakdownModeCheckbox = document.getElementById('breakdownMode');
+const breakdownSettings = document.getElementById('breakdownSettings');
+const workpieceWidthInput = document.getElementById('workpieceWidth');
+const workpieceHeightInput = document.getElementById('workpieceHeight');
+const breakdownRingCountEl = document.getElementById('breakdownRingCount');
 
 const DEFAULTS = {
   p: 16,
@@ -256,6 +262,9 @@ function collectParams() {
   raw.draw_group_outline = outlineToggle.checked;
   raw.red_outline = redToggle.checked;
   raw.use_symmetric = symmetricToggle?.checked ?? true;
+  if (breakdownModeCheckbox?.checked) {
+    raw.red_outline = true;
+  }
   const params = normaliseParams(raw);
   // Preserve mode exactly as selected (normaliseParams already handles but ensure string)
   params.mode = raw.mode || params.mode;
@@ -1769,18 +1778,6 @@ const bulkQRangeRow     = document.getElementById('bulkQRangeRow');
 
 let bulkCancelled = false;
 
-function triggerBulkDownload(content, mimeType, filename) {
-  const blob = new Blob([content], { type: mimeType });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-}
-
 function bulkLogLine(msg) {
   const d = document.createElement('div');
   d.textContent = msg;
@@ -1809,7 +1806,7 @@ function buildPairList() {
   return pairs;
 }
 
-function bulkSleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+function bulkYield() { return new Promise(r => setTimeout(r, 0)); }
 
 async function runBulkExport() {
   const pairs = buildPairList();
@@ -1818,8 +1815,6 @@ async function runBulkExport() {
   const wantDxf = bulkExportDxf.checked;
   if (!wantSvg && !wantDxf) { bulkLogLine('Select at least one format.'); return; }
 
-  const formatsPerPair = (wantSvg ? 1 : 0) + (wantDxf ? 1 : 0);
-  const total = pairs.length * formatsPerPair;
   const baseParams = collectParams();
 
   bulkCancelled = false;
@@ -1829,51 +1824,78 @@ async function runBulkExport() {
   bulkCancelBtn.textContent = 'Cancel';
   bulkProgress.hidden = false;
   bulkLogEl.innerHTML = '';
-  updateBulkProgress(0, total, `Starting — ${pairs.length} spiral(s)…`);
+  updateBulkProgress(0, pairs.length, `Starting — ${pairs.length} spiral(s)…`);
 
-  let done = 0;
-  for (const { p, q } of pairs) {
-    if (bulkCancelled) { bulkLogLine(`Cancelled after ${done} / ${total}.`); break; }
+  const zip = new JSZip(); // eslint-disable-line no-undef
+  let added = 0;
+
+  for (let i = 0; i < pairs.length; i++) {
+    if (bulkCancelled) { bulkLogLine(`Cancelled after ${i} / ${pairs.length}.`); break; }
+    const { p, q } = pairs[i];
     const label = `p=${p}, q=${q}`;
-    updateBulkProgress(done, total, `Rendering ${label}…`);
+    updateBulkProgress(i, pairs.length, `Rendering ${label}…`);
     bulkLogLine(`${label}…`);
 
     let result;
     try { result = renderSpiral({ ...baseParams, p, q }); }
-    catch (err) { bulkLogLine(`  ERROR: ${err.message}`); await bulkSleep(0); continue; }
+    catch (err) { bulkLogLine(`  ERROR: ${err.message}`); await bulkYield(); continue; }
 
     const name = `doyle_p${p}_q${q}`;
     const hasGroups = (result.engine?.arcGroups?.size ?? 0) > 0;
     if (!hasGroups) {
-      bulkLogLine(`  SKIPPED ${label} — no geometry produced`);
+      bulkLogLine(`  SKIPPED — no geometry produced`);
+      await bulkYield();
       continue;
     }
+
     if (wantSvg && result.svgString) {
-      triggerBulkDownload(result.svgString, 'image/svg+xml;charset=utf-8', `${name}.svg`);
-      bulkLogLine(`  ↓ ${name}.svg`);
-      done++;
-      updateBulkProgress(done, total, `↓ ${name}.svg`);
-      await bulkSleep(600);
+      zip.file(`${name}.svg`, result.svgString);
+      bulkLogLine(`  + ${name}.svg`);
+      added++;
     }
-    if (bulkCancelled) break;
     if (wantDxf) {
       const { bounding_box_width_mm: bbW, bounding_box_height_mm: bbH,
               draw_group_outline, red_outline } = baseParams;
       const dxf = generateDXF(result.engine.arcGroups, result.scaleFactor ?? 1, bbW, bbH,
         { drawGroupOutline: draw_group_outline !== false, redOutline: Boolean(red_outline) });
-      triggerBulkDownload(dxf, 'application/dxf', `${name}.dxf`);
-      bulkLogLine(`  ↓ ${name}.dxf`);
-      done++;
-      updateBulkProgress(done, total, `↓ ${name}.dxf`);
-      await bulkSleep(600);
+      zip.file(`${name}.dxf`, dxf);
+      bulkLogLine(`  + ${name}.dxf`);
+      added++;
     }
-    await bulkSleep(0);
+
+    updateBulkProgress(i + 1, pairs.length, `${i + 1} / ${pairs.length} rendered`);
+    await bulkYield();
   }
 
-  if (!bulkCancelled) {
-    updateBulkProgress(total, total, `Done — ${done} file(s) downloaded.`);
-    bulkLogLine(`Complete. ${done} file(s) downloaded.`);
+  if (bulkCancelled) {
+    bulkStartBtn.hidden = false;
+    bulkCancelBtn.hidden = true;
+    return;
   }
+
+  if (added === 0) {
+    bulkLogLine('Nothing to zip — all pairs were skipped.');
+    bulkStartBtn.hidden = false;
+    bulkCancelBtn.hidden = true;
+    return;
+  }
+
+  updateBulkProgress(pairs.length, pairs.length, 'Generating zip…');
+  bulkLogLine(`Generating zip with ${added} file(s)…`);
+
+  const zipBlob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } });
+  const url = URL.createObjectURL(zipBlob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'doyle_bulk_export.zip';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+
+  updateBulkProgress(pairs.length, pairs.length, `Done — ${added} file(s) in zip.`);
+  bulkLogLine(`↓ doyle_bulk_export.zip (${added} file(s))`);
+
   bulkStartBtn.hidden = false;
   bulkCancelBtn.hidden = true;
 }

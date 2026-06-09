@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Doyle Spiral Studio</title>
   <script src="https://cdn.jsdelivr.net/npm/three@0.152.2/build/three.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
   <style>
     :root {
       color-scheme: light dark;
@@ -1145,6 +1146,23 @@
             <label><input type="checkbox" name="add_fill_pattern" id="togglePattern"> Pattern fill</label>
             <label><input type="checkbox" name="draw_group_outline" id="toggleOutline" checked> Group outline</label>
             <label><input type="checkbox" name="red_outline" id="toggleRed"> Highlight rim</label>
+          </div>
+
+          <div class="checkbox-row">
+            <label><input type="checkbox" id="breakdownMode"> Breakdown mode</label>
+          </div>
+
+          <div id="breakdownSettings" hidden>
+            <div class="inline-fields">
+              <div class="field-group">
+                <label for="workpieceWidth">Workpiece width (mm)</label>
+                <input id="workpieceWidth" name="workpiece_width_mm" type="number" min="0.001" step="0.001" value="100" />
+              </div>
+              <div class="field-group">
+                <label for="workpieceHeight">Workpiece height (mm)</label>
+                <input id="workpieceHeight" name="workpiece_height_mm" type="number" min="0.001" step="0.001" value="100" />
+              </div>
+            </div>
           </div>
 
           <div class="field-group">
