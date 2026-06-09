@@ -1,6 +1,33 @@
 import { describe, it, expect } from 'vitest';
-import { getBreakdownRings, generateBreakdownSVG, countWorkpieces, getOuterBoundsRequired, centreOutline } from '../js/breakdown.js';
+import { getBreakdownRings, generateBreakdownSVG, countWorkpieces, getOuterBoundsRequired, centreOutline, getFittingGroups } from '../js/breakdown.js';
 import { generateSingleGroupDXF } from '../js/dxf_export.js';
+import { renderSpiral } from '../js/doyle_spiral_engine.js';
+
+// Replicates the workpiece-file build logic from downloadBreakdownZip in app.js:
+// overflow ring IDs are those NOT in fittingRings; workpiece gets every circle_* group
+// whose ringIndex is NOT in overflowRingIds.
+function buildWorkpieceSVG(arcGroups, scaleFactor, wpW, wpH) {
+  const rings = getBreakdownRings(arcGroups, scaleFactor, wpW, wpH);
+  const fittingIndices = new Set(rings.map(r => r.ringIndex));
+
+  // overflow ring IDs = circle_* group IDs not in fitting set
+  const overflowRingIds = new Set();
+  for (const [key, g] of arcGroups.entries()) {
+    if (!key.startsWith('circle_')) continue;
+    if (g.ringIndex == null || g.ringIndex < 0) continue;
+    if (!fittingIndices.has(g.ringIndex)) overflowRingIds.add(g.ringIndex);
+  }
+
+  const outlines = [];
+  for (const [key, g] of arcGroups.entries()) {
+    if (!key.startsWith('circle_')) continue;
+    if (overflowRingIds.has(g.ringIndex)) continue;
+    const o = g.getClosedOutline();
+    if (o && o.length >= 2) outlines.push(o);
+  }
+
+  return { svg: generateBreakdownSVG(outlines, [], scaleFactor, wpW, wpH, []), outlines, overflowRingIds };
+}
 
 // Helper to build a mock arcGroups Map
 function makeArcGroups(entries) {
@@ -451,5 +478,206 @@ describe('generateBreakdownSVG multi-outline (fitting workpiece)', () => {
     // Here we test that passing empty highlightPaths produces no red strokes
     const svg = generateBreakdownSVG([squareOutline(5)], [], 1, 100, 100, []);
     expect(svg).not.toContain('stroke="red"');
+  });
+});
+
+describe('getFittingGroups', () => {
+  // arcGroups where ring 1 has a clone whose outline exceeds the 60mm box (half=30)
+  // ring 0: 1 group, fits; ring 1: master fits (half=20), clone does NOT fit (re=35 > 30)
+  // getBreakdownRings → only ring 0 fits; getFittingGroups → 1 group (ring 0's only group)
+  function makeCloneArcGroups() {
+    return makeArcGroups([
+      ['circle_0',  0, squareOutline(10)],
+      ['circle_1a', 1, squareOutline(20)],
+      ['circle_1b', 1, [{ re: 35, im: 0 }, { re: 0, im: 35 },
+                        { re: -35, im: 0 }, { re: 0, im: -35 }]],
+    ]);
+  }
+
+  it('returns only groups whose ring index is in the fitting set', () => {
+    const arcGroups = makeCloneArcGroups();
+    const fittingRings = getBreakdownRings(arcGroups, 1, 60, 60); // ring 1 excluded
+    expect(fittingRings.map(r => r.ringIndex)).toEqual([0]);
+    const groups = getFittingGroups(arcGroups, fittingRings);
+    expect(groups.every(g => g.ringIndex === 0)).toBe(true);
+    expect(groups).toHaveLength(1);
+  });
+
+  it('workpiece SVG path count equals number of fitting groups', () => {
+    const arcGroups = makeCloneArcGroups();
+    const fittingRings = getBreakdownRings(arcGroups, 1, 60, 60);
+    const fittingGroups = getFittingGroups(arcGroups, fittingRings);
+    const outlines = fittingGroups.map(g => g.outline);
+    const svg = generateBreakdownSVG(outlines, [], 1, 250, 250, []);
+    const pathCount = (svg.match(/<path /g) || []).length;
+    expect(pathCount).toBe(fittingGroups.length);
+  });
+
+  it('includes all groups when every ring fits', () => {
+    // ring 0: 1 group, ring 1: 2 groups — all within 100mm box (half=50)
+    const arcGroups = makeArcGroups([
+      ['circle_0',  0, squareOutline(5)],
+      ['circle_1a', 1, squareOutline(10)],
+      ['circle_1b', 1, squareOutline(10)],
+    ]);
+    const fittingRings = getBreakdownRings(arcGroups, 1, 100, 100);
+    expect(fittingRings.map(r => r.ringIndex)).toEqual([0, 1]);
+    const groups = getFittingGroups(arcGroups, fittingRings);
+    expect(groups).toHaveLength(3);
+  });
+
+  it('returns empty array when no rings fit', () => {
+    const arcGroups = makeArcGroups([['circle_0', 0, squareOutline(100)]]);
+    const fittingRings = getBreakdownRings(arcGroups, 1, 10, 10);
+    expect(getFittingGroups(arcGroups, fittingRings)).toHaveLength(0);
+  });
+});
+
+describe('workpiece SVG contains no overflow ring groups', () => {
+  // Setup: ring 0 (1 group, fits), ring 1 (2 clone groups, fit), ring 2 (2 groups, overflow)
+  function makeThreeRingGroups() {
+    return makeArcGroups([
+      ['circle_0',  0, squareOutline(5)],
+      ['circle_1a', 1, squareOutline(15)],
+      ['circle_1b', 1, squareOutline(15)],
+      ['circle_2a', 2, squareOutline(60)],  // 60 > 50 — overflow
+      ['circle_2b', 2, squareOutline(60)],
+    ]);
+  }
+
+  it('workpiece SVG path count equals only the non-overflow circle_ groups', () => {
+    const arcGroups = makeThreeRingGroups();
+    const { svg, outlines, overflowRingIds } = buildWorkpieceSVG(arcGroups, 1, 100, 100);
+
+    // Overflow should be ring 2 only
+    expect([...overflowRingIds]).toEqual([2]);
+
+    // Non-overflow circle_ groups: ring 0 (1) + ring 1 (2) = 3
+    expect(outlines).toHaveLength(3);
+
+    const pathCount = (svg.match(/<path /g) || []).length;
+    expect(pathCount).toBe(3);
+  });
+
+  it('workpiece SVG contains no paths for overflow ring IDs', () => {
+    // Verify by checking that the overflow outlines (ring 2, half-size 60) do NOT appear.
+    // After transform x = re*1 + 50, a point at re=60 → x=110 which exceeds wpW=100.
+    // None of the paths in the workpiece SVG should have x > wpW.
+    const arcGroups = makeThreeRingGroups();
+    const { svg } = buildWorkpieceSVG(arcGroups, 1, 100, 100);
+
+    const xMatches = [...svg.matchAll(/[ML]([\d.]+),([\d.]+)/g)];
+    const xs = xMatches.map(m => parseFloat(m[1]));
+    expect(xs.every(x => x <= 100)).toBe(true);
+  });
+
+  it('when all rings fit, workpiece contains every circle_ group and overflow set is empty', () => {
+    const arcGroups = makeArcGroups([
+      ['circle_0',  0, squareOutline(5)],
+      ['circle_1a', 1, squareOutline(10)],
+      ['circle_1b', 1, squareOutline(10)],
+    ]);
+    const { svg, outlines, overflowRingIds } = buildWorkpieceSVG(arcGroups, 1, 100, 100);
+
+    expect(overflowRingIds.size).toBe(0);
+    expect(outlines).toHaveLength(3);
+    const pathCount = (svg.match(/<path /g) || []).length;
+    expect(pathCount).toBe(3);
+  });
+
+  it('when no rings fit, workpiece has no outlines and overflow contains everything', () => {
+    const arcGroups = makeArcGroups([
+      ['circle_0', 0, squareOutline(100)],  // 100 > 5 — overflow immediately
+    ]);
+    const { outlines, overflowRingIds } = buildWorkpieceSVG(arcGroups, 1, 10, 10);
+
+    expect(overflowRingIds.has(0)).toBe(true);
+    expect(outlines).toHaveLength(0);
+  });
+
+  it('overflow ring IDs exactly match the ring IDs used in individual file names', () => {
+    // The individual files are named ring_${g.ringIndex}_group_${g.id}.
+    // overflowRingIds must equal the set of ringIndex values from overflow groups.
+    const arcGroups = makeArcGroups([
+      ['circle_0',  0, squareOutline(5)],
+      ['circle_2a', 2, squareOutline(60)],  // overflow
+      ['circle_2b', 2, squareOutline(60)],  // overflow
+    ]);
+    const rings = getBreakdownRings(arcGroups, 1, 100, 100);
+    const fittingIndices = new Set(rings.map(r => r.ringIndex));
+
+    // Simulate overflow file generation: collect ring IDs used in filenames
+    const fileRingIds = new Set();
+    for (const [key, g] of arcGroups.entries()) {
+      if (!key.startsWith('circle_')) continue;
+      if (!fittingIndices.has(g.ringIndex)) fileRingIds.add(g.ringIndex);
+    }
+
+    const { overflowRingIds } = buildWorkpieceSVG(arcGroups, 1, 100, 100);
+    expect([...overflowRingIds].sort()).toEqual([...fileRingIds].sort());
+  });
+});
+
+describe('workpiece SVG with real engine: p=q=16, bbox=1000mm, workpiece=250mm', () => {
+  // Render with draw_group_outline so arcGroups are populated
+  const res = renderSpiral({
+    p: 16, q: 16, depth: 4,
+    bounding_box_width_mm: 1000,
+    bounding_box_height_mm: 1000,
+    mode: 'arram_boyle',
+    draw_group_outline: true,
+  }, 'arram_boyle');
+
+  const wpW = 250, wpH = 250;
+  const sf = res.scaleFactor;
+  const arcGroups = res.engine.arcGroups;
+
+  it('engine produces arc groups', () => {
+    expect(arcGroups.size).toBeGreaterThan(0);
+  });
+
+  it('workpiece SVG path count equals circle_ groups NOT in overflow', () => {
+    const rings = getBreakdownRings(arcGroups, sf, wpW, wpH);
+    const fittingIndices = new Set(rings.map(r => r.ringIndex));
+
+    const overflowRingIds = new Set();
+    let expectedPaths = 0;
+    for (const [key, g] of arcGroups.entries()) {
+      if (!key.startsWith('circle_')) continue;
+      if (g.ringIndex == null || g.ringIndex < 0) continue;
+      const o = g.getClosedOutline();
+      if (!o || o.length < 2) continue;
+      if (!fittingIndices.has(g.ringIndex)) {
+        overflowRingIds.add(g.ringIndex);
+      } else {
+        expectedPaths++;
+      }
+    }
+
+    const { svg, outlines } = buildWorkpieceSVG(arcGroups, sf, wpW, wpH);
+    expect(outlines).toHaveLength(expectedPaths);
+
+    const pathCount = (svg.match(/<path /g) || []).length;
+    expect(pathCount).toBe(expectedPaths);
+  });
+
+  it('workpiece SVG contains no outline points outside the workpiece box', () => {
+    const { svg } = buildWorkpieceSVG(arcGroups, sf, wpW, wpH);
+    const xMatches = [...svg.matchAll(/[ML]([\d.-]+),([\d.-]+)/g)];
+    const xs = xMatches.map(m => parseFloat(m[1]));
+    const ys = xMatches.map(m => parseFloat(m[2]));
+    expect(xs.every(x => x >= -0.01 && x <= wpW + 0.01)).toBe(true);
+    expect(ys.every(y => y >= -0.01 && y <= wpH + 0.01)).toBe(true);
+  });
+
+  it('overflow ring IDs are all greater than any fitting ring ID', () => {
+    const rings = getBreakdownRings(arcGroups, sf, wpW, wpH);
+    if (rings.length === 0) return; // nothing to check
+    const maxFitting = Math.max(...rings.map(r => r.ringIndex));
+
+    const { overflowRingIds } = buildWorkpieceSVG(arcGroups, sf, wpW, wpH);
+    for (const id of overflowRingIds) {
+      expect(id).toBeGreaterThan(maxFitting);
+    }
   });
 });
