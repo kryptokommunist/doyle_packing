@@ -213,15 +213,15 @@ async function downloadBreakdownZip(format) {
   const fittingHighlightPaths = [];
   const fittingPatternLines = [];
 
-  // Workpiece highlight rim = closed outlines of the outermost fitting ring groups.
-  // (For the absolute outermost ring the engine uses outer_* + arcs[2,3], but inner
-  // rings have no outer_* closure arcs — their getClosedOutline() is the full boundary.)
+  // Workpiece highlight rim = outer 4 arcs (indices 2,3,5,7) of outermost fitting ring groups.
+  // Arcs 0,1,4,6 are the 4 nearest to centre and are omitted.
   const outermostFittingRingIndex = rings.length > 0 ? rings[rings.length - 1].ringIndex : -1;
   if (outermostFittingRingIndex >= 0) {
     for (const [key, g] of engine.arcGroups.entries()) {
       if (!key.startsWith('circle_') || g.ringIndex !== outermostFittingRingIndex) continue;
-      const o = g.getClosedOutline();
-      if (o && o.length >= 2) fittingHighlightPaths.push(o);
+      fittingHighlightPaths.push(...buildContinuousPathsFromArcs(
+        g.arcs.filter((_, i) => i === 2 || i === 3 || i === 5 || i === 7)
+      ));
     }
   }
 
