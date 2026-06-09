@@ -517,6 +517,8 @@ function collectParams() {
         raw.red_outline_min_ring = 0;
       }
     }
+  } else {
+    raw.red_outline_min_ring = null;
   }
   const params = normaliseParams(raw);
   // Preserve mode exactly as selected (normaliseParams already handles but ensure string)

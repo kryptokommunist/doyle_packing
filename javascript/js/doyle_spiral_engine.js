@@ -3676,7 +3676,7 @@ function normaliseParams(params = {}) {
     group_outline_width: groupOutlineWidth,
     pattern_stroke_width: patternStrokeWidth,
     red_outline: Boolean(params.red_outline ?? false),
-    red_outline_min_ring: Number.isFinite(Number(params.red_outline_min_ring)) ? Number(params.red_outline_min_ring) : null,
+    red_outline_min_ring: (params.red_outline_min_ring != null && Number.isFinite(Number(params.red_outline_min_ring))) ? Number(params.red_outline_min_ring) : null,
     draw_group_outline: params.draw_group_outline !== undefined ? Boolean(params.draw_group_outline) : true,
     max_d: Number(params.max_d ?? 2000),
     bounding_box_width_mm: boundingWidthMm,
