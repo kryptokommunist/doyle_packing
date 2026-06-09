@@ -4,6 +4,20 @@
  */
 
 /**
+ * Translates an outline so its centroid is at (0, 0).
+ * Used to centre overflow group outlines before placing them in a workpiece file.
+ *
+ * @param {Array<{re: number, im: number}>} outline
+ * @returns {Array<{re: number, im: number}>}
+ */
+export function centreOutline(outline) {
+  if (!outline || outline.length === 0) return outline;
+  const cx = outline.reduce((s, p) => s + p.re, 0) / outline.length;
+  const cy = outline.reduce((s, p) => s + p.im, 0) / outline.length;
+  return outline.map(p => ({ re: p.re - cx, im: p.im - cy }));
+}
+
+/**
  * Returns the minimum workpiece box (in mm) required to fit any single arc group
  * outline of the outermost visible ring (highest circle_* ringIndex), when that
  * outline is centered in the workpiece box (as it is in the exported file).

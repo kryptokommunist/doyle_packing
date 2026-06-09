@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getBreakdownRings, generateBreakdownSVG, countWorkpieces, getOuterBoundsRequired } from '../js/breakdown.js';
+import { getBreakdownRings, generateBreakdownSVG, countWorkpieces, getOuterBoundsRequired, centreOutline } from '../js/breakdown.js';
 import { generateSingleGroupDXF } from '../js/dxf_export.js';
 
 // Helper to build a mock arcGroups Map
@@ -334,5 +334,79 @@ describe('getOuterBoundsRequired', () => {
     const arcGroups = makeArcGroupsForBounds([['circle_1', 1, squareOutline(20)]]);
     const required = getOuterBoundsRequired(arcGroups, 1);
     expect(required.w <= 40).toBe(true);
+  });
+});
+
+describe('centreOutline', () => {
+  it('returns outline unchanged when already centred at origin', () => {
+    const outline = squareOutline(10);
+    const result = centreOutline(outline);
+    for (let i = 0; i < outline.length; i++) {
+      expect(result[i].re).toBeCloseTo(outline[i].re);
+      expect(result[i].im).toBeCloseTo(outline[i].im);
+    }
+  });
+
+  it('shifts an off-centre outline so its centroid is at (0, 0)', () => {
+    // Outline centred at (100, 50), half-size 10
+    const outline = [
+      { re: 90, im: 40 }, { re: 110, im: 40 },
+      { re: 110, im: 60 }, { re: 90, im: 60 },
+    ];
+    const result = centreOutline(outline);
+    const cx = result.reduce((s, p) => s + p.re, 0) / result.length;
+    const cy = result.reduce((s, p) => s + p.im, 0) / result.length;
+    expect(cx).toBeCloseTo(0);
+    expect(cy).toBeCloseTo(0);
+  });
+
+  it('preserves the shape (relative distances between points unchanged)', () => {
+    const outline = [
+      { re: 100, im: 200 }, { re: 120, im: 200 },
+      { re: 120, im: 220 }, { re: 100, im: 220 },
+    ];
+    const result = centreOutline(outline);
+    // Width and height should be the same: 20 × 20
+    const minRe = Math.min(...result.map(p => p.re));
+    const maxRe = Math.max(...result.map(p => p.re));
+    const minIm = Math.min(...result.map(p => p.im));
+    const maxIm = Math.max(...result.map(p => p.im));
+    expect(maxRe - minRe).toBeCloseTo(20);
+    expect(maxIm - minIm).toBeCloseTo(20);
+  });
+
+  it('overflow group SVG: outline centred at (wpW/2, wpH/2) after transform', () => {
+    // Outline centred at spiral position (100, 50), half-size 10
+    const offCentreOutline = [
+      { re: 90, im: 40 }, { re: 110, im: 40 },
+      { re: 110, im: 60 }, { re: 90, im: 60 },
+    ];
+    const centred = centreOutline(offCentreOutline);
+    const w = 100, h = 100, scale = 1;
+    const svg = generateBreakdownSVG([centred], [], scale, w, h, []);
+    // After transform x = re*1 + 50, the bounding box midpoint should be ≈ 50
+    // Extract all x coordinates from the path d attribute
+    const xMatches = [...svg.matchAll(/[ML]([\d.-]+),([\d.-]+)/g)];
+    const xs = xMatches.map(m => parseFloat(m[1]));
+    const midX = (Math.min(...xs) + Math.max(...xs)) / 2;
+    expect(midX).toBeCloseTo(w / 2, 0);
+  });
+});
+
+describe('generateBreakdownSVG multi-outline (fitting workpiece)', () => {
+  it('includes all arc group outlines for fitting rings', () => {
+    // Two outlines in spiral coords (ring 0 and ring 1 representative)
+    const outline0 = squareOutline(5);
+    const outline1 = squareOutline(10);
+    const svg = generateBreakdownSVG([outline0, outline1], [], 1, 100, 100, []);
+    const pathCount = (svg.match(/<path /g) || []).length;
+    expect(pathCount).toBe(2);
+  });
+
+  it('three fitting ring groups all appear as separate paths', () => {
+    const outlines = [squareOutline(3), squareOutline(5), squareOutline(8)];
+    const svg = generateBreakdownSVG(outlines, [], 1, 100, 100, []);
+    const pathCount = (svg.match(/<path /g) || []).length;
+    expect(pathCount).toBe(3);
   });
 });

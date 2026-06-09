@@ -2,7 +2,7 @@ import { renderSpiral, normaliseParams, buildPatternAnimationContext, buildConti
 import { createThreeViewer } from './three_viewer.js';
 import { generateDXF, generateSingleGroupDXF } from './dxf_export.js';
 import { zipSync, strToU8 } from 'https://cdn.jsdelivr.net/npm/fflate@0.8.2/esm/browser.js';
-import { getBreakdownRings, generateBreakdownSVG, countWorkpieces, getOuterBoundsRequired } from './breakdown.js';
+import { getBreakdownRings, generateBreakdownSVG, countWorkpieces, getOuterBoundsRequired, centreOutline } from './breakdown.js';
 
 const form = document.getElementById('controlsForm');
 const statusEl = document.getElementById('statusMessage');
@@ -187,23 +187,18 @@ async function downloadBreakdownZip(format) {
   const fittingPatternLines = [];
 
   for (let i = 0; i < rings.length; i++) {
-    const { ringIndex, group, outline } = rings[i];
+    const { ringIndex } = rings[i];
     const isOutermost = i === rings.length - 1;
 
-    if (withPattern) {
-      for (const [key, g] of engine.arcGroups.entries()) {
-        if (!key.startsWith('circle_') || g.ringIndex !== ringIndex) continue;
-        const gOutline = g.getClosedOutline();
-        if (!gOutline || gOutline.length < 2) continue;
-        fittingOutlines.push(gOutline);
-        if (withHighlight) fittingHighlightPaths.push(...getHighlightRimForGroup(g, engine.arcGroups, isOutermost));
-        if (typeof g.getPatternSegments === 'function') {
-          fittingPatternLines.push(...(g.getPatternSegments(params.fill_pattern_spacing, g.primaryPatternAngle, params.fill_pattern_offset) ?? []));
-        }
+    for (const [key, g] of engine.arcGroups.entries()) {
+      if (!key.startsWith('circle_') || g.ringIndex !== ringIndex) continue;
+      const gOutline = g.getClosedOutline();
+      if (!gOutline || gOutline.length < 2) continue;
+      fittingOutlines.push(gOutline);
+      if (withHighlight) fittingHighlightPaths.push(...getHighlightRimForGroup(g, engine.arcGroups, isOutermost));
+      if (withPattern && typeof g.getPatternSegments === 'function') {
+        fittingPatternLines.push(...(g.getPatternSegments(params.fill_pattern_spacing, g.primaryPatternAngle, params.fill_pattern_offset) ?? []));
       }
-    } else {
-      fittingOutlines.push(outline);
-      if (withHighlight) fittingHighlightPaths.push(...getHighlightRimForGroup(group, engine.arcGroups, isOutermost));
     }
   }
 
@@ -216,22 +211,29 @@ async function downloadBreakdownZip(format) {
     );
   }
 
-  // --- Beyond-box rings: one file per arc group ---
+  // --- Beyond-box rings: one file per arc group, centred in workpiece box ---
   const overflowGroups = getOverflowGroups(engine.arcGroups, rings);
   for (const g of overflowGroups) {
     const gOutline = g.getClosedOutline();
     if (!gOutline || gOutline.length < 2) continue;
+    const cx = gOutline.reduce((s, p) => s + p.re, 0) / gOutline.length;
+    const cy = gOutline.reduce((s, p) => s + p.im, 0) / gOutline.length;
+    const gOutlineCentred = centreOutline(gOutline);
     const highlightPaths = withHighlight && Number.isFinite(g.ringIndex) && g.ringIndex > 0
-      ? [gOutline]
+      ? [gOutlineCentred]
       : [];
     const patLines = withPattern && typeof g.getPatternSegments === 'function'
       ? (g.getPatternSegments(params.fill_pattern_spacing, g.primaryPatternAngle, params.fill_pattern_offset) ?? [])
+          .map(seg => ({
+            p1: { re: seg.p1.re - cx, im: seg.p1.im - cy },
+            p2: { re: seg.p2.re - cx, im: seg.p2.im - cy },
+          }))
       : [];
     const fname = `${base}_ring_${g.ringIndex}_group_${g.id}.${format}`;
     zipFiles[fname] = strToU8(
       format === 'svg'
-        ? generateBreakdownSVG([gOutline], highlightPaths, scaleFactor ?? 1, wpW, wpH, patLines)
-        : generateSingleGroupDXF([gOutline], highlightPaths, scaleFactor ?? 1, wpW, wpH)
+        ? generateBreakdownSVG([gOutlineCentred], highlightPaths, scaleFactor ?? 1, wpW, wpH, patLines)
+        : generateSingleGroupDXF([gOutlineCentred], highlightPaths, scaleFactor ?? 1, wpW, wpH)
     );
   }
 
