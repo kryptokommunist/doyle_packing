@@ -179,7 +179,7 @@ async function downloadBreakdownZip(format) {
   const base = sanitiseFileName(exportFilenameInput?.value.trim() || 'doyle-spiral') || 'doyle-spiral';
   const zipFiles = {};
   const withPattern = Boolean(params.add_fill_pattern);
-  const withHighlight = Boolean(params.red_outline);
+  const withHighlight = true; // always show cut boundary in breakdown exports
 
   // --- Beyond-box rings: one file per arc group, centred in workpiece box ---
   // Compute these first so we know the exact ring IDs exported individually.
