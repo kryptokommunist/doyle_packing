@@ -171,46 +171,43 @@ async function downloadBreakdownZip(format) {
   const zipFiles = {};
   const withPattern = Boolean(params.add_fill_pattern);
   const withHighlight = Boolean(params.red_outline);
-  const totalPieceCount = countWorkpieces(engine.arcGroups, rings, withPattern);
+
+  // --- Fitting rings: all outlines combined into one workpiece file ---
+  const fittingOutlines = [];
+  const fittingHighlightPaths = [];
+  const fittingPatternLines = [];
 
   for (let i = 0; i < rings.length; i++) {
     const { ringIndex, group, outline } = rings[i];
     const isOutermost = i === rings.length - 1;
 
     if (withPattern) {
-      // Pattern fill: each arc group may have a unique angle — one file per arc group
       for (const [key, g] of engine.arcGroups.entries()) {
         if (!key.startsWith('circle_') || g.ringIndex !== ringIndex) continue;
         const gOutline = g.getClosedOutline();
         if (!gOutline || gOutline.length < 2) continue;
-        const highlightPaths = withHighlight
-          ? getHighlightRimForGroup(g, engine.arcGroups, isOutermost)
-          : [];
-        const patLines = typeof g.getPatternSegments === 'function'
-          ? (g.getPatternSegments(params.fill_pattern_spacing, g.primaryPatternAngle, params.fill_pattern_offset) ?? [])
-          : [];
-        const fname = `${base}_ring_${ringIndex}_group_${g.id}.${format}`;
-        zipFiles[fname] = strToU8(
-          format === 'svg'
-            ? generateBreakdownSVG(gOutline, highlightPaths, scaleFactor ?? 1, wpW, wpH, patLines)
-            : generateSingleGroupDXF(gOutline, highlightPaths, scaleFactor ?? 1, wpW, wpH)
-        );
+        fittingOutlines.push(gOutline);
+        if (withHighlight) fittingHighlightPaths.push(...getHighlightRimForGroup(g, engine.arcGroups, isOutermost));
+        if (typeof g.getPatternSegments === 'function') {
+          fittingPatternLines.push(...(g.getPatternSegments(params.fill_pattern_spacing, g.primaryPatternAngle, params.fill_pattern_offset) ?? []));
+        }
       }
     } else {
-      // No pattern fill: ring is symmetric — one file per ring
-      const highlightPaths = withHighlight
-        ? getHighlightRimForGroup(group, engine.arcGroups, isOutermost)
-        : [];
-      const fname = `${base}_ring_${ringIndex}.${format}`;
-      zipFiles[fname] = strToU8(
-        format === 'svg'
-          ? generateBreakdownSVG(outline, highlightPaths, scaleFactor ?? 1, wpW, wpH, [])
-          : generateSingleGroupDXF(outline, highlightPaths, scaleFactor ?? 1, wpW, wpH)
-      );
+      fittingOutlines.push(outline);
+      if (withHighlight) fittingHighlightPaths.push(...getHighlightRimForGroup(group, engine.arcGroups, isOutermost));
     }
   }
 
-  // Beyond-box rings: one file per arc group, highlight rim = full closed outline
+  if (fittingOutlines.length > 0) {
+    const fname = `${base}_workpiece.${format}`;
+    zipFiles[fname] = strToU8(
+      format === 'svg'
+        ? generateBreakdownSVG(fittingOutlines, fittingHighlightPaths, scaleFactor ?? 1, wpW, wpH, fittingPatternLines)
+        : generateSingleGroupDXF(fittingOutlines, fittingHighlightPaths, scaleFactor ?? 1, wpW, wpH)
+    );
+  }
+
+  // --- Beyond-box rings: one file per arc group ---
   const overflowGroups = getOverflowGroups(engine.arcGroups, rings);
   for (const g of overflowGroups) {
     const gOutline = g.getClosedOutline();
@@ -224,11 +221,12 @@ async function downloadBreakdownZip(format) {
     const fname = `${base}_ring_${g.ringIndex}_group_${g.id}.${format}`;
     zipFiles[fname] = strToU8(
       format === 'svg'
-        ? generateBreakdownSVG(gOutline, highlightPaths, scaleFactor ?? 1, wpW, wpH, patLines)
-        : generateSingleGroupDXF(gOutline, highlightPaths, scaleFactor ?? 1, wpW, wpH)
+        ? generateBreakdownSVG([gOutline], highlightPaths, scaleFactor ?? 1, wpW, wpH, patLines)
+        : generateSingleGroupDXF([gOutline], highlightPaths, scaleFactor ?? 1, wpW, wpH)
     );
   }
 
+  const totalPieceCount = countWorkpieces(engine.arcGroups, rings, withPattern);
   const fileCount = Object.keys(zipFiles).length;
   const zipped = zipSync(zipFiles);
   const blob = new Blob([zipped], { type: 'application/zip' });
@@ -240,7 +238,7 @@ async function downloadBreakdownZip(format) {
   link.click();
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
-  setStatus(`Exported ${fileCount} template file${fileCount === 1 ? '' : 's'} for ${totalPieceCount} workpiece${totalPieceCount === 1 ? '' : 's'} in ${base}_breakdown.zip.`);
+  setStatus(`Exported ${fileCount} workpiece file${fileCount === 1 ? '' : 's'} in ${base}_breakdown.zip.`);
 }
 
 function getExportFileName() {
@@ -594,16 +592,7 @@ function handleRenderSuccess(result) {
         const rings = getBreakdownRings(res.engine.arcGroups, res.scaleFactor ?? 1, wpW, wpH);
         lastRender.engine = res.engine;
         lastRender.scaleFactor = res.scaleFactor;
-        // Count total workpieces: sum of arc groups per ring
-        let total = 0;
-        for (const { ringIndex } of rings) {
-          let count = 0;
-          for (const [key, g] of res.engine.arcGroups.entries()) {
-            if (key.startsWith('circle_') && g.ringIndex === ringIndex) count++;
-          }
-          total += count || 1;
-        }
-        updateBreakdownRingCount(total);
+        updateBreakdownRingCount(countWorkpieces(res.engine.arcGroups, rings, Boolean(lastRender.params?.add_fill_pattern)));
       }
     } catch (_) {
       updateBreakdownRingCount(null);

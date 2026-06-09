@@ -89,7 +89,7 @@ describe('generateBreakdownSVG', () => {
   const h = 100;
 
   it('produces a valid SVG string', () => {
-    const svg = generateBreakdownSVG(outline, [], scale, w, h, []);
+    const svg = generateBreakdownSVG([outline], [], scale, w, h, []);
     expect(svg).toMatch(/^<\?xml/);
     expect(svg).toContain('<svg');
     expect(svg).toContain('</svg>');
@@ -97,30 +97,38 @@ describe('generateBreakdownSVG', () => {
   });
 
   it('sets correct viewBox from workpiece dimensions', () => {
-    const svg = generateBreakdownSVG(outline, [], scale, w, h, []);
+    const svg = generateBreakdownSVG([outline], [], scale, w, h, []);
     expect(svg).toContain(`viewBox="0 0 ${w} ${h}"`);
   });
 
   it('includes highlight path in red when highlightPaths provided', () => {
     const rim = [squareOutline(12)];
-    const svg = generateBreakdownSVG(outline, rim, scale, w, h, []);
+    const svg = generateBreakdownSVG([outline], rim, scale, w, h, []);
     expect(svg).toContain('stroke="red"');
   });
 
   it('does not include red path when highlightPaths is empty', () => {
-    const svg = generateBreakdownSVG(outline, [], scale, w, h, []);
+    const svg = generateBreakdownSVG([outline], [], scale, w, h, []);
     expect(svg).not.toContain('stroke="red"');
   });
 
   it('includes pattern lines when patternLines provided', () => {
     const patLines = [{ p1: { re: 0, im: 0 }, p2: { re: 5, im: 5 } }];
-    const svg = generateBreakdownSVG(outline, [], scale, w, h, patLines);
+    const svg = generateBreakdownSVG([outline], [], scale, w, h, patLines);
     expect(svg).toContain('<line');
   });
 
   it('does not include line elements when patternLines is empty', () => {
-    const svg = generateBreakdownSVG(outline, [], scale, w, h, []);
+    const svg = generateBreakdownSVG([outline], [], scale, w, h, []);
     expect(svg).not.toContain('<line');
+  });
+
+  it('renders multiple outlines as separate path elements', () => {
+    const outlineA = squareOutline(5);
+    const outlineB = squareOutline(10);
+    const svg = generateBreakdownSVG([outlineA, outlineB], [], scale, w, h, []);
+    const pathCount = (svg.match(/<path /g) || []).length;
+    expect(pathCount).toBe(2);
   });
 });
 
@@ -131,24 +139,24 @@ describe('generateSingleGroupDXF', () => {
   const h = 100;
 
   it('contains LWPOLYLINE and SPIRALS layer', () => {
-    const dxf = generateSingleGroupDXF(outline, [], scale, w, h);
+    const dxf = generateSingleGroupDXF([outline], [], scale, w, h);
     expect(dxf).toContain('LWPOLYLINE');
     expect(dxf).toContain('SPIRALS');
   });
 
   it('does not contain HIGHLIGHT layer when highlightPaths is empty', () => {
-    const dxf = generateSingleGroupDXF(outline, [], scale, w, h);
+    const dxf = generateSingleGroupDXF([outline], [], scale, w, h);
     expect(dxf).not.toContain('HIGHLIGHT');
   });
 
   it('contains HIGHLIGHT layer when highlightPaths are provided', () => {
     const rim = [squareOutline(12)];
-    const dxf = generateSingleGroupDXF(outline, rim, scale, w, h);
+    const dxf = generateSingleGroupDXF([outline], rim, scale, w, h);
     expect(dxf).toContain('HIGHLIGHT');
   });
 
   it('has correct DXF structure (header, tables, entities)', () => {
-    const dxf = generateSingleGroupDXF(outline, [], scale, w, h);
+    const dxf = generateSingleGroupDXF([outline], [], scale, w, h);
     expect(dxf).toContain('SECTION');
     expect(dxf).toContain('HEADER');
     expect(dxf).toContain('ENTITIES');
@@ -156,7 +164,7 @@ describe('generateSingleGroupDXF', () => {
   });
 
   it('sets mm units in header', () => {
-    const dxf = generateSingleGroupDXF(outline, [], scale, w, h);
+    const dxf = generateSingleGroupDXF([outline], [], scale, w, h);
     expect(dxf).toContain('$INSUNITS');
     expect(dxf).toContain('4'); // 4 = millimetres
   });
@@ -164,8 +172,16 @@ describe('generateSingleGroupDXF', () => {
   it('centres outline using workpiece dimensions', () => {
     // Point at (0, 0) should map to (w/2, h/2) = (50, 50)
     const centreOutline = [{ re: 0, im: 0 }, { re: 1, im: 0 }, { re: 0, im: 1 }];
-    const dxf = generateSingleGroupDXF(centreOutline, [], scale, 100, 100);
+    const dxf = generateSingleGroupDXF([centreOutline], [], scale, 100, 100);
     expect(dxf).toContain('50.000000'); // x = 0*1 + 50
+  });
+
+  it('renders multiple outlines as separate LWPOLYLINE entities', () => {
+    const outlineA = squareOutline(5);
+    const outlineB = squareOutline(10);
+    const dxf = generateSingleGroupDXF([outlineA, outlineB], [], scale, w, h);
+    const count = (dxf.match(/LWPOLYLINE/g) || []).length;
+    expect(count).toBe(2);
   });
 });
 
@@ -195,17 +211,7 @@ describe('countWorkpieces', () => {
     expect(countWorkpieces(arcGroups, fittingRings, false)).toBe(1);
   });
 
-  it('counts multiple arc groups in the same ring as separate workpieces (no pattern)', () => {
-    const arcGroups = makeMultiGroupArcGroups([
-      ['circle_0a', 0, squareOutline(5)],
-      ['circle_0b', 0, squareOutline(5)],
-      ['circle_0c', 0, squareOutline(5)],
-    ]);
-    const fittingRings = getBreakdownRings(arcGroups, 1, 100, 100);
-    expect(countWorkpieces(arcGroups, fittingRings, false)).toBe(3);
-  });
-
-  it('sums arc groups across multiple fitting rings (no pattern)', () => {
+  it('returns 1 for any number of fitting rings (all combined into one workpiece file)', () => {
     const arcGroups = makeMultiGroupArcGroups([
       ['circle_0',  0, squareOutline(5)],
       ['circle_1a', 1, squareOutline(10)],
@@ -213,10 +219,11 @@ describe('countWorkpieces', () => {
     ]);
     const fittingRings = getBreakdownRings(arcGroups, 1, 100, 100);
     expect(fittingRings.map(r => r.ringIndex)).toEqual([0, 1]);
-    expect(countWorkpieces(arcGroups, fittingRings, false)).toBe(3);
+    // All fitting rings → 1 combined file = 1 workpiece
+    expect(countWorkpieces(arcGroups, fittingRings, false)).toBe(1);
   });
 
-  it('counts overflow groups (beyond-box rings) as individual workpieces', () => {
+  it('counts overflow groups (beyond-box rings) as individual workpieces on top of the 1 fitting workpiece', () => {
     const arcGroups = makeMultiGroupArcGroups([
       ['circle_0',  0, squareOutline(5)],
       ['circle_1a', 1, squareOutline(60)],  // 60 > 50 — does not fit
@@ -224,17 +231,31 @@ describe('countWorkpieces', () => {
     ]);
     const fittingRings = getBreakdownRings(arcGroups, 1, 100, 100);
     expect(fittingRings.map(r => r.ringIndex)).toEqual([0]);
-    // 1 fitting + 2 overflow = 3
+    // 1 fitting workpiece + 2 overflow arc groups = 3
     expect(countWorkpieces(arcGroups, fittingRings, false)).toBe(3);
   });
 
-  it('with pattern fill counts each arc group in fitting rings as a separate file', () => {
+  it('file count equals workpiece count (fitting=1 combined, overflow=1 per group)', () => {
+    // 1 fitting ring + 2 overflow groups → 3 workpieces = 3 files
+    const arcGroups = makeMultiGroupArcGroups([
+      ['circle_0',  0, squareOutline(5)],
+      ['circle_1a', 1, squareOutline(60)],
+      ['circle_1b', 1, squareOutline(60)],
+    ]);
+    const fittingRings = getBreakdownRings(arcGroups, 1, 100, 100);
+    const count = countWorkpieces(arcGroups, fittingRings, false);
+    // 1 combined workpiece file + 2 overflow files = 3
+    expect(count).toBe(3);
+  });
+
+  it('pattern fill flag does not change count (fitting still = 1 combined)', () => {
     const arcGroups = makeMultiGroupArcGroups([
       ['circle_0a', 0, squareOutline(5)],
       ['circle_0b', 0, squareOutline(5)],
     ]);
     const fittingRings = getBreakdownRings(arcGroups, 1, 100, 100);
-    expect(countWorkpieces(arcGroups, fittingRings, true)).toBe(2);
+    expect(countWorkpieces(arcGroups, fittingRings, true)).toBe(1);
+    expect(countWorkpieces(arcGroups, fittingRings, false)).toBe(1);
   });
 
   it('returns 0 for empty arcGroups', () => {

@@ -44,44 +44,20 @@ export function getBreakdownRings(arcGroups, scaleFactor, workpieceWmm, workpiec
 /**
  * Counts total physical workpieces for a breakdown export.
  *
- * Without pattern fill: rings are rotationally symmetric, so one file per ring
- * but the number of physical pieces equals the number of arc groups in that ring.
- * With pattern fill: each arc group is a unique file (different fill angle), so
- * count is the number of arc groups across all fitting rings.
- * Beyond-box rings: always one physical piece per arc group.
+ * All fitting rings are nested into one combined workpiece file = 1 workpiece.
+ * Beyond-box rings: one physical workpiece per arc group.
  *
  * @param {Map<string, {ringIndex: number|null, getClosedOutline: () => Array}>} arcGroups
  * @param {Array<{ringIndex: number}>} fittingRings
- * @param {boolean} withPattern
+ * @param {boolean} _withPattern  - reserved, does not affect count (same combined file)
  * @returns {number}
  */
-export function countWorkpieces(arcGroups, fittingRings, withPattern) {
-  const fittingIndices = new Set(fittingRings.map(r => r.ringIndex));
-  let count = 0;
-
-  if (withPattern) {
-    // One file per arc group in fitting rings (unique angle per group)
-    for (const [key, group] of arcGroups.entries()) {
-      if (!key.startsWith('circle_')) continue;
-      const r = group.ringIndex;
-      if (r === null || r === undefined || r < 0) continue;
-      if (!fittingIndices.has(r)) continue;
-      const outline = group.getClosedOutline();
-      if (!outline || outline.length < 2) continue;
-      count++;
-    }
-  } else {
-    // Symmetric: count arc groups per ring (how many physical copies are cut)
-    for (const { ringIndex } of fittingRings) {
-      let groupCountInRing = 0;
-      for (const [key, group] of arcGroups.entries()) {
-        if (key.startsWith('circle_') && group.ringIndex === ringIndex) groupCountInRing++;
-      }
-      count += groupCountInRing || 1;
-    }
-  }
+export function countWorkpieces(arcGroups, fittingRings, _withPattern) {
+  // Fitting rings are always one combined workpiece
+  let count = fittingRings.length > 0 ? 1 : 0;
 
   // Beyond-box rings: one physical piece per arc group
+  const fittingIndices = new Set(fittingRings.map(r => r.ringIndex));
   for (const [key, group] of arcGroups.entries()) {
     if (!key.startsWith('circle_')) continue;
     const r = group.ringIndex;
@@ -96,10 +72,10 @@ export function countWorkpieces(arcGroups, fittingRings, withPattern) {
 }
 
 /**
- * Generates a standalone SVG string for a single arc group outline.
- * Outline is centred in the workpiece box.
+ * Generates a standalone SVG string for one or more arc group outlines.
+ * All outlines are centred in the workpiece box.
  *
- * @param {Array<{re: number, im: number}>} outline
+ * @param {Array<Array<{re: number, im: number}>>} outlines  - one or more closed outlines
  * @param {Array<Array<{re: number, im: number}>>} highlightPaths
  * @param {number} scaleFactor
  * @param {number} workpieceWmm
@@ -107,22 +83,25 @@ export function countWorkpieces(arcGroups, fittingRings, withPattern) {
  * @param {Array<{p1: {re,im}, p2: {re,im}}>} patternLines
  * @returns {string}
  */
-export function generateBreakdownSVG(outline, highlightPaths, scaleFactor, workpieceWmm, workpieceHmm, patternLines) {
-  const pts = outline.map(pt => ({
-    x: pt.re * scaleFactor + workpieceWmm / 2,
-    y: -(pt.im * scaleFactor) + workpieceHmm / 2,
-  }));
-  const d = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(4)},${p.y.toFixed(4)}`).join(' ') + ' Z';
+export function generateBreakdownSVG(outlines, highlightPaths, scaleFactor, workpieceWmm, workpieceHmm, patternLines) {
+  function toSvgPt(pt) {
+    return {
+      x: pt.re * scaleFactor + workpieceWmm / 2,
+      y: -(pt.im * scaleFactor) + workpieceHmm / 2,
+    };
+  }
 
-  let svgContent = `<path d="${d}" fill="none" stroke="black" stroke-width="0.2"/>`;
+  const normalised = Array.isArray(outlines[0]) ? outlines : [outlines];
+  let svgContent = normalised.map(outline => {
+    const pts = outline.map(toSvgPt);
+    const d = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(4)},${p.y.toFixed(4)}`).join(' ') + ' Z';
+    return `<path d="${d}" fill="none" stroke="black" stroke-width="0.2"/>`;
+  }).join('\n  ');
 
   if (Array.isArray(highlightPaths) && highlightPaths.length > 0) {
     for (const path of highlightPaths) {
       if (!path || path.length < 2) continue;
-      const hPts = path.map(pt => ({
-        x: pt.re * scaleFactor + workpieceWmm / 2,
-        y: -(pt.im * scaleFactor) + workpieceHmm / 2,
-      }));
+      const hPts = path.map(toSvgPt);
       const hd = hPts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(4)},${p.y.toFixed(4)}`).join(' ');
       svgContent += `\n  <path d="${hd}" fill="none" stroke="red" stroke-width="0.4"/>`;
     }

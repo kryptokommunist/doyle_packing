@@ -166,7 +166,7 @@ export function generateDXF(arcGroups, scaleFactor, boundingWidthMm, boundingHei
  * @param {number} workpieceHmm  - workpiece height in mm
  * @returns {string} DXF file contents
  */
-export function generateSingleGroupDXF(outline, highlightPaths, scaleFactor, workpieceWmm, workpieceHmm) {
+export function generateSingleGroupDXF(outlines, highlightPaths, scaleFactor, workpieceWmm, workpieceHmm) {
   function ptToMm(re, im) {
     return {
       x: re * scaleFactor + workpieceWmm / 2,
@@ -174,6 +174,7 @@ export function generateSingleGroupDXF(outline, highlightPaths, scaleFactor, wor
     };
   }
 
+  const normalisedOutlines = Array.isArray(outlines[0]) ? outlines : [outlines];
   const hasHighlight = Array.isArray(highlightPaths) && highlightPaths.length > 0;
   const layerCount = hasHighlight ? 2 : 1;
 
@@ -194,10 +195,12 @@ export function generateSingleGroupDXF(outline, highlightPaths, scaleFactor, wor
 
   lines.push('  0', 'SECTION', '  2', 'ENTITIES');
 
-  const pts = outline.map(pt => ptToMm(pt.re, pt.im));
-  lines.push('  0', 'LWPOLYLINE', '  8', 'SPIRALS', ' 70', '1', ' 90', String(pts.length));
-  for (const { x, y } of pts) {
-    lines.push(' 10', x.toFixed(6), ' 20', y.toFixed(6));
+  for (const outline of normalisedOutlines) {
+    const pts = outline.map(pt => ptToMm(pt.re, pt.im));
+    lines.push('  0', 'LWPOLYLINE', '  8', 'SPIRALS', ' 70', '1', ' 90', String(pts.length));
+    for (const { x, y } of pts) {
+      lines.push(' 10', x.toFixed(6), ' 20', y.toFixed(6));
+    }
   }
 
   if (hasHighlight) {
