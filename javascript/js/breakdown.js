@@ -4,9 +4,12 @@
  */
 
 /**
- * Returns the minimum workpiece box (in mm) required to fit all arc group
- * outlines of the outermost visible ring (highest circle_* ringIndex).
- * This is the ring that must fit for a complete breakdown export to be valid.
+ * Returns the minimum workpiece box (in mm) required to fit any single arc group
+ * outline of the outermost visible ring (highest circle_* ringIndex), when that
+ * outline is centered in the workpiece box (as it is in the exported file).
+ *
+ * The relevant measure is the outline's own width/height (max - min per axis),
+ * not its absolute position in the spiral coordinate system.
  *
  * Returns null if no circle_* groups exist.
  *
@@ -25,25 +28,32 @@ export function getOuterBoundsRequired(arcGroups, scaleFactor) {
   }
   if (!Number.isFinite(maxRing) || maxRing < 0) return null;
 
-  // Measure the maximum extent across all arc groups of that ring
-  let maxAbsRe = 0;
-  let maxAbsIm = 0;
+  // Measure the max outline dimensions (width/height) across all arc groups of that ring.
+  // Each group is exported centered, so the relevant size is (maxRe - minRe) × scaleFactor.
+  let maxW = 0;
+  let maxH = 0;
   let found = false;
   for (const [key, group] of arcGroups.entries()) {
     if (!key.startsWith('circle_') || group.ringIndex !== maxRing) continue;
     const outline = group.getClosedOutline();
     if (!outline || outline.length < 2) continue;
     found = true;
+    let minRe = Infinity, maxRe = -Infinity;
+    let minIm = Infinity, maxIm = -Infinity;
     for (const pt of outline) {
-      const re = Math.abs(pt.re) * scaleFactor;
-      const im = Math.abs(pt.im) * scaleFactor;
-      if (re > maxAbsRe) maxAbsRe = re;
-      if (im > maxAbsIm) maxAbsIm = im;
+      if (pt.re < minRe) minRe = pt.re;
+      if (pt.re > maxRe) maxRe = pt.re;
+      if (pt.im < minIm) minIm = pt.im;
+      if (pt.im > maxIm) maxIm = pt.im;
     }
+    const w = (maxRe - minRe) * scaleFactor;
+    const h = (maxIm - minIm) * scaleFactor;
+    if (w > maxW) maxW = w;
+    if (h > maxH) maxH = h;
   }
 
   if (!found) return null;
-  return { w: maxAbsRe * 2, h: maxAbsIm * 2 };
+  return { w: maxW, h: maxH };
 }
 
 /**
