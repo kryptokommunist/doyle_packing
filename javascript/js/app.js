@@ -372,8 +372,8 @@ function downloadCurrentDxf() {
   const bbH = params.bounding_box_height_mm || DEFAULTS.bounding_box_height_mm;
 
   const dxfContent = generateDXF(engine.arcGroups, scaleFactor ?? 1, bbW, bbH, {
-    drawGroupOutline: params.draw_group_outline !== false,
-    redOutline: Boolean(params.red_outline),
+    drawGroupOutline: false,
+    redOutline: true,
   });
 
   const raw = exportFilenameInput ? exportFilenameInput.value.trim() || 'doyle-spiral' : 'doyle-spiral';
