@@ -3554,7 +3554,7 @@ class DoyleSpiralEngine {
 
   toJSON() {
     if (!this.arcGroups.size) {
-      throw new Error('Arc groups are not available. Render in arram_boyle mode first.');
+      return null;
     }
     const exportData = {
       spiral_params: {

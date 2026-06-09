@@ -1843,6 +1843,11 @@ async function runBulkExport() {
     catch (err) { bulkLogLine(`  ERROR: ${err.message}`); await bulkSleep(0); continue; }
 
     const name = `doyle_p${p}_q${q}`;
+    const hasGroups = (result.engine?.arcGroups?.size ?? 0) > 0;
+    if (!hasGroups) {
+      bulkLogLine(`  SKIPPED ${label} — no geometry produced`);
+      continue;
+    }
     if (wantSvg && result.svgString) {
       triggerBulkDownload(result.svgString, 'image/svg+xml;charset=utf-8', `${name}.svg`);
       bulkLogLine(`  ↓ ${name}.svg`);
@@ -1852,19 +1857,15 @@ async function runBulkExport() {
     }
     if (bulkCancelled) break;
     if (wantDxf) {
-      if (result.engine?.arcGroups?.size) {
-        const { bounding_box_width_mm: bbW, bounding_box_height_mm: bbH,
-                draw_group_outline, red_outline } = baseParams;
-        const dxf = generateDXF(result.engine.arcGroups, result.scaleFactor ?? 1, bbW, bbH,
-          { drawGroupOutline: draw_group_outline !== false, redOutline: Boolean(red_outline) });
-        triggerBulkDownload(dxf, 'application/dxf', `${name}.dxf`);
-        bulkLogLine(`  ↓ ${name}.dxf`);
-        done++;
-        updateBulkProgress(done, total, `↓ ${name}.dxf`);
-        await bulkSleep(600);
-      } else {
-        bulkLogLine(`  SKIPPED ${name}.dxf — needs arram_boyle mode`);
-      }
+      const { bounding_box_width_mm: bbW, bounding_box_height_mm: bbH,
+              draw_group_outline, red_outline } = baseParams;
+      const dxf = generateDXF(result.engine.arcGroups, result.scaleFactor ?? 1, bbW, bbH,
+        { drawGroupOutline: draw_group_outline !== false, redOutline: Boolean(red_outline) });
+      triggerBulkDownload(dxf, 'application/dxf', `${name}.dxf`);
+      bulkLogLine(`  ↓ ${name}.dxf`);
+      done++;
+      updateBulkProgress(done, total, `↓ ${name}.dxf`);
+      await bulkSleep(600);
     }
     await bulkSleep(0);
   }
