@@ -212,20 +212,25 @@ async function downloadBreakdownZip(format) {
   const fittingOutlines = [];
   const fittingHighlightPaths = [];
   const fittingPatternLines = [];
-  const outermostRingIndex = rings.length > 0 ? rings[rings.length - 1].ringIndex : -1;
+
+  // Workpiece highlight rim = arcs[2,3] of the first overflow ring
+  // (same role as the outer_* closure arcs for the spiral's absolute outermost ring)
+  const firstOverflowRingIndex = overflowGroups.length > 0
+    ? Math.min(...overflowGroups.map(g => g.ringIndex))
+    : -1;
+  if (firstOverflowRingIndex >= 0) {
+    for (const [key, g] of engine.arcGroups.entries()) {
+      if (!key.startsWith('circle_') || g.ringIndex !== firstOverflowRingIndex) continue;
+      fittingHighlightPaths.push(...buildContinuousPathsFromArcs(g.arcs.filter((_, i) => i === 2 || i === 3)));
+    }
+  }
 
   for (const [key, g] of engine.arcGroups.entries()) {
     if (!key.startsWith('circle_')) continue;
     if (!fittingRingIds.has(g.ringIndex)) continue;
     const gOutline = g.getClosedOutline();
     if (!gOutline || gOutline.length < 2) continue;
-    const isOutermost = g.ringIndex === outermostRingIndex;
     fittingOutlines.push(gOutline);
-    if (isOutermost) {
-      // arcs[2,3] only — outer_* closure arcs belong to the spiral's absolute outermost ring,
-      // not the workpiece cutoff ring, so don't include them here.
-      fittingHighlightPaths.push(...getHighlightRimForGroup(g, engine.arcGroups, false));
-    }
     if (withPattern && typeof g._getPatternSegments === 'function') {
       const segs = g._getPatternSegments((params.fill_pattern_spacing ?? 8) / (scaleFactor ?? 1), g.primaryPatternAngle ?? params.fill_pattern_angle, (params.fill_pattern_offset ?? 0) / (scaleFactor ?? 1)) ?? [];
       fittingPatternLines.push(...segs.map(([p1, p2]) => ({ p1, p2 })));
