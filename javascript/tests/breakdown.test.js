@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getBreakdownRings, generateBreakdownSVG } from '../js/breakdown.js';
+import { getBreakdownRings, generateBreakdownSVG, countWorkpieces } from '../js/breakdown.js';
 import { generateSingleGroupDXF } from '../js/dxf_export.js';
 
 // Helper to build a mock arcGroups Map
@@ -166,5 +166,80 @@ describe('generateSingleGroupDXF', () => {
     const centreOutline = [{ re: 0, im: 0 }, { re: 1, im: 0 }, { re: 0, im: 1 }];
     const dxf = generateSingleGroupDXF(centreOutline, [], scale, 100, 100);
     expect(dxf).toContain('50.000000'); // x = 0*1 + 50
+  });
+});
+
+describe('countWorkpieces', () => {
+  function makeMultiGroupArcGroups(entries) {
+    const map = new Map();
+    for (const [key, ringIndex, outlinePoints] of entries) {
+      map.set(key, {
+        ringIndex,
+        id: key,
+        getClosedOutline: () => outlinePoints,
+        arcs: [],
+      });
+    }
+    return map;
+  }
+
+  it('returns 1 when workpiece box exactly matches ring 0 bounding box and only ring 0 fits', () => {
+    // One arc group for ring 0 only; workpiece box exactly matches its bounding box.
+    // half-size=10, scale=1 → outline extents are 10mm; workpiece=20×20mm (half=10).
+    // Ring 0 fits exactly (≤ check). No other rings exist → no overflow → count = 1.
+    const arcGroups = makeMultiGroupArcGroups([
+      ['circle_0', 0, squareOutline(10)],
+    ]);
+    const fittingRings = getBreakdownRings(arcGroups, 1, 20, 20);
+    expect(fittingRings.map(r => r.ringIndex)).toEqual([0]);
+    expect(countWorkpieces(arcGroups, fittingRings, false)).toBe(1);
+  });
+
+  it('counts multiple arc groups in the same ring as separate workpieces (no pattern)', () => {
+    const arcGroups = makeMultiGroupArcGroups([
+      ['circle_0a', 0, squareOutline(5)],
+      ['circle_0b', 0, squareOutline(5)],
+      ['circle_0c', 0, squareOutline(5)],
+    ]);
+    const fittingRings = getBreakdownRings(arcGroups, 1, 100, 100);
+    expect(countWorkpieces(arcGroups, fittingRings, false)).toBe(3);
+  });
+
+  it('sums arc groups across multiple fitting rings (no pattern)', () => {
+    const arcGroups = makeMultiGroupArcGroups([
+      ['circle_0',  0, squareOutline(5)],
+      ['circle_1a', 1, squareOutline(10)],
+      ['circle_1b', 1, squareOutline(10)],
+    ]);
+    const fittingRings = getBreakdownRings(arcGroups, 1, 100, 100);
+    expect(fittingRings.map(r => r.ringIndex)).toEqual([0, 1]);
+    expect(countWorkpieces(arcGroups, fittingRings, false)).toBe(3);
+  });
+
+  it('counts overflow groups (beyond-box rings) as individual workpieces', () => {
+    const arcGroups = makeMultiGroupArcGroups([
+      ['circle_0',  0, squareOutline(5)],
+      ['circle_1a', 1, squareOutline(60)],  // 60 > 50 — does not fit
+      ['circle_1b', 1, squareOutline(60)],
+    ]);
+    const fittingRings = getBreakdownRings(arcGroups, 1, 100, 100);
+    expect(fittingRings.map(r => r.ringIndex)).toEqual([0]);
+    // 1 fitting + 2 overflow = 3
+    expect(countWorkpieces(arcGroups, fittingRings, false)).toBe(3);
+  });
+
+  it('with pattern fill counts each arc group in fitting rings as a separate file', () => {
+    const arcGroups = makeMultiGroupArcGroups([
+      ['circle_0a', 0, squareOutline(5)],
+      ['circle_0b', 0, squareOutline(5)],
+    ]);
+    const fittingRings = getBreakdownRings(arcGroups, 1, 100, 100);
+    expect(countWorkpieces(arcGroups, fittingRings, true)).toBe(2);
+  });
+
+  it('returns 0 for empty arcGroups', () => {
+    const arcGroups = makeMultiGroupArcGroups([]);
+    const fittingRings = getBreakdownRings(arcGroups, 1, 100, 100);
+    expect(countWorkpieces(arcGroups, fittingRings, false)).toBe(0);
   });
 });

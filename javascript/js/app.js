@@ -2,7 +2,7 @@ import { renderSpiral, normaliseParams, buildPatternAnimationContext, buildConti
 import { createThreeViewer } from './three_viewer.js';
 import { generateDXF, generateSingleGroupDXF } from './dxf_export.js';
 import { zipSync, strToU8 } from 'https://cdn.jsdelivr.net/npm/fflate@0.8.2/esm/browser.js';
-import { getBreakdownRings, generateBreakdownSVG } from './breakdown.js';
+import { getBreakdownRings, generateBreakdownSVG, countWorkpieces } from './breakdown.js';
 
 const form = document.getElementById('controlsForm');
 const statusEl = document.getElementById('statusMessage');
@@ -171,7 +171,7 @@ async function downloadBreakdownZip(format) {
   const zipFiles = {};
   const withPattern = Boolean(params.add_fill_pattern);
   const withHighlight = Boolean(params.red_outline);
-  let totalPieceCount = 0;
+  const totalPieceCount = countWorkpieces(engine.arcGroups, rings, withPattern);
 
   for (let i = 0; i < rings.length; i++) {
     const { ringIndex, group, outline } = rings[i];
@@ -183,7 +183,6 @@ async function downloadBreakdownZip(format) {
         if (!key.startsWith('circle_') || g.ringIndex !== ringIndex) continue;
         const gOutline = g.getClosedOutline();
         if (!gOutline || gOutline.length < 2) continue;
-        totalPieceCount++;
         const highlightPaths = withHighlight
           ? getHighlightRimForGroup(g, engine.arcGroups, isOutermost)
           : [];
@@ -198,13 +197,7 @@ async function downloadBreakdownZip(format) {
         );
       }
     } else {
-      // No pattern fill: ring is symmetric — one file per ring, count copies separately
-      let groupCountInRing = 0;
-      for (const [key, g] of engine.arcGroups.entries()) {
-        if (key.startsWith('circle_') && g.ringIndex === ringIndex) groupCountInRing++;
-      }
-      totalPieceCount += groupCountInRing || 1;
-
+      // No pattern fill: ring is symmetric — one file per ring
       const highlightPaths = withHighlight
         ? getHighlightRimForGroup(group, engine.arcGroups, isOutermost)
         : [];
@@ -222,7 +215,6 @@ async function downloadBreakdownZip(format) {
   for (const g of overflowGroups) {
     const gOutline = g.getClosedOutline();
     if (!gOutline || gOutline.length < 2) continue;
-    totalPieceCount++;
     const highlightPaths = withHighlight && Number.isFinite(g.ringIndex) && g.ringIndex > 0
       ? [gOutline]
       : [];

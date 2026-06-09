@@ -42,6 +42,60 @@ export function getBreakdownRings(arcGroups, scaleFactor, workpieceWmm, workpiec
 }
 
 /**
+ * Counts total physical workpieces for a breakdown export.
+ *
+ * Without pattern fill: rings are rotationally symmetric, so one file per ring
+ * but the number of physical pieces equals the number of arc groups in that ring.
+ * With pattern fill: each arc group is a unique file (different fill angle), so
+ * count is the number of arc groups across all fitting rings.
+ * Beyond-box rings: always one physical piece per arc group.
+ *
+ * @param {Map<string, {ringIndex: number|null, getClosedOutline: () => Array}>} arcGroups
+ * @param {Array<{ringIndex: number}>} fittingRings
+ * @param {boolean} withPattern
+ * @returns {number}
+ */
+export function countWorkpieces(arcGroups, fittingRings, withPattern) {
+  const fittingIndices = new Set(fittingRings.map(r => r.ringIndex));
+  let count = 0;
+
+  if (withPattern) {
+    // One file per arc group in fitting rings (unique angle per group)
+    for (const [key, group] of arcGroups.entries()) {
+      if (!key.startsWith('circle_')) continue;
+      const r = group.ringIndex;
+      if (r === null || r === undefined || r < 0) continue;
+      if (!fittingIndices.has(r)) continue;
+      const outline = group.getClosedOutline();
+      if (!outline || outline.length < 2) continue;
+      count++;
+    }
+  } else {
+    // Symmetric: count arc groups per ring (how many physical copies are cut)
+    for (const { ringIndex } of fittingRings) {
+      let groupCountInRing = 0;
+      for (const [key, group] of arcGroups.entries()) {
+        if (key.startsWith('circle_') && group.ringIndex === ringIndex) groupCountInRing++;
+      }
+      count += groupCountInRing || 1;
+    }
+  }
+
+  // Beyond-box rings: one physical piece per arc group
+  for (const [key, group] of arcGroups.entries()) {
+    if (!key.startsWith('circle_')) continue;
+    const r = group.ringIndex;
+    if (r === null || r === undefined || r < 0) continue;
+    if (fittingIndices.has(r)) continue;
+    const outline = group.getClosedOutline();
+    if (!outline || outline.length < 2) continue;
+    count++;
+  }
+
+  return count;
+}
+
+/**
  * Generates a standalone SVG string for a single arc group outline.
  * Outline is centred in the workpiece box.
  *
