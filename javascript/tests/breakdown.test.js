@@ -636,23 +636,23 @@ describe('workpiece SVG with real engine: p=q=16, bbox=1000mm, workpiece=250mm',
     expect(arcGroups.size).toBeGreaterThan(0);
   });
 
-  it('workpiece SVG path count equals circle_ groups NOT in overflow', () => {
+  it('workpiece SVG path count equals total circle_ groups minus overflow groups (total − countWorkpieces + 1)', () => {
     const rings = getBreakdownRings(arcGroups, sf, wpW, wpH);
-    const fittingIndices = new Set(rings.map(r => r.ringIndex));
 
-    const overflowRingIds = new Set();
-    let expectedPaths = 0;
+    // Total valid circle_* groups
+    let totalGroups = 0;
     for (const [key, g] of arcGroups.entries()) {
       if (!key.startsWith('circle_')) continue;
       if (g.ringIndex == null || g.ringIndex < 0) continue;
       const o = g.getClosedOutline();
-      if (!o || o.length < 2) continue;
-      if (!fittingIndices.has(g.ringIndex)) {
-        overflowRingIds.add(g.ringIndex);
-      } else {
-        expectedPaths++;
-      }
+      if (o && o.length >= 2) totalGroups++;
     }
+
+    // countWorkpieces = 1 (workpiece file) + overflow group count
+    // → overflow count = countWorkpieces - 1
+    // → expected workpiece paths = totalGroups - (countWorkpieces - 1)
+    const total = countWorkpieces(arcGroups, rings, false);
+    const expectedPaths = totalGroups - (total - 1);
 
     const { svg, outlines } = buildWorkpieceSVG(arcGroups, sf, wpW, wpH);
     expect(outlines).toHaveLength(expectedPaths);
