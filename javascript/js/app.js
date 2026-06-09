@@ -195,7 +195,7 @@ async function downloadBreakdownZip(format) {
       ? [gOutlineCentred]
       : [];
     const rawPatSegs = withPattern && typeof g._getPatternSegments === 'function'
-      ? (g._getPatternSegments(params.fill_pattern_spacing, g.primaryPatternAngle ?? params.fill_pattern_angle, params.fill_pattern_offset) ?? [])
+      ? (g._getPatternSegments((params.fill_pattern_spacing ?? 8) / (scaleFactor ?? 1), g.primaryPatternAngle ?? params.fill_pattern_angle, (params.fill_pattern_offset ?? 0) / (scaleFactor ?? 1)) ?? [])
       : [];
     const patLines = rawPatSegs.map(([p1, p2]) => ({
       p1: { re: p1.re - cx, im: p1.im - cy },
@@ -209,8 +209,8 @@ async function downloadBreakdownZip(format) {
     );
   }
 
-  // --- Workpiece file: all groups NOT exported individually ---
-  // Exclude any ring ID that appears in an individual overflow file.
+  // --- Workpiece file: all groups whose ring fits in the workpiece box ---
+  const fittingRingIds = new Set(rings.map(r => r.ringIndex));
   const fittingOutlines = [];
   const fittingHighlightPaths = [];
   const fittingPatternLines = [];
@@ -218,14 +218,14 @@ async function downloadBreakdownZip(format) {
 
   for (const [key, g] of engine.arcGroups.entries()) {
     if (!key.startsWith('circle_')) continue;
-    if (overflowRingIds.has(g.ringIndex)) continue;
+    if (!fittingRingIds.has(g.ringIndex)) continue;
     const gOutline = g.getClosedOutline();
     if (!gOutline || gOutline.length < 2) continue;
     const isOutermost = g.ringIndex === outermostRingIndex;
     fittingOutlines.push(gOutline);
     if (withHighlight && isOutermost) fittingHighlightPaths.push(gOutline);
     if (withPattern && typeof g._getPatternSegments === 'function') {
-      const segs = g._getPatternSegments(params.fill_pattern_spacing, g.primaryPatternAngle ?? params.fill_pattern_angle, params.fill_pattern_offset) ?? [];
+      const segs = g._getPatternSegments((params.fill_pattern_spacing ?? 8) / (scaleFactor ?? 1), g.primaryPatternAngle ?? params.fill_pattern_angle, (params.fill_pattern_offset ?? 0) / (scaleFactor ?? 1)) ?? [];
       fittingPatternLines.push(...segs.map(([p1, p2]) => ({ p1, p2 })));
     }
   }
