@@ -2,6 +2,7 @@ import { renderSpiral, normaliseParams, buildPatternAnimationContext, buildConti
 import { createThreeViewer } from './three_viewer.js';
 import { generateDXF, generateSingleGroupDXF } from './dxf_export.js';
 import { zipSync, strToU8 } from 'https://cdn.jsdelivr.net/npm/fflate@0.8.2/esm/browser.js';
+import { getBreakdownRings, generateBreakdownSVG } from './breakdown.js';
 
 const form = document.getElementById('controlsForm');
 const statusEl = document.getElementById('statusMessage');
@@ -91,6 +92,130 @@ function sanitiseFileName(name) {
   return name.replace(/[\\/:*?"<>|]+/g, '-');
 }
 
+function updateBreakdownMode() {
+  const isBreakdown = breakdownModeCheckbox?.checked;
+  if (breakdownSettings) breakdownSettings.hidden = !isBreakdown;
+  if (exportButton)    exportButton.textContent    = isBreakdown ? 'Breakdown SVG' : 'Download SVG';
+  if (exportDxfButton) exportDxfButton.textContent = isBreakdown ? 'Breakdown DXF' : 'Download DXF';
+}
+
+/**
+ * Returns the highlight rim paths (arcs[2] and arcs[3]) for a single arc group.
+ * These are the outer boundary arcs of each cell, used for laser-cut reference.
+ * For the outermost ring, also includes the outer_* closure arcs.
+ */
+function getHighlightRimForGroup(group, arcGroups, isOutermost) {
+  const highlightArcs = group.arcs.filter((_, i) => i === 2 || i === 3);
+  const paths = buildContinuousPathsFromArcs(highlightArcs);
+  if (isOutermost) {
+    for (const [key, g] of arcGroups.entries()) {
+      if (!key.startsWith('outer_')) continue;
+      paths.push(...buildContinuousPathsFromArcs(g.arcs));
+    }
+  }
+  return paths;
+}
+
+function updateBreakdownRingCount(count) {
+  if (breakdownRingCountEl) {
+    breakdownRingCountEl.textContent = count !== null ? `${count} workpiece${count === 1 ? '' : 's'}` : '';
+  }
+}
+
+async function downloadBreakdownZip(format) {
+  if (!lastRender) {
+    setStatus('Render the spiral before exporting.', 'error');
+    return;
+  }
+
+  const params = lastRender.params || collectParams();
+  let engine = lastRender.engine;
+  let scaleFactor = lastRender.scaleFactor;
+
+  if (!engine || !engine.arcGroups || !engine.arcGroups.size) {
+    const result = renderSpiral({ ...params, mode: 'arram_boyle' }, 'arram_boyle');
+    if (!result || !result.engine || !result.engine.arcGroups) {
+      setStatus('Breakdown export failed: could not generate geometry.', 'error');
+      return;
+    }
+    engine = result.engine;
+    scaleFactor = result.scaleFactor;
+  }
+
+  const wpW = Number(workpieceWidthInput?.value) || 100;
+  const wpH = Number(workpieceHeightInput?.value) || 100;
+  const rings = getBreakdownRings(engine.arcGroups, scaleFactor ?? 1, wpW, wpH);
+
+  if (!rings.length) {
+    setStatus('No rings fit within the workpiece bounding box.', 'error');
+    updateBreakdownRingCount(0);
+    return;
+  }
+
+  const base = sanitiseFileName(exportFilenameInput?.value.trim() || 'doyle-spiral') || 'doyle-spiral';
+  const zipFiles = {};
+  const withPattern = Boolean(params.add_fill_pattern);
+  const withHighlight = Boolean(params.red_outline);
+  let totalPieceCount = 0;
+
+  for (let i = 0; i < rings.length; i++) {
+    const { ringIndex, group, outline } = rings[i];
+    const isOutermost = i === rings.length - 1;
+
+    if (withPattern) {
+      // Pattern fill: each arc group may have a unique angle — one file per arc group
+      for (const [key, g] of engine.arcGroups.entries()) {
+        if (!key.startsWith('circle_') || g.ringIndex !== ringIndex) continue;
+        const gOutline = g.getClosedOutline();
+        if (!gOutline || gOutline.length < 2) continue;
+        totalPieceCount++;
+        const highlightPaths = withHighlight
+          ? getHighlightRimForGroup(g, engine.arcGroups, isOutermost)
+          : [];
+        const patLines = typeof g.getPatternSegments === 'function'
+          ? (g.getPatternSegments(params.fill_pattern_spacing, g.primaryPatternAngle, params.fill_pattern_offset) ?? [])
+          : [];
+        const fname = `${base}_ring_${ringIndex}_group_${g.id}.${format}`;
+        zipFiles[fname] = strToU8(
+          format === 'svg'
+            ? generateBreakdownSVG(gOutline, highlightPaths, scaleFactor ?? 1, wpW, wpH, patLines)
+            : generateSingleGroupDXF(gOutline, highlightPaths, scaleFactor ?? 1, wpW, wpH)
+        );
+      }
+    } else {
+      // No pattern fill: ring is symmetric — one file per ring, count copies separately
+      let groupCountInRing = 0;
+      for (const [key, g] of engine.arcGroups.entries()) {
+        if (key.startsWith('circle_') && g.ringIndex === ringIndex) groupCountInRing++;
+      }
+      totalPieceCount += groupCountInRing || 1;
+
+      const highlightPaths = withHighlight
+        ? getHighlightRimForGroup(group, engine.arcGroups, isOutermost)
+        : [];
+      const fname = `${base}_ring_${ringIndex}.${format}`;
+      zipFiles[fname] = strToU8(
+        format === 'svg'
+          ? generateBreakdownSVG(outline, highlightPaths, scaleFactor ?? 1, wpW, wpH, [])
+          : generateSingleGroupDXF(outline, highlightPaths, scaleFactor ?? 1, wpW, wpH)
+      );
+    }
+  }
+
+  const fileCount = Object.keys(zipFiles).length;
+  const zipped = zipSync(zipFiles);
+  const blob = new Blob([zipped], { type: 'application/zip' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `${base}_breakdown.zip`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+  setStatus(`Exported ${fileCount} template file${fileCount === 1 ? '' : 's'} for ${totalPieceCount} workpiece${totalPieceCount === 1 ? '' : 's'} in ${base}_breakdown.zip.`);
+}
+
 function getExportFileName() {
   if (!exportFilenameInput) {
     return 'doyle-spiral.svg';
@@ -119,6 +244,11 @@ function getRenderTimeoutMs() {
 }
 
 function downloadCurrentSvg() {
+  if (breakdownModeCheckbox?.checked) {
+    downloadBreakdownZip('svg');
+    return;
+  }
+
   if (!lastRender) {
     setStatus('Render the spiral before downloading.', 'error');
     return;
@@ -155,6 +285,11 @@ function hasGeometry(geometry) {
 }
 
 function downloadCurrentDxf() {
+  if (breakdownModeCheckbox?.checked) {
+    downloadBreakdownZip('dxf');
+    return;
+  }
+
   if (!lastRender) {
     setStatus('Render the spiral before downloading.', 'error');
     return;
@@ -410,6 +545,35 @@ function handleRenderSuccess(result) {
   setStatus('Spiral updated. Switch views to explore it in 3D.');
   updateExportAvailability(true);
 
+  // Update breakdown workpiece count when breakdown mode is active
+  if (breakdownModeCheckbox?.checked) {
+    // Engine is not available from worker results; compute synchronously for count
+    try {
+      const res = renderSpiral({ ...params, mode: 'arram_boyle' }, 'arram_boyle');
+      if (res?.engine?.arcGroups) {
+        const wpW = Number(workpieceWidthInput?.value) || 100;
+        const wpH = Number(workpieceHeightInput?.value) || 100;
+        const rings = getBreakdownRings(res.engine.arcGroups, res.scaleFactor ?? 1, wpW, wpH);
+        lastRender.engine = res.engine;
+        lastRender.scaleFactor = res.scaleFactor;
+        // Count total workpieces: sum of arc groups per ring
+        let total = 0;
+        for (const { ringIndex } of rings) {
+          let count = 0;
+          for (const [key, g] of res.engine.arcGroups.entries()) {
+            if (key.startsWith('circle_') && g.ringIndex === ringIndex) count++;
+          }
+          total += count || 1;
+        }
+        updateBreakdownRingCount(total);
+      }
+    } catch (_) {
+      updateBreakdownRingCount(null);
+    }
+  } else {
+    updateBreakdownRingCount(null);
+  }
+
   if (threeApp) {
     if (geometry) {
       threeApp.useGeometryFromPayload(params, geometry);
@@ -586,6 +750,22 @@ form.addEventListener('submit', event => {
     threeApp.queueGeometryUpdate(collectParams(), true);
   }
 });
+
+// Breakdown mode toggle
+if (breakdownModeCheckbox) {
+  breakdownModeCheckbox.addEventListener('change', () => {
+    updateBreakdownMode();
+    debouncedRender();
+  });
+}
+// Re-render when workpiece dimensions change while breakdown mode is active
+[workpieceWidthInput, workpieceHeightInput].forEach(el => {
+  el?.addEventListener('change', () => {
+    if (breakdownModeCheckbox?.checked) debouncedRender();
+  });
+});
+// Init breakdown mode UI state
+updateBreakdownMode();
 
 function switchToView(view) {
   if (view === activeView) {

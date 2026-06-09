@@ -155,3 +155,66 @@ export function generateDXF(arcGroups, scaleFactor, boundingWidthMm, boundingHei
 
   return lines.join('\n');
 }
+
+/**
+ * Generates a DXF R2000 file for a single arc group outline (breakdown export).
+ *
+ * @param {Array<{re: number, im: number}>} outline   - closed outline points in internal units
+ * @param {Array<Array<{re: number, im: number}>>} highlightPaths - optional rim paths (empty = no HIGHLIGHT layer)
+ * @param {number} scaleFactor   - mm per internal unit
+ * @param {number} workpieceWmm  - workpiece width in mm (used to centre the outline)
+ * @param {number} workpieceHmm  - workpiece height in mm
+ * @returns {string} DXF file contents
+ */
+export function generateSingleGroupDXF(outline, highlightPaths, scaleFactor, workpieceWmm, workpieceHmm) {
+  function ptToMm(re, im) {
+    return {
+      x: re * scaleFactor + workpieceWmm / 2,
+      y: -(im * scaleFactor) + workpieceHmm / 2,
+    };
+  }
+
+  const hasHighlight = Array.isArray(highlightPaths) && highlightPaths.length > 0;
+  const layerCount = hasHighlight ? 2 : 1;
+
+  const lines = [];
+
+  lines.push('  0', 'SECTION', '  2', 'HEADER');
+  lines.push('  9', '$ACADVER', '  1', 'AC1015');
+  lines.push('  9', '$INSUNITS', ' 70', '4');
+  lines.push('  0', 'ENDSEC');
+
+  lines.push('  0', 'SECTION', '  2', 'TABLES');
+  lines.push('  0', 'TABLE', '  2', 'LAYER', ' 70', String(layerCount));
+  lines.push('  0', 'LAYER', '  2', 'SPIRALS', ' 70', '0', ' 62', '7', '  6', 'Continuous');
+  if (hasHighlight) {
+    lines.push('  0', 'LAYER', '  2', 'HIGHLIGHT', ' 70', '0', ' 62', '1', '  6', 'Continuous');
+  }
+  lines.push('  0', 'ENDTAB', '  0', 'ENDSEC');
+
+  lines.push('  0', 'SECTION', '  2', 'ENTITIES');
+
+  const pts = outline.map(pt => ptToMm(pt.re, pt.im));
+  lines.push('  0', 'LWPOLYLINE', '  8', 'SPIRALS', ' 70', '1', ' 90', String(pts.length));
+  for (const { x, y } of pts) {
+    lines.push(' 10', x.toFixed(6), ' 20', y.toFixed(6));
+  }
+
+  if (hasHighlight) {
+    for (const path of highlightPaths) {
+      if (!path || path.length < 2) continue;
+      const hPts = path.map(pt => ptToMm(pt.re, pt.im));
+      const isClosed = hPts.length >= 2
+        && Math.abs(hPts[0].x - hPts[hPts.length - 1].x) < 1e-4
+        && Math.abs(hPts[0].y - hPts[hPts.length - 1].y) < 1e-4;
+      lines.push('  0', 'LWPOLYLINE', '  8', 'HIGHLIGHT',
+        ' 70', isClosed ? '1' : '0', ' 90', String(hPts.length));
+      for (const { x, y } of hPts) {
+        lines.push(' 10', x.toFixed(6), ' 20', y.toFixed(6));
+      }
+    }
+  }
+
+  lines.push('  0', 'ENDSEC', '  0', 'EOF');
+  return lines.join('\n');
+}

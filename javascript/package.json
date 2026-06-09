@@ -1,0 +1,13 @@
+{
+  "name": "doyle-packing",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "test:e2e": "playwright test"
+  },
+  "devDependencies": {
+    "vitest": "^2.0.0",
+    "@playwright/test": "^1.44.0"
+  }
+}
