@@ -191,9 +191,10 @@ async function downloadBreakdownZip(format) {
     const cx = gOutline.reduce((s, p) => s + p.re, 0) / gOutline.length;
     const cy = gOutline.reduce((s, p) => s + p.im, 0) / gOutline.length;
     const gOutlineCentred = centreOutline(gOutline);
-    const highlightPaths = withHighlight && Number.isFinite(g.ringIndex) && g.ringIndex > 0
-      ? [gOutlineCentred]
-      : [];
+    const rawHighlight = getHighlightRimForGroup(g, engine.arcGroups, false);
+    const highlightPaths = rawHighlight.map(path =>
+      path.map(pt => ({ re: pt.re - cx, im: pt.im - cy }))
+    );
     const rawPatSegs = withPattern && typeof g._getPatternSegments === 'function'
       ? (g._getPatternSegments((params.fill_pattern_spacing ?? 8) / (scaleFactor ?? 1), g.primaryPatternAngle ?? params.fill_pattern_angle, (params.fill_pattern_offset ?? 0) / (scaleFactor ?? 1)) ?? [])
       : [];
@@ -223,7 +224,7 @@ async function downloadBreakdownZip(format) {
     if (!gOutline || gOutline.length < 2) continue;
     const isOutermost = g.ringIndex === outermostRingIndex;
     fittingOutlines.push(gOutline);
-    if (withHighlight && isOutermost) fittingHighlightPaths.push(gOutline);
+    fittingHighlightPaths.push(...getHighlightRimForGroup(g, engine.arcGroups, isOutermost));
     if (withPattern && typeof g._getPatternSegments === 'function') {
       const segs = g._getPatternSegments((params.fill_pattern_spacing ?? 8) / (scaleFactor ?? 1), g.primaryPatternAngle ?? params.fill_pattern_angle, (params.fill_pattern_offset ?? 0) / (scaleFactor ?? 1)) ?? [];
       fittingPatternLines.push(...segs.map(([p1, p2]) => ({ p1, p2 })));
