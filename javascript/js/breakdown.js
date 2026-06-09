@@ -121,6 +121,31 @@ export function getBreakdownRings(arcGroups, scaleFactor, workpieceWmm, workpiec
 }
 
 /**
+ * Returns all circle_* arc groups whose ring index is in the fitting set
+ * (as returned by getBreakdownRings), in ring-index order.
+ * Unlike getBreakdownRings, this returns every group per ring (all clones),
+ * which is the full set to include in the combined workpiece file.
+ *
+ * @param {Map} arcGroups
+ * @param {Array<{ringIndex: number}>} fittingRings
+ * @returns {Array<{group: object, outline: Array, ringIndex: number}>}
+ */
+export function getFittingGroups(arcGroups, fittingRings) {
+  const fittingIndices = new Set(fittingRings.map(r => r.ringIndex));
+  const result = [];
+  for (const [key, group] of arcGroups.entries()) {
+    if (!key.startsWith('circle_')) continue;
+    const r = group.ringIndex;
+    if (!fittingIndices.has(r)) continue;
+    const outline = group.getClosedOutline();
+    if (!outline || outline.length < 2) continue;
+    result.push({ group, outline, ringIndex: r });
+  }
+  result.sort((a, b) => a.ringIndex - b.ringIndex);
+  return result;
+}
+
+/**
  * Counts total physical workpieces for a breakdown export.
  *
  * All fitting rings are nested into one combined workpiece file = 1 workpiece.

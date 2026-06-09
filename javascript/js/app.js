@@ -237,12 +237,12 @@ async function downloadBreakdownZip(format) {
     }
   }
 
-  if (fittingOutlines.length > 0) {
+  if (fittingOutlines.length > 0 || fittingHighlightPaths.length > 0) {
     const fname = `${base}_workpiece.${format}`;
     zipFiles[fname] = strToU8(
       format === 'svg'
         ? generateBreakdownSVG(fittingOutlines, fittingHighlightPaths, scaleFactor ?? 1, wpW, wpH, fittingPatternLines)
-        : generateSingleGroupDXF(fittingOutlines, fittingHighlightPaths, scaleFactor ?? 1, wpW, wpH)
+        : generateSingleGroupDXF([], fittingHighlightPaths, scaleFactor ?? 1, wpW, wpH)
     );
   }
 
