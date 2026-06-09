@@ -105,6 +105,8 @@ function updateBreakdownMode() {
  * For the outermost ring, also includes the outer_* closure arcs.
  */
 function getHighlightRimForGroup(group, arcGroups, isOutermost) {
+  // Ring 0 (center piece) has no highlight rim
+  if (!Number.isFinite(group.ringIndex) || group.ringIndex <= 0) return [];
   const highlightArcs = group.arcs.filter((_, i) => i === 2 || i === 3);
   const paths = buildContinuousPathsFromArcs(highlightArcs);
   if (isOutermost) {
@@ -120,6 +122,19 @@ function updateBreakdownRingCount(count) {
   if (breakdownRingCountEl) {
     breakdownRingCountEl.textContent = count !== null ? `${count} workpiece${count === 1 ? '' : 's'}` : '';
   }
+}
+
+function getOverflowGroups(arcGroups, fittingRings) {
+  const fittingIndices = new Set(fittingRings.map(r => r.ringIndex));
+  const result = [];
+  for (const [key, group] of arcGroups.entries()) {
+    if (!key.startsWith('circle_')) continue;
+    const r = group.ringIndex;
+    if (r === null || r === undefined || r < 0) continue;
+    if (fittingIndices.has(r)) continue;
+    result.push(group);
+  }
+  return result;
 }
 
 async function downloadBreakdownZip(format) {
@@ -200,6 +215,26 @@ async function downloadBreakdownZip(format) {
           : generateSingleGroupDXF(outline, highlightPaths, scaleFactor ?? 1, wpW, wpH)
       );
     }
+  }
+
+  // Beyond-box rings: one file per arc group, highlight rim = full closed outline
+  const overflowGroups = getOverflowGroups(engine.arcGroups, rings);
+  for (const g of overflowGroups) {
+    const gOutline = g.getClosedOutline();
+    if (!gOutline || gOutline.length < 2) continue;
+    totalPieceCount++;
+    const highlightPaths = withHighlight && Number.isFinite(g.ringIndex) && g.ringIndex > 0
+      ? [gOutline]
+      : [];
+    const patLines = withPattern && typeof g.getPatternSegments === 'function'
+      ? (g.getPatternSegments(params.fill_pattern_spacing, g.primaryPatternAngle, params.fill_pattern_offset) ?? [])
+      : [];
+    const fname = `${base}_ring_${g.ringIndex}_group_${g.id}.${format}`;
+    zipFiles[fname] = strToU8(
+      format === 'svg'
+        ? generateBreakdownSVG(gOutline, highlightPaths, scaleFactor ?? 1, wpW, wpH, patLines)
+        : generateSingleGroupDXF(gOutline, highlightPaths, scaleFactor ?? 1, wpW, wpH)
+    );
   }
 
   const fileCount = Object.keys(zipFiles).length;
@@ -399,6 +434,17 @@ function collectParams() {
   raw.use_symmetric = symmetricToggle?.checked ?? true;
   if (breakdownModeCheckbox?.checked) {
     raw.red_outline = true;
+    if (lastRender?.engine?.arcGroups && lastRender?.scaleFactor != null) {
+      const wpW = Number(workpieceWidthInput?.value) || 100;
+      const wpH = Number(workpieceHeightInput?.value) || 100;
+      const fittingRings = getBreakdownRings(lastRender.engine.arcGroups, lastRender.scaleFactor, wpW, wpH);
+      if (fittingRings.length > 0) {
+        const lastFitting = fittingRings[fittingRings.length - 1].ringIndex;
+        raw.red_outline_min_ring = lastFitting + 1;
+      } else {
+        raw.red_outline_min_ring = 0;
+      }
+    }
   }
   const params = normaliseParams(raw);
   // Preserve mode exactly as selected (normaliseParams already handles but ensure string)

@@ -3329,6 +3329,7 @@ class DoyleSpiralEngine {
     fillPatternAngle = 0.0,
     fillPatternAnimation = DEFAULT_PATTERN_ANIMATION,
     redOutline = false,
+    redOutlineMinRing = null,
     drawGroupOutline = true,
     fillPatternOffset = 0.0,
     fillPatternType = 'lines',
@@ -3479,6 +3480,17 @@ class DoyleSpiralEngine {
         }
       }
     }
+
+    // Beyond-box rings: draw full closed outline in red for each arc group
+    if (redOutline && Number.isFinite(redOutlineMinRing) && redOutlineMinRing >= 0) {
+      for (const [key, group] of this.arcGroups.entries()) {
+        if (!key.startsWith('circle_')) continue;
+        if (!Number.isFinite(group.ringIndex) || group.ringIndex < redOutlineMinRing) continue;
+        const outline = group.getClosedOutline();
+        if (!outline || outline.length < 2) continue;
+        context.drawPolyline(outline, { color: '#ff0000', width: highlightStrokeWidth });
+      }
+    }
   }
 
   _renderDoyle(context) {
@@ -3496,6 +3508,7 @@ class DoyleSpiralEngine {
     fillPatternAngle = 0.0,
     fillPatternAnimation = DEFAULT_PATTERN_ANIMATION,
     redOutline = false,
+    redOutlineMinRing = null,
     drawGroupOutline = true,
     fillPatternOffset = 0.0,
     fillPatternType = 'lines',
@@ -3533,6 +3546,7 @@ class DoyleSpiralEngine {
         fillPatternAngle,
         fillPatternAnimation,
         redOutline,
+        redOutlineMinRing,
         drawGroupOutline,
         fillPatternOffset,
         fillPatternType,
@@ -3662,6 +3676,7 @@ function normaliseParams(params = {}) {
     group_outline_width: groupOutlineWidth,
     pattern_stroke_width: patternStrokeWidth,
     red_outline: Boolean(params.red_outline ?? false),
+    red_outline_min_ring: Number.isFinite(Number(params.red_outline_min_ring)) ? Number(params.red_outline_min_ring) : null,
     draw_group_outline: params.draw_group_outline !== undefined ? Boolean(params.draw_group_outline) : true,
     max_d: Number(params.max_d ?? 2000),
     bounding_box_width_mm: boundingWidthMm,
@@ -3702,6 +3717,7 @@ function renderSpiral(params = {}, overrideMode = null) {
     fillPatternSpacing: opts.fill_pattern_spacing,
     fillPatternAngle: opts.fill_pattern_angle,
     redOutline: opts.red_outline,
+    redOutlineMinRing: opts.red_outline_min_ring,
     drawGroupOutline: opts.draw_group_outline,
     fillPatternOffset: opts.fill_pattern_offset,
     fillPatternType: opts.fill_pattern_type,
