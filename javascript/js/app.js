@@ -1,6 +1,7 @@
 import { renderSpiral, normaliseParams, buildPatternAnimationContext, buildContinuousPathsFromArcs } from './doyle_spiral_engine.js';
 import { createThreeViewer } from './three_viewer.js';
 import { generateDXF, generateSingleGroupDXF } from './dxf_export.js';
+import { generateSTEP, generateSingleGroupSTEP } from './step_export.js';
 import { zipSync, strToU8 } from 'https://cdn.jsdelivr.net/npm/fflate@0.8.2/esm/browser.js';
 import { getBreakdownRings, generateBreakdownSVG, countWorkpieces, getOuterBoundsRequired, centreOutline, stitchPaths } from './breakdown.js';
 
@@ -41,6 +42,7 @@ const threeStats = document.getElementById('threeStats');
 const fileInput = document.getElementById('threeFileInput');
 const exportButton = document.getElementById('exportSvgButton');
 const exportDxfButton = document.getElementById('exportDxfButton');
+const exportStepButton = document.getElementById('exportStepButton');
 const exportFilenameInput = document.getElementById('exportFilename');
 const breakdownModeCheckbox = document.getElementById('breakdownMode');
 const breakdownSettings = document.getElementById('breakdownSettings');
@@ -95,8 +97,9 @@ function sanitiseFileName(name) {
 function updateBreakdownMode() {
   const isBreakdown = breakdownModeCheckbox?.checked;
   if (breakdownSettings) breakdownSettings.hidden = !isBreakdown;
-  if (exportButton)    exportButton.textContent    = isBreakdown ? 'Breakdown SVG' : 'Download SVG';
-  if (exportDxfButton) exportDxfButton.textContent = isBreakdown ? 'Breakdown DXF' : 'Download DXF';
+  if (exportButton)     exportButton.textContent     = isBreakdown ? 'Breakdown SVG'  : 'Download SVG';
+  if (exportDxfButton)  exportDxfButton.textContent  = isBreakdown ? 'Breakdown DXF'  : 'Download DXF';
+  if (exportStepButton) exportStepButton.textContent = isBreakdown ? 'Breakdown STEP' : 'Download STEP';
 }
 
 /**
@@ -208,7 +211,9 @@ async function downloadBreakdownZip(format) {
     zipFiles[fname] = strToU8(
       format === 'svg'
         ? generateBreakdownSVG([gOutlineCentred], [gOutlineCentred], scaleFactor ?? 1, wpW, wpH, patLines)
-        : generateSingleGroupDXF([], [gOutlineCentred], scaleFactor ?? 1, wpW, wpH)
+        : format === 'step'
+          ? generateSingleGroupSTEP([], [gOutlineCentred], scaleFactor ?? 1, wpW, wpH, `${base}_ring_${ringIdx}`)
+          : generateSingleGroupDXF([], [gOutlineCentred], scaleFactor ?? 1, wpW, wpH)
     );
   }
 
@@ -248,7 +253,9 @@ async function downloadBreakdownZip(format) {
     zipFiles[fname] = strToU8(
       format === 'svg'
         ? generateBreakdownSVG(fittingOutlines, stitchedHighlight, scaleFactor ?? 1, wpW, wpH, fittingPatternLines)
-        : generateSingleGroupDXF([], stitchedHighlight, scaleFactor ?? 1, wpW, wpH)
+        : format === 'step'
+          ? generateSingleGroupSTEP([], stitchedHighlight, scaleFactor ?? 1, wpW, wpH, `${base}_workpiece`)
+          : generateSingleGroupDXF([], stitchedHighlight, scaleFactor ?? 1, wpW, wpH)
     );
   }
 
@@ -277,12 +284,9 @@ function getExportFileName() {
 }
 
 function updateExportAvailability(available) {
-  if (exportButton) {
-    exportButton.disabled = !available;
-  }
-  if (exportDxfButton) {
-    exportDxfButton.disabled = !available;
-  }
+  if (exportButton)     exportButton.disabled     = !available;
+  if (exportDxfButton)  exportDxfButton.disabled  = !available;
+  if (exportStepButton) exportStepButton.disabled = !available;
 }
 
 function getRenderTimeoutMs() {
@@ -384,6 +388,56 @@ function downloadCurrentDxf() {
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
   setStatus(`DXF downloaded as ${filename}.`);
+}
+
+function downloadCurrentStep() {
+  if (breakdownModeCheckbox?.checked) {
+    downloadBreakdownZip('step');
+    return;
+  }
+
+  if (!lastRender) {
+    setStatus('Render the spiral before downloading.', 'error');
+    return;
+  }
+
+  const params = lastRender.params || collectParams();
+  let engine = lastRender.engine;
+  let scaleFactor = lastRender.scaleFactor;
+
+  if (!engine || !engine.arcGroups || !engine.arcGroups.size) {
+    const result = renderSpiral({ ...params, mode: 'arram_boyle' }, 'arram_boyle');
+    if (!result || !result.engine || !result.engine.arcGroups) {
+      setStatus('STEP export failed: could not generate geometry.', 'error');
+      return;
+    }
+    engine = result.engine;
+    scaleFactor = result.scaleFactor;
+  }
+
+  const bbW = params.bounding_box_width_mm || DEFAULTS.bounding_box_width_mm;
+  const bbH = params.bounding_box_height_mm || DEFAULTS.bounding_box_height_mm;
+  const raw = exportFilenameInput ? exportFilenameInput.value.trim() || 'doyle-spiral' : 'doyle-spiral';
+  const safe = sanitiseFileName(raw) || 'doyle-spiral';
+  const name = safe.toLowerCase().endsWith('.step') || safe.toLowerCase().endsWith('.stp') ? safe.replace(/\.(step|stp)$/i, '') : safe;
+  const filename = `${name}.step`;
+
+  const stepContent = generateSTEP(engine.arcGroups, scaleFactor ?? 1, bbW, bbH, {
+    drawGroupOutline: params.draw_group_outline !== false,
+    redOutline: Boolean(params.red_outline),
+    name,
+  });
+
+  const blob = new Blob([stepContent], { type: 'application/step' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+  setStatus(`STEP downloaded as ${filename}.`);
 }
 
 function updateTValue() {
@@ -884,6 +938,10 @@ if (exportButton) {
 
 if (exportDxfButton) {
   exportDxfButton.addEventListener('click', downloadCurrentDxf);
+}
+
+if (exportStepButton) {
+  exportStepButton.addEventListener('click', downloadCurrentStep);
 }
 
 if (fillPatternTypeSelect) {
@@ -2010,6 +2068,7 @@ const bulkQMax          = document.getElementById('bulkQMax');
 const bulkDiagonal      = document.getElementById('bulkDiagonal');
 const bulkExportSvg     = document.getElementById('bulkExportSvg');
 const bulkExportDxf     = document.getElementById('bulkExportDxf');
+const bulkExportStep    = document.getElementById('bulkExportStep');
 const bulkProgress      = document.getElementById('bulkProgress');
 const bulkProgressLabel = document.getElementById('bulkProgressLabel');
 const bulkProgressCount = document.getElementById('bulkProgressCount');
@@ -2052,9 +2111,10 @@ function bulkYield() { return new Promise(r => setTimeout(r, 0)); }
 async function runBulkExport() {
   const pairs = buildPairList();
   if (!pairs.length) { bulkLogLine('Nothing to export — check your range.'); return; }
-  const wantSvg = bulkExportSvg.checked;
-  const wantDxf = bulkExportDxf.checked;
-  if (!wantSvg && !wantDxf) { bulkLogLine('Select at least one format.'); return; }
+  const wantSvg  = bulkExportSvg.checked;
+  const wantDxf  = bulkExportDxf.checked;
+  const wantStep = bulkExportStep?.checked ?? false;
+  if (!wantSvg && !wantDxf && !wantStep) { bulkLogLine('Select at least one format.'); return; }
 
   const baseParams = collectParams();
 
@@ -2101,6 +2161,15 @@ async function runBulkExport() {
         { drawGroupOutline: draw_group_outline !== false, redOutline: Boolean(red_outline) });
       zip.file(`${name}.dxf`, dxf);
       bulkLogLine(`  + ${name}.dxf`);
+      added++;
+    }
+    if (wantStep) {
+      const { bounding_box_width_mm: bbW, bounding_box_height_mm: bbH,
+              draw_group_outline, red_outline } = baseParams;
+      const step = generateSTEP(result.engine.arcGroups, result.scaleFactor ?? 1, bbW, bbH,
+        { drawGroupOutline: draw_group_outline !== false, redOutline: Boolean(red_outline), name });
+      zip.file(`${name}.step`, step);
+      bulkLogLine(`  + ${name}.step`);
       added++;
     }
 
