@@ -221,7 +221,11 @@ async function downloadBreakdownZip(format) {
     if (!gOutline || gOutline.length < 2) continue;
     const isOutermost = g.ringIndex === outermostRingIndex;
     fittingOutlines.push(gOutline);
-    if (isOutermost) fittingHighlightPaths.push(...getHighlightRimForGroup(g, engine.arcGroups, true));
+    if (isOutermost) {
+      // arcs[2,3] only — outer_* closure arcs belong to the spiral's absolute outermost ring,
+      // not the workpiece cutoff ring, so don't include them here.
+      fittingHighlightPaths.push(...getHighlightRimForGroup(g, engine.arcGroups, false));
+    }
     if (withPattern && typeof g._getPatternSegments === 'function') {
       const segs = g._getPatternSegments((params.fill_pattern_spacing ?? 8) / (scaleFactor ?? 1), g.primaryPatternAngle ?? params.fill_pattern_angle, (params.fill_pattern_offset ?? 0) / (scaleFactor ?? 1)) ?? [];
       fittingPatternLines.push(...segs.map(([p1, p2]) => ({ p1, p2 })));
