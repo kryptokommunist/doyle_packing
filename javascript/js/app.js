@@ -195,9 +195,11 @@ async function downloadBreakdownZip(format) {
       const gOutline = g.getClosedOutline();
       if (!gOutline || gOutline.length < 2) continue;
       fittingOutlines.push(gOutline);
-      if (withHighlight) fittingHighlightPaths.push(...getHighlightRimForGroup(g, engine.arcGroups, isOutermost));
-      if (withPattern && typeof g.getPatternSegments === 'function') {
-        fittingPatternLines.push(...(g.getPatternSegments(params.fill_pattern_spacing, g.primaryPatternAngle, params.fill_pattern_offset) ?? []));
+      // Highlight rim = closed outline of each group in the outermost fitting ring only
+      if (withHighlight && isOutermost) fittingHighlightPaths.push(gOutline);
+      if (withPattern && typeof g._getPatternSegments === 'function') {
+        const segs = g._getPatternSegments(params.fill_pattern_spacing, g.primaryPatternAngle ?? params.fill_pattern_angle, params.fill_pattern_offset) ?? [];
+        fittingPatternLines.push(...segs.map(([p1, p2]) => ({ p1, p2 })));
       }
     }
   }
@@ -222,13 +224,13 @@ async function downloadBreakdownZip(format) {
     const highlightPaths = withHighlight && Number.isFinite(g.ringIndex) && g.ringIndex > 0
       ? [gOutlineCentred]
       : [];
-    const patLines = withPattern && typeof g.getPatternSegments === 'function'
-      ? (g.getPatternSegments(params.fill_pattern_spacing, g.primaryPatternAngle, params.fill_pattern_offset) ?? [])
-          .map(seg => ({
-            p1: { re: seg.p1.re - cx, im: seg.p1.im - cy },
-            p2: { re: seg.p2.re - cx, im: seg.p2.im - cy },
-          }))
+    const rawPatSegs = withPattern && typeof g._getPatternSegments === 'function'
+      ? (g._getPatternSegments(params.fill_pattern_spacing, g.primaryPatternAngle ?? params.fill_pattern_angle, params.fill_pattern_offset) ?? [])
       : [];
+    const patLines = rawPatSegs.map(([p1, p2]) => ({
+      p1: { re: p1.re - cx, im: p1.im - cy },
+      p2: { re: p2.re - cx, im: p2.im - cy },
+    }));
     const fname = `${base}_ring_${g.ringIndex}_group_${g.id}.${format}`;
     zipFiles[fname] = strToU8(
       format === 'svg'

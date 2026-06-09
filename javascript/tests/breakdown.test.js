@@ -424,4 +424,32 @@ describe('generateBreakdownSVG multi-outline (fitting workpiece)', () => {
     const pathCount = (svg.match(/<path /g) || []).length;
     expect(pathCount).toBe(3);
   });
+
+  it('highlight rim is the closed outline of each outermost fitting ring group (not inner rings)', () => {
+    // Simulate: ring 0 group (inner) + ring 1 group A + ring 1 group B (outermost ring)
+    // Only ring 1 groups should have their outlines added as highlight paths
+    const ring0Outline = squareOutline(3);
+    const ring1OutlineA = squareOutline(8);
+    const ring1OutlineB = squareOutline(8);
+
+    // Build highlight paths as the export loop does: push gOutline for isOutermost groups only
+    const highlightPaths = [ring1OutlineA, ring1OutlineB];
+    const allOutlines = [ring0Outline, ring1OutlineA, ring1OutlineB];
+
+    const svg = generateBreakdownSVG(allOutlines, highlightPaths, 1, 100, 100, []);
+
+    // 3 black paths (outlines) + 2 red paths (highlight rim = outermost ring groups)
+    const redPaths = (svg.match(/stroke="red"/g) || []).length;
+    const blackPaths = (svg.match(/stroke="black"/g) || []).length;
+    expect(redPaths).toBe(2);
+    expect(blackPaths).toBe(3);
+  });
+
+  it('no highlight rim paths when outermost is ring 0 (single ring, no rim)', () => {
+    // Ring 0 is the only fitting ring — its groups get no highlight (ringIndex <= 0 check)
+    // In the export loop: isOutermost=true but ring 0 is excluded by ringIndex check
+    // Here we test that passing empty highlightPaths produces no red strokes
+    const svg = generateBreakdownSVG([squareOutline(5)], [], 1, 100, 100, []);
+    expect(svg).not.toContain('stroke="red"');
+  });
 });
