@@ -203,7 +203,7 @@ async function downloadBreakdownZip(format) {
     zipFiles[fname] = strToU8(
       format === 'svg'
         ? generateBreakdownSVG([gOutlineCentred], highlightPaths, scaleFactor ?? 1, wpW, wpH, patLines)
-        : generateSingleGroupDXF([gOutlineCentred], highlightPaths, scaleFactor ?? 1, wpW, wpH)
+        : generateSingleGroupDXF([gOutlineCentred], [], scaleFactor ?? 1, wpW, wpH)
     );
   }
 
