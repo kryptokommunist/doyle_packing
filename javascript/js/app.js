@@ -193,29 +193,22 @@ async function downloadBreakdownZip(format) {
   }
 
   for (const [ringIdx, ringGroups] of overflowByRing.entries()) {
-    const ringOutlines = [];
-    const ringPatLines = [];
-    for (const g of ringGroups) {
-      const gOutline = g.getClosedOutline();
-      if (!gOutline || gOutline.length < 2) continue;
-      const cx = gOutline.reduce((s, p) => s + p.re, 0) / gOutline.length;
-      const cy = gOutline.reduce((s, p) => s + p.im, 0) / gOutline.length;
-      const gOutlineCentred = centreOutline(gOutline);
-      ringOutlines.push(gOutlineCentred);
-      if (withPattern && typeof g._getPatternSegments === 'function') {
-        const rawPatSegs = g._getPatternSegments((params.fill_pattern_spacing ?? 8) / (scaleFactor ?? 1), g.primaryPatternAngle ?? params.fill_pattern_angle, (params.fill_pattern_offset ?? 0) / (scaleFactor ?? 1)) ?? [];
-        ringPatLines.push(...rawPatSegs.map(([p1, p2]) => ({
-          p1: { re: p1.re - cx, im: p1.im - cy },
-          p2: { re: p2.re - cx, im: p2.im - cy },
-        })));
-      }
-    }
-    if (ringOutlines.length === 0) continue;
-    const fname = `${base}_ring_${ringIdx}_x${ringOutlines.length}.${format}`;
+    // Use first group as representative example for this ring layer
+    const g = ringGroups[0];
+    const gOutline = g.getClosedOutline();
+    if (!gOutline || gOutline.length < 2) continue;
+    const cx = gOutline.reduce((s, p) => s + p.re, 0) / gOutline.length;
+    const cy = gOutline.reduce((s, p) => s + p.im, 0) / gOutline.length;
+    const gOutlineCentred = centreOutline(gOutline);
+    const patLines = withPattern && typeof g._getPatternSegments === 'function'
+      ? (g._getPatternSegments((params.fill_pattern_spacing ?? 8) / (scaleFactor ?? 1), g.primaryPatternAngle ?? params.fill_pattern_angle, (params.fill_pattern_offset ?? 0) / (scaleFactor ?? 1)) ?? [])
+          .map(([p1, p2]) => ({ p1: { re: p1.re - cx, im: p1.im - cy }, p2: { re: p2.re - cx, im: p2.im - cy } }))
+      : [];
+    const fname = `${base}_ring_${ringIdx}_x${ringGroups.length}.${format}`;
     zipFiles[fname] = strToU8(
       format === 'svg'
-        ? generateBreakdownSVG(ringOutlines, ringOutlines, scaleFactor ?? 1, wpW, wpH, ringPatLines)
-        : generateSingleGroupDXF(ringOutlines, [], scaleFactor ?? 1, wpW, wpH)
+        ? generateBreakdownSVG([gOutlineCentred], [gOutlineCentred], scaleFactor ?? 1, wpW, wpH, patLines)
+        : generateSingleGroupDXF([gOutlineCentred], [], scaleFactor ?? 1, wpW, wpH)
     );
   }
 
