@@ -213,15 +213,15 @@ async function downloadBreakdownZip(format) {
   const fittingHighlightPaths = [];
   const fittingPatternLines = [];
 
-  // Workpiece highlight rim = arcs[2,3] of the first overflow ring
-  // (same role as the outer_* closure arcs for the spiral's absolute outermost ring)
-  const firstOverflowRingIndex = overflowGroups.length > 0
-    ? Math.min(...overflowGroups.map(g => g.ringIndex))
-    : -1;
-  if (firstOverflowRingIndex >= 0) {
+  // Workpiece highlight rim = closed outlines of the outermost fitting ring groups.
+  // (For the absolute outermost ring the engine uses outer_* + arcs[2,3], but inner
+  // rings have no outer_* closure arcs — their getClosedOutline() is the full boundary.)
+  const outermostFittingRingIndex = rings.length > 0 ? rings[rings.length - 1].ringIndex : -1;
+  if (outermostFittingRingIndex >= 0) {
     for (const [key, g] of engine.arcGroups.entries()) {
-      if (!key.startsWith('circle_') || g.ringIndex !== firstOverflowRingIndex) continue;
-      fittingHighlightPaths.push(...buildContinuousPathsFromArcs(g.arcs.filter((_, i) => i === 2 || i === 3)));
+      if (!key.startsWith('circle_') || g.ringIndex !== outermostFittingRingIndex) continue;
+      const o = g.getClosedOutline();
+      if (o && o.length >= 2) fittingHighlightPaths.push(o);
     }
   }
 
