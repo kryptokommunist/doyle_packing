@@ -80,6 +80,21 @@ describe('getBreakdownRings', () => {
     expect(getBreakdownRings(arcGroups, 2, 39, 39)).toHaveLength(0); // 10*2=20 > 39/2=19.5
     expect(getBreakdownRings(arcGroups, 2, 40, 40)).toHaveLength(1); // 10*2=20 ≤ 40/2=20
   });
+
+  it('excludes a ring when any rotated clone exceeds the box even if the master fits', () => {
+    // Master group for ring 1 has half-size 20 → fits in 50mm half-box.
+    // Rotated clone of ring 1 has a point at (35, 35) → |re|=35 > 30, does NOT fit in 60mm box.
+    // The ring must be excluded because not ALL groups fit.
+    const arcGroups = makeArcGroups([
+      ['circle_0',  0, squareOutline(10)],                          // ring 0 fits
+      ['circle_1a', 1, squareOutline(20)],                          // ring 1 master: |re|,|im| ≤ 20 — fits
+      ['circle_1b', 1, [{ re: 35, im: 0 }, { re: 0, im: 35 },      // ring 1 clone: |re|=35 > 30
+                        { re: -35, im: 0 }, { re: 0, im: -35 }]],
+    ]);
+    const rings = getBreakdownRings(arcGroups, 1, 60, 60); // half=30
+    // ring 1 clone has |re|=35 > 30 → ring 1 must not fit
+    expect(rings.map(r => r.ringIndex)).toEqual([0]);
+  });
 });
 
 describe('generateBreakdownSVG', () => {

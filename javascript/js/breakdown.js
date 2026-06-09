@@ -84,26 +84,38 @@ export function getBreakdownRings(arcGroups, scaleFactor, workpieceWmm, workpiec
   const halfW = workpieceWmm / 2;
   const halfH = workpieceHmm / 2;
 
-  const ringReps = new Map();
+  // Collect ALL groups per ring index (not just a representative — rotated clones
+  // can have larger absolute extents than the master, so all must be checked)
+  const ringGroups = new Map();
   for (const [key, group] of arcGroups.entries()) {
     if (!key.startsWith('circle_')) continue;
     const r = group.ringIndex;
     if (r === null || r === undefined || r < 0) continue;
-    if (!ringReps.has(r)) ringReps.set(r, group);
+    if (!ringGroups.has(r)) ringGroups.set(r, []);
+    ringGroups.get(r).push(group);
   }
 
-  const sortedRings = Array.from(ringReps.keys()).sort((a, b) => a - b);
+  const sortedRings = Array.from(ringGroups.keys()).sort((a, b) => a - b);
   const result = [];
   for (const r of sortedRings) {
-    const group = ringReps.get(r);
-    const outline = group.getClosedOutline();
-    if (!outline || outline.length < 2) continue;
-    const fits = outline.every(pt =>
-      Math.abs(pt.re) * scaleFactor <= halfW &&
-      Math.abs(pt.im) * scaleFactor <= halfH
-    );
-    if (!fits) break;
-    result.push({ ringIndex: r, group, outline });
+    const groups = ringGroups.get(r);
+    let ringFits = true;
+    let repGroup = null;
+    let repOutline = null;
+
+    for (const group of groups) {
+      const outline = group.getClosedOutline();
+      if (!outline || outline.length < 2) continue;
+      if (repGroup === null) { repGroup = group; repOutline = outline; }
+      const fits = outline.every(pt =>
+        Math.abs(pt.re) * scaleFactor <= halfW &&
+        Math.abs(pt.im) * scaleFactor <= halfH
+      );
+      if (!fits) { ringFits = false; break; }
+    }
+
+    if (!ringFits || repGroup === null) break;
+    result.push({ ringIndex: r, group: repGroup, outline: repOutline });
   }
   return result;
 }
