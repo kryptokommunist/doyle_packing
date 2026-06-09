@@ -2,7 +2,7 @@ import { renderSpiral, normaliseParams, buildPatternAnimationContext, buildConti
 import { createThreeViewer } from './three_viewer.js';
 import { generateDXF, generateSingleGroupDXF } from './dxf_export.js';
 import { zipSync, strToU8 } from 'https://cdn.jsdelivr.net/npm/fflate@0.8.2/esm/browser.js';
-import { getBreakdownRings, getFittingGroups, generateBreakdownSVG, countWorkpieces, getOuterBoundsRequired, centreOutline } from './breakdown.js';
+import { getBreakdownRings, generateBreakdownSVG, countWorkpieces, getOuterBoundsRequired, centreOutline } from './breakdown.js';
 
 const form = document.getElementById('controlsForm');
 const statusEl = document.getElementById('statusMessage');
@@ -181,35 +181,10 @@ async function downloadBreakdownZip(format) {
   const withPattern = Boolean(params.add_fill_pattern);
   const withHighlight = Boolean(params.red_outline);
 
-  // --- Fitting rings: all outlines combined into one workpiece file ---
-  const fittingOutlines = [];
-  const fittingHighlightPaths = [];
-  const fittingPatternLines = [];
-
-  const fittingGroups = getFittingGroups(engine.arcGroups, rings);
-  const outermostRingIndex = rings.length > 0 ? rings[rings.length - 1].ringIndex : -1;
-
-  for (const { group: g, outline: gOutline, ringIndex } of fittingGroups) {
-    const isOutermost = ringIndex === outermostRingIndex;
-    fittingOutlines.push(gOutline);
-    if (withHighlight && isOutermost) fittingHighlightPaths.push(gOutline);
-    if (withPattern && typeof g._getPatternSegments === 'function') {
-      const segs = g._getPatternSegments(params.fill_pattern_spacing, g.primaryPatternAngle ?? params.fill_pattern_angle, params.fill_pattern_offset) ?? [];
-      fittingPatternLines.push(...segs.map(([p1, p2]) => ({ p1, p2 })));
-    }
-  }
-
-  if (fittingOutlines.length > 0) {
-    const fname = `${base}_workpiece.${format}`;
-    zipFiles[fname] = strToU8(
-      format === 'svg'
-        ? generateBreakdownSVG(fittingOutlines, fittingHighlightPaths, scaleFactor ?? 1, wpW, wpH, fittingPatternLines)
-        : generateSingleGroupDXF(fittingOutlines, fittingHighlightPaths, scaleFactor ?? 1, wpW, wpH)
-    );
-  }
-
   // --- Beyond-box rings: one file per arc group, centred in workpiece box ---
+  // Compute these first so we know the exact ring IDs exported individually.
   const overflowGroups = getOverflowGroups(engine.arcGroups, rings);
+  const overflowRingIds = new Set(overflowGroups.map(g => g.ringIndex));
   for (const g of overflowGroups) {
     const gOutline = g.getClosedOutline();
     if (!gOutline || gOutline.length < 2) continue;
@@ -231,6 +206,36 @@ async function downloadBreakdownZip(format) {
       format === 'svg'
         ? generateBreakdownSVG([gOutlineCentred], highlightPaths, scaleFactor ?? 1, wpW, wpH, patLines)
         : generateSingleGroupDXF([gOutlineCentred], highlightPaths, scaleFactor ?? 1, wpW, wpH)
+    );
+  }
+
+  // --- Workpiece file: all groups NOT exported individually ---
+  // Exclude any ring ID that appears in an individual overflow file.
+  const fittingOutlines = [];
+  const fittingHighlightPaths = [];
+  const fittingPatternLines = [];
+  const outermostRingIndex = rings.length > 0 ? rings[rings.length - 1].ringIndex : -1;
+
+  for (const [key, g] of engine.arcGroups.entries()) {
+    if (!key.startsWith('circle_')) continue;
+    if (overflowRingIds.has(g.ringIndex)) continue;
+    const gOutline = g.getClosedOutline();
+    if (!gOutline || gOutline.length < 2) continue;
+    const isOutermost = g.ringIndex === outermostRingIndex;
+    fittingOutlines.push(gOutline);
+    if (withHighlight && isOutermost) fittingHighlightPaths.push(gOutline);
+    if (withPattern && typeof g._getPatternSegments === 'function') {
+      const segs = g._getPatternSegments(params.fill_pattern_spacing, g.primaryPatternAngle ?? params.fill_pattern_angle, params.fill_pattern_offset) ?? [];
+      fittingPatternLines.push(...segs.map(([p1, p2]) => ({ p1, p2 })));
+    }
+  }
+
+  if (fittingOutlines.length > 0) {
+    const fname = `${base}_workpiece.${format}`;
+    zipFiles[fname] = strToU8(
+      format === 'svg'
+        ? generateBreakdownSVG(fittingOutlines, fittingHighlightPaths, scaleFactor ?? 1, wpW, wpH, fittingPatternLines)
+        : generateSingleGroupDXF(fittingOutlines, fittingHighlightPaths, scaleFactor ?? 1, wpW, wpH)
     );
   }
 
