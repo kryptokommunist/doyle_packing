@@ -302,6 +302,230 @@
       margin-bottom: 0.15rem;
     }
 
+    .animate-card {
+      padding: 1.5rem;
+      gap: 1.5rem;
+    }
+
+    .animate-header {
+      display: grid;
+      gap: 1rem;
+    }
+
+    .animate-controls {
+      display: flex;
+      gap: 1.5rem;
+      flex-wrap: wrap;
+      align-items: flex-end;
+      justify-content: space-between;
+    }
+
+    .animate-preset-control {
+      display: grid;
+      gap: 0.45rem;
+      min-width: 240px;
+    }
+
+    .animate-preset-control label {
+      font-size: 0.75rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      font-weight: 600;
+    }
+
+    .animate-preset-row {
+      display: flex;
+      gap: 0.6rem;
+      align-items: center;
+    }
+
+    .animate-preset-row select {
+      flex: 1 1 auto;
+      min-width: 0;
+      padding: 0.6rem 0.75rem;
+      border-radius: 0.75rem;
+      border: 1px solid rgba(148, 163, 184, 0.35);
+      background: rgba(255, 255, 255, 0.9);
+      color: var(--text-strong);
+    }
+
+    .animate-frame-controls {
+      display: flex;
+      gap: 0.6rem;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .animate-frame-controls button {
+      padding: 0.65rem 1rem;
+      font-size: 0.85rem;
+    }
+
+    .animate-body {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(260px, 320px);
+      gap: 1.5rem;
+      align-items: stretch;
+    }
+
+    .animate-svg {
+      background: rgba(248, 250, 252, 0.6);
+      border-radius: 1.25rem;
+      border: 1px solid rgba(148, 163, 184, 0.25);
+      position: relative;
+      min-height: 420px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      color: var(--text-muted);
+      text-align: center;
+      padding: 1rem;
+    }
+
+    .animate-svg svg {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    .animate-timeline {
+      background: rgba(248, 250, 252, 0.78);
+      border-radius: 1.25rem;
+      border: 1px solid rgba(148, 163, 184, 0.22);
+      padding: 1rem 1.2rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    .animate-frames {
+      display: grid;
+      grid-auto-flow: column;
+      grid-auto-columns: minmax(120px, 1fr);
+      gap: 0.85rem;
+      overflow-x: auto;
+      padding-bottom: 0.5rem;
+    }
+
+    .animate-frame {
+      background: rgba(255, 255, 255, 0.88);
+      border-radius: 1rem;
+      border: 1px solid rgba(148, 163, 184, 0.25);
+      padding: 0.75rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.6rem;
+      min-height: 140px;
+      cursor: pointer;
+      transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .animate-frame:hover {
+      transform: translateY(-2px);
+    }
+
+    .animate-frame.selected {
+      border-color: var(--accent);
+      box-shadow: 0 12px 26px rgba(37, 99, 235, 0.18);
+    }
+
+    .frame-items {
+      display: flex;
+      flex-direction: column;
+      gap: 0.45rem;
+      flex: 1;
+    }
+
+    .frame-empty {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.75rem;
+      color: rgba(100, 116, 139, 0.7);
+      border: 1px dashed rgba(148, 163, 184, 0.4);
+      border-radius: 0.6rem;
+      padding: 0.4rem;
+    }
+
+    .frame-label {
+      text-align: center;
+      font-size: 0.75rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+    }
+
+    .frame-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.4rem;
+      background: rgba(37, 99, 235, 0.08);
+      color: var(--text-strong);
+      border-radius: 0.65rem;
+      padding: 0.35rem 0.6rem;
+      font-size: 0.78rem;
+      border: none;
+      cursor: pointer;
+      transition: transform 0.2s ease, background 0.2s ease;
+    }
+
+    .frame-badge:hover {
+      transform: translateY(-1px);
+      background: rgba(37, 99, 235, 0.12);
+    }
+
+    .frame-badge span {
+      flex: 1;
+      text-align: left;
+    }
+
+    .frame-badge .remove {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+
+    .animate-actions button {
+      width: 100%;
+    }
+
+    .arcgroup-hitarea {
+      cursor: pointer;
+    }
+
+    .arcgroup-shape {
+      fill: transparent;
+      stroke: transparent;
+      transition: fill 0.3s ease, stroke 0.3s ease, stroke-width 0.3s ease;
+    }
+
+    .arcgroup-shape[data-frame-index] {
+      stroke-width: 1.1;
+      fill-opacity: 0.35;
+    }
+
+    .arcgroup-shape.is-pulsing {
+      animation: arcgroupPulse 0.9s ease-out;
+    }
+
+    @keyframes arcgroupPulse {
+      0% {
+        stroke-width: 1.4;
+        fill-opacity: 0.5;
+      }
+      50% {
+        stroke-width: 2.2;
+        fill-opacity: 0.75;
+      }
+      100% {
+        stroke-width: 1.1;
+        fill-opacity: 0.35;
+      }
+    }
+
     .three-card {
       padding: 1.5rem;
       gap: 1.25rem;
@@ -552,6 +776,7 @@
       <section class="preview">
         <div class="view-toggle" role="group" aria-label="Preview mode">
           <button type="button" class="active" data-view="2d" aria-pressed="true">2D SVG</button>
+          <button type="button" data-view="animate" aria-pressed="false">Animate</button>
           <button type="button" data-view="3d" aria-pressed="false">3D View</button>
         </div>
 
@@ -563,6 +788,35 @@
           <div class="stat-card"><strong id="statArcGroups">0</strong>Arc groups</div>
           <div class="stat-card"><strong id="statPolygons">0</strong>Polygons extruded</div>
           <div class="stat-card"><strong id="statMode">Arram-Boyle</strong>Render mode</div>
+        </div>
+
+        <div class="preview-card animate-card" id="viewAnimate" hidden>
+          <div class="animate-header">
+            <div class="animate-controls">
+              <div class="animate-preset-control">
+                <label for="animatePreset">Preset</label>
+                <div class="animate-preset-row">
+                  <select id="animatePreset"></select>
+                  <button type="button" class="secondary" id="animateApplyPreset">Load preset</button>
+                </div>
+              </div>
+              <div class="animate-frame-controls">
+                <button type="button" id="animateAddFrame">Add frame</button>
+                <button type="button" class="secondary" id="animateRemoveFrame">Remove last</button>
+                <button type="button" class="secondary" id="animateClearFrames">Clear frames</button>
+              </div>
+            </div>
+            <div class="status" id="animateStatus">Select a frame, then click cells in the spiral to assign them.</div>
+          </div>
+          <div class="animate-body">
+            <div class="animate-svg" id="animateSvgPreview" aria-live="polite">Load a spiral to begin.</div>
+            <aside class="animate-timeline" aria-label="Animation frames">
+              <div class="animate-frames" id="animateFrames"></div>
+              <div class="animate-actions">
+                <button type="button" id="animateApply">Animate selection</button>
+              </div>
+            </aside>
+          </div>
         </div>
 
         <div class="preview-card three-card" id="view3d" hidden>
