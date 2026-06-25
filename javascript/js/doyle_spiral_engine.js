@@ -602,6 +602,97 @@ function patternAnimationSpiralArmSweep(context, opts = {}) {
   return assignments;
 }
 
+/**
+ * Zigzag snake: starts at every 2nd group in the innermost ring, then alternately
+ * expands top-right / top-left to the next outer ring, snaking outward to the rim
+ * and then back inward through unvisited groups — each group is visited exactly once.
+ * phaseOffset animates the active "band" sweeping along the snake path.
+ */
+function patternAnimationZigzagSnake(context, opts = {}) {
+  const assignments = new Map();
+  const baseAngle = Number.isFinite(opts.baseAngle) ? opts.baseAngle : 0;
+  const phaseShift = Number.isFinite(opts.phaseOffset) ? opts.phaseOffset * 180 : 0;
+
+  const { sortedRings, ringMap } = context;
+  if (!sortedRings.length) return assignments;
+
+  // Build the visit order: snake path through all groups
+  const visitOrder = [];
+  const visitedIds = new Set();
+
+  // Step 1: innermost ring — every 2nd group (by theta-sorted index)
+  const innerMetas = (ringMap.get(sortedRings[0]) || []).slice().sort((a, b) => a.theta - b.theta);
+  const seeds = innerMetas.filter((_, i) => i % 2 === 0);
+
+  // For each seed, build an outward chain that alternates cw/ccw expansion per ring
+  // then collect remaining unvisited groups after the outward pass
+  for (let s = 0; s < seeds.length; s++) {
+    let current = seeds[s];
+    if (visitedIds.has(current.id)) continue;
+    visitedIds.add(current.id);
+    visitOrder.push(current);
+
+    // Outward pass: ring by ring, pick the outer neighbor that alternates direction
+    // Even seed index → start clockwise (right), odd seed → start counter-clockwise (left)
+    let cwBias = s % 2 === 0;
+
+    for (let ri = 1; ri < sortedRings.length; ri++) {
+      const outerRing = sortedRings[ri];
+      const outerMetas = ringMap.get(outerRing) || [];
+      if (!outerMetas.length) break;
+
+      // Find outer-ring neighbors of current that are in this ring, unvisited
+      const outerNeighbors = [...current.neighbors].filter(
+        n => n.ringIndex === outerRing && !visitedIds.has(n.id)
+      );
+
+      if (!outerNeighbors.length) {
+        // No direct neighbor — pick closest unvisited in this ring by angle
+        const closest = outerMetas
+          .filter(m => !visitedIds.has(m.id))
+          .sort((a, b) => angularDistanceRad(current.theta, a.theta) - angularDistanceRad(current.theta, b.theta));
+        if (!closest.length) break;
+        current = closest[0];
+      } else if (outerNeighbors.length === 1) {
+        current = outerNeighbors[0];
+      } else {
+        // Sort by theta relative to current and pick cw or ccw
+        outerNeighbors.sort((a, b) => a.theta - b.theta);
+        // cw bias = pick the one with larger theta (rightward / clockwise)
+        current = cwBias ? outerNeighbors[outerNeighbors.length - 1] : outerNeighbors[0];
+      }
+
+      visitedIds.add(current.id);
+      visitOrder.push(current);
+      // Alternate direction on every ring step
+      cwBias = !cwBias;
+    }
+  }
+
+  // Step 2: sweep back inward through all unvisited groups, outermost ring first
+  const remaining = [];
+  for (let ri = sortedRings.length - 1; ri >= 0; ri--) {
+    const metas = (ringMap.get(sortedRings[ri]) || []).slice().sort((a, b) => a.theta - b.theta);
+    for (const m of metas) {
+      if (!visitedIds.has(m.id)) {
+        visitedIds.add(m.id);
+        remaining.push(m);
+      }
+    }
+  }
+  visitOrder.push(...remaining);
+
+  // Assign step indices along the visit order
+  const total = visitOrder.length || 1;
+  const stepGap = 15;
+  visitOrder.forEach((meta, i) => {
+    const angle = (i / total) * stepGap * total + meta.ringIndex * baseAngle + phaseShift;
+    assignments.set(meta.id, { primaryAngle: angle, angles: [angle] });
+  });
+
+  return assignments;
+}
+
 const PATTERN_ANIMATION_DEFINITIONS = {
   radial_bloom: { label: 'Radial bloom', generator: patternAnimationRadialBloom },
   ring_cycle: { label: 'Ring cycle chase', generator: patternAnimationRingCycle },
@@ -611,6 +702,7 @@ const PATTERN_ANIMATION_DEFINITIONS = {
   diamond_pulse: { label: 'Diamond pulse', generator: patternAnimationDiamondPulse },
   fibonacci_spiral: { label: 'Fibonacci spiral', generator: patternAnimationFibonacciSpiral },
   spiral_arm_sweep: { label: 'Spiral arm sweep', generator: patternAnimationSpiralArmSweep },
+  zigzag_snake: { label: 'Zigzag snake', generator: patternAnimationZigzagSnake },
 };
 
 const DEFAULT_PATTERN_ANIMATION = 'radial_bloom';
