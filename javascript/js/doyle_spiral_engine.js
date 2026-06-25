@@ -663,6 +663,24 @@ function patternAnimationZigzagSnake(context, opts = {}) {
   return assignments;
 }
 
+function zigzagSnakeStepCount(context) {
+  const { sortedRings, ringMap } = context;
+  if (!sortedRings.length) return null;
+  const sizeCounts = new Map();
+  for (const ri of sortedRings) {
+    const cnt = (ringMap.get(ri) || []).length;
+    sizeCounts.set(cnt, (sizeCounts.get(cnt) || 0) + 1);
+  }
+  let n = 2, bestFreq = 0;
+  for (const [cnt, freq] of sizeCounts) {
+    if (freq > bestFreq || (freq === bestFreq && cnt > n)) { bestFreq = freq; n = cnt; }
+  }
+  const seedRingPos = sortedRings.findIndex(ri => (ringMap.get(ri) || []).length === n);
+  const workingRings = sortedRings.slice(seedRingPos < 0 ? 0 : seedRingPos);
+  // outward pass + inward return (outermost ring not duplicated)
+  return workingRings.length > 0 ? workingRings.length * 2 - 1 : 1;
+}
+
 const PATTERN_ANIMATION_DEFINITIONS = {
   radial_bloom: { label: 'Radial bloom', generator: patternAnimationRadialBloom },
   ring_cycle: { label: 'Ring cycle chase', generator: patternAnimationRingCycle },
@@ -672,7 +690,7 @@ const PATTERN_ANIMATION_DEFINITIONS = {
   diamond_pulse: { label: 'Diamond pulse', generator: patternAnimationDiamondPulse },
   fibonacci_spiral: { label: 'Fibonacci spiral', generator: patternAnimationFibonacciSpiral },
   spiral_arm_sweep: { label: 'Spiral arm sweep', generator: patternAnimationSpiralArmSweep },
-  zigzag_snake: { label: 'Zigzag snake', generator: patternAnimationZigzagSnake },
+  zigzag_snake: { label: 'Zigzag snake', generator: patternAnimationZigzagSnake, stepCount: zigzagSnakeStepCount },
 };
 
 const DEFAULT_PATTERN_ANIMATION = 'radial_bloom';
@@ -732,13 +750,19 @@ function generatePresetAnimationFrames(arcGroups, { animationId, baseAngle } = {
   const resolvedId = normalisePatternAnimationId(animationId);
   const context = buildPatternAnimationContext(arcGroups);
   const baseAngleValue = Number.isFinite(baseAngle) ? baseAngle : 0;
-  const generator = PATTERN_ANIMATION_DEFINITIONS[resolvedId]?.generator
-    || PATTERN_ANIMATION_DEFINITIONS[DEFAULT_PATTERN_ANIMATION].generator;
+  const def = PATTERN_ANIMATION_DEFINITIONS[resolvedId]
+    || PATTERN_ANIMATION_DEFINITIONS[DEFAULT_PATTERN_ANIMATION];
+  const generator = def.generator;
+
+  // Discrete-step animations declare their natural step count; use it instead of
+  // the spacing-derived numFrames so line spacing doesn't affect animation speed.
+  const naturalSteps = typeof def.stepCount === 'function' ? def.stepCount(context) : null;
+  const fwdFrames = naturalSteps != null ? naturalSteps : numFrames;
 
   const frames = [];
   // Forward pass: phaseOffset 0 → 1 (exclusive of 1 to avoid duplicate at wrap-around)
-  for (let i = 0; i < numFrames; i++) {
-    const phaseOffset = i / numFrames;
+  for (let i = 0; i < fwdFrames; i++) {
+    const phaseOffset = i / fwdFrames;
     const raw = generator(context, { baseAngle: baseAngleValue, phaseOffset }) || new Map();
     const frame = new Map();
     for (const meta of context.metaList) {
@@ -750,8 +774,8 @@ function generatePresetAnimationFrames(arcGroups, { animationId, baseAngle } = {
     }
     frames.push(frame);
   }
-  // Reverse pass: phaseOffset back from (numFrames-1)/numFrames → 1/numFrames (skip first and last to avoid duplicates)
-  for (let i = numFrames - 2; i >= 1; i--) {
+  // Reverse pass: skip first and last to avoid duplicates at loop points
+  for (let i = fwdFrames - 2; i >= 1; i--) {
     frames.push(frames[i]);
   }
   return frames;

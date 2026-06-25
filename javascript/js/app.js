@@ -2081,14 +2081,11 @@ function renderFramePreviews() {
 
   // --- Preset loop preview mode: no CA frames, show phase-sweep animation ---
   if (!frames.length && params.add_fill_pattern) {
-    const rawSpacing = params.fill_pattern_spacing;
-    const numFrames = Number.isFinite(rawSpacing) && rawSpacing > 0
-      ? Math.max(4, Math.min(360, Math.round(180 / rawSpacing)))
-      : 20;
+    // Pass a generous fixed hint; animations with a natural stepCount ignore it.
     const presetFrames = generatePresetAnimationFrames(
       result.engine.arcGroups,
       { animationId: params.fill_pattern_animation, baseAngle: params.fill_pattern_angle },
-      numFrames
+      60
     );
     if (!presetFrames.length) {
       scrollContainer.innerHTML = '<div class="empty-state" style="padding: 2rem; color: var(--text-muted);">Add frames or enable fill pattern to see preview</div>';
@@ -2099,8 +2096,10 @@ function renderFramePreviews() {
     for (const group of result.engine.arcGroups.values()) {
       idToName.set(group.id, group.name);
     }
+    // Actual forward frame count: ping-pong has 2*fwd-2 total, so fwd = (total+2)/2
+    const totalFrames = presetFrames.length;
+    const totalFwd = Math.round((totalFrames + 2) / 2);
     presetFrames.forEach((frameMap, idx) => {
-      const totalFwd = numFrames;
       const isReverse = idx >= totalFwd;
       const label = isReverse ? `Rev ${idx - totalFwd + 2}` : `Fwd ${idx + 1}`;
       const item = document.createElement('div');

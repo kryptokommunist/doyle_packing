@@ -169,6 +169,9 @@ function createThreeViewer({
       throw new Error('Invalid geometry payload');
     }
     clearSpiral();
+    if (Number.isFinite(data.fill_pattern_spacing) && data.fill_pattern_spacing > 0) {
+      fillPatternSpacing = data.fill_pattern_spacing;
+    }
     data.arcgroups.forEach(group => {
       const patternAngles = Array.isArray(group.line_patterns) && group.line_patterns.length
         ? group.line_patterns.slice(0, 3)
@@ -179,8 +182,6 @@ function createThreeViewer({
           mesh.userData.patternIndex = index;
           if (index > 0) {
             mesh.position.z += 0.02 * index;
-            mesh.material.transparent = true;
-            mesh.material.opacity = Math.max(0.65, 1 - index * 0.15);
           }
           spiralContainer.add(mesh);
         }
@@ -212,6 +213,7 @@ function createThreeViewer({
   let autoRotationSpeed = rotationSpeed ? parseFloat(rotationSpeed.value) : 0.4;
   let pulseSpeed = pulseSpeedSlider ? parseFloat(pulseSpeedSlider.value) : 1.0;
   let animationStart = performance.now();
+  let fillPatternSpacing = 9;
 
   function updateMaterialsForRotation(rotationAngleDeg, timeSec) {
     if (!spiralContainer.children.length) {
