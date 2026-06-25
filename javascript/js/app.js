@@ -2092,9 +2092,12 @@ function renderFramePreviews() {
       return;
     }
     // Snapshot the id→name mapping from the original arcGroups before any re-render mutates them.
+    // Also collect all group names so we can force-OFF any group not covered by the frame map.
     const idToName = new Map();
+    const allGroupNames = new Set();
     for (const group of result.engine.arcGroups.values()) {
       idToName.set(group.id, group.name);
+      allGroupNames.add(group.name);
     }
     // Actual forward frame count: ping-pong has 2*fwd-2 total, so fwd = (total+2)/2
     const totalFrames = presetFrames.length;
@@ -2109,8 +2112,12 @@ function renderFramePreviews() {
         <div class="frame-preview-svg"></div>
         <div class="frame-preview-info">Preset: ${params.fill_pattern_animation}</div>
       `;
-      // Build name-keyed overrides using the stable id→name snapshot.
+      // Build name-keyed overrides. Start with all groups OFF, then apply the frame assignments.
+      // This ensures groups not in the frame map (e.g. outer ring) are suppressed too.
       const frameOverrides = new Map();
+      for (const name of allGroupNames) {
+        frameOverrides.set(name, []);
+      }
       for (const [id, name] of idToName) {
         const assignment = frameMap.get(id);
         if (assignment) frameOverrides.set(name, assignment.angles.slice(0, 2));
