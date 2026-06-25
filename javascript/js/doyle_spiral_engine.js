@@ -3654,7 +3654,8 @@ class DoyleSpiralEngine {
         // outerArc: arc from the invisible outer circle closing the outer edge
         const highlightArcs = [group.arcs[2], group.arcs[3]].filter(Boolean);
         for (let i = 4; i < group.arcs.length; i++) {
-          if (!outermostCircleIds.has(group.arcs[i].circle?.id)) {
+          const c = group.arcs[i].circle;
+          if (c && c.visible && !outermostCircleIds.has(c.id)) {
             highlightArcs.push(group.arcs[i]);
           }
         }
