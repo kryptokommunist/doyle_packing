@@ -2094,6 +2094,11 @@ function renderFramePreviews() {
       scrollContainer.innerHTML = '<div class="empty-state" style="padding: 2rem; color: var(--text-muted);">Add frames or enable fill pattern to see preview</div>';
       return;
     }
+    // Snapshot the id→name mapping from the original arcGroups before any re-render mutates them.
+    const idToName = new Map();
+    for (const group of result.engine.arcGroups.values()) {
+      idToName.set(group.id, group.name);
+    }
     presetFrames.forEach((frameMap, idx) => {
       const totalFwd = numFrames;
       const isReverse = idx >= totalFwd;
@@ -2105,11 +2110,11 @@ function renderFramePreviews() {
         <div class="frame-preview-svg"></div>
         <div class="frame-preview-info">Preset: ${params.fill_pattern_animation}</div>
       `;
-      // Build name-keyed overrides so they survive the internal applyPatternAnimationToGroups call.
+      // Build name-keyed overrides using the stable id→name snapshot.
       const frameOverrides = new Map();
-      for (const group of result.engine.arcGroups.values()) {
-        const assignment = frameMap.get(group.id);
-        if (assignment) frameOverrides.set(group.name, assignment.angles.slice(0, 2));
+      for (const [id, name] of idToName) {
+        const assignment = frameMap.get(id);
+        if (assignment) frameOverrides.set(name, assignment.angles.slice(0, 2));
       }
       const fSvg = result.engine.render('arram_boyle', {
         size: params.size,
