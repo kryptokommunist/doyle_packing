@@ -581,6 +581,27 @@ function patternAnimationFibonacciSpiral(context, opts = {}) {
   return assignments;
 }
 
+/**
+ * Spiral arm sweep: hatch angle sweeps outward along each logarithmic spiral arm.
+ * Cells at the same polar angle activate together; the wave propagates radially
+ * outward, and each arm fires at a distinct phase proportional to its angular
+ * position, so the animation reads as distinct arms sweeping one after another.
+ */
+function patternAnimationSpiralArmSweep(context, opts = {}) {
+  const assignments = new Map();
+  const baseAngle = Number.isFinite(opts.baseAngle) ? opts.baseAngle : 0;
+  const phaseShift = Number.isFinite(opts.phaseOffset) ? opts.phaseOffset * 180 : 0;
+  const armStep = 18;
+  context.metaList.forEach(meta => {
+    const thetaNorm = normaliseAngle360(meta.theta * (180 / Math.PI));
+    const armOffset = thetaNorm * 0.5;
+    const radialProgress = meta.ringIndex * armStep;
+    const angle = armOffset + radialProgress + meta.ringIndex * baseAngle + phaseShift;
+    assignments.set(meta.id, { primaryAngle: angle, angles: [angle] });
+  });
+  return assignments;
+}
+
 const PATTERN_ANIMATION_DEFINITIONS = {
   radial_bloom: { label: 'Radial bloom', generator: patternAnimationRadialBloom },
   ring_cycle: { label: 'Ring cycle chase', generator: patternAnimationRingCycle },
@@ -589,6 +610,7 @@ const PATTERN_ANIMATION_DEFINITIONS = {
   spiral_vortex: { label: 'Spiral vortex', generator: patternAnimationSpiralVortex },
   diamond_pulse: { label: 'Diamond pulse', generator: patternAnimationDiamondPulse },
   fibonacci_spiral: { label: 'Fibonacci spiral', generator: patternAnimationFibonacciSpiral },
+  spiral_arm_sweep: { label: 'Spiral arm sweep', generator: patternAnimationSpiralArmSweep },
 };
 
 const DEFAULT_PATTERN_ANIMATION = 'radial_bloom';
@@ -3249,6 +3271,25 @@ class DoyleSpiralEngine {
         distances.push({ dist, i, j });
       }
       distances.sort((a, b) => a.dist - b.dist);
+
+      // The innermost arc (distances[0]) is the outer boundary of the adjacent visible
+      // circle group. Add it to that group so getClosedOutline() includes it.
+      if (distances.length > 0) {
+        const { i: innerI, j: innerJ } = distances[0];
+        // Find the visible circle that shares both intersection endpoints of this arc.
+        const neighborAtI = circle.intersections[innerI][1];
+        const neighborAtJ = circle.intersections[innerJ][1];
+        const ownerCircle = neighborAtI === neighborAtJ ? neighborAtI : null;
+        if (ownerCircle && ownerCircle.visible) {
+          const ownerKey = `circle_${ownerCircle.id}`;
+          const ownerGroup = this.arcGroups.get(ownerKey);
+          if (ownerGroup) {
+            const steps = estimateArcSteps(circle, pts[innerI], pts[innerJ]);
+            ownerGroup.addArc(new ArcElement(circle, pts[innerI], pts[innerJ], steps, true));
+          }
+        }
+      }
+
       const arcsForCircle = [];
       for (let idx = 1; idx < Math.min(3, distances.length); idx += 1) {
         const { i, j } = distances[idx];
@@ -3606,15 +3647,9 @@ class DoyleSpiralEngine {
         if (group.ringIndex !== maxIndex) {
           continue;
         }
-        const highlightArcs = [];
-        for (let i = 0; i < group.arcs.length; i += 1) {
-          if (i === 3 || i === 2) {
-            highlightArcs.push(group.arcs[i]);
-          }
-        }
-        const paths = buildContinuousPathsFromArcs(highlightArcs);
-        for (const path of paths) {
-          context.drawPolyline(path, { color: '#ff0000', width: highlightStrokeWidth });
+        const outline = group.getClosedOutline();
+        if (outline && outline.length >= 2) {
+          context.drawPolyline(outline, { color: '#ff0000', width: highlightStrokeWidth, close: true });
         }
       }
     }
