@@ -52,6 +52,7 @@ const breakdownSettings = document.getElementById('breakdownSettings');
 const workpieceWidthInput = document.getElementById('workpieceWidth');
 const workpieceHeightInput = document.getElementById('workpieceHeight');
 const breakdownRingCountEl = document.getElementById('breakdownRingCount');
+const svgLayersCheckbox = document.getElementById('svgLayersToggle');
 
 const DEFAULTS = {
   p: 16,
@@ -76,6 +77,8 @@ const DEFAULTS = {
   highlight_rim_width: 1.2,
   group_outline_width: 0.6,
   pattern_stroke_width: 0.5,
+  svg_layers: false,
+  svg_layer_count: 30,
 };
 
 let activeView = '2d';
@@ -508,6 +511,7 @@ function collectParams() {
   raw.red_outline = redToggle.checked;
   raw.use_symmetric = symmetricToggle?.checked ?? true;
   raw.fill_pattern_loop = fillPatternLoopCheckbox?.checked ?? false;
+  raw.svg_layers = svgLayersCheckbox?.checked ?? false;
   if (breakdownModeCheckbox?.checked) {
     raw.red_outline = true;
     if (lastRender?.engine?.arcGroups && lastRender?.scaleFactor != null) {

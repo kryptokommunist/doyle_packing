@@ -3467,6 +3467,9 @@ class DoyleSpiralEngine {
 
     // Use symmetric optimization when p == q
     const canUseSymmetric = useSymmetric && this.p === this.q;
+    // When layering is enabled, suppress inline outline drawing during group creation;
+    // outlines will be drawn in a post-creation pass with correct layer assignment.
+    const inlineDrawOutline = svgLayers ? false : drawGroupOutline;
 
     if (canUseSymmetric) {
       this._createArcGroupsSymmetric(
@@ -3474,7 +3477,7 @@ class DoyleSpiralEngine {
         spiralCenter,
         debugGroups,
         addFillPattern,
-        drawGroupOutline,
+        inlineDrawOutline,
         context,
         outlineStrokeWidth,
       );
@@ -3484,7 +3487,7 @@ class DoyleSpiralEngine {
         spiralCenter,
         debugGroups,
         addFillPattern,
-        drawGroupOutline,
+        inlineDrawOutline,
         context,
         outlineStrokeWidth,
       );
@@ -3591,7 +3594,7 @@ class DoyleSpiralEngine {
       }
     }
 
-    if (!addFillPattern && !debugGroups && drawGroupOutline) {
+    if (svgLayers && !addFillPattern && !debugGroups && drawGroupOutline) {
       for (const [key, group] of this.arcGroups.entries()) {
         if (key.startsWith('outer_')) continue;
         const ringIdx = group.ringIndex ?? 0;
@@ -3667,6 +3670,8 @@ class DoyleSpiralEngine {
     boundingBoxHeight = null,
     lengthUnits = '',
     useSymmetric = true,
+    svgLayers = false,
+    svgLayerCount = 30,
   } = {}) {
     if (!this._generated) {
       this.generateCircles();
@@ -3704,6 +3709,8 @@ class DoyleSpiralEngine {
         groupOutlineWidth,
         patternStrokeWidth,
         useSymmetric,
+        svgLayers,
+        svgLayerCount,
       });
       return {
         svg: context.toElement(),
@@ -3832,6 +3839,8 @@ function normaliseParams(params = {}) {
     bounding_box_width_mm: boundingWidthMm,
     bounding_box_height_mm: boundingHeightMm,
     use_symmetric: params.use_symmetric !== undefined ? Boolean(params.use_symmetric) : true,
+    svg_layers: Boolean(params.svg_layers ?? false),
+    svg_layer_count: Number.isFinite(Number(params.svg_layer_count)) ? Math.max(1, Math.floor(Number(params.svg_layer_count))) : 30,
   };
 }
 
@@ -3881,6 +3890,8 @@ function renderSpiral(params = {}, overrideMode = null) {
     boundingBoxHeight: opts.bounding_box_height_mm,
     lengthUnits: 'mm',
     useSymmetric: opts.use_symmetric,
+    svgLayers: opts.svg_layers ?? false,
+    svgLayerCount: opts.svg_layer_count ?? 30,
   });
   return {
     engine,
