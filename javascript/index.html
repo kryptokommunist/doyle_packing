@@ -714,6 +714,32 @@
       border-radius: 0.5rem;
     }
 
+    .frame-angles {
+      display: flex;
+      gap: 0.6rem;
+      padding: 0.4rem 0.2rem 0.2rem;
+      border-top: 1px solid rgba(148, 163, 184, 0.15);
+      margin-top: 0.4rem;
+    }
+
+    .frame-angles label {
+      display: flex;
+      align-items: center;
+      gap: 0.3rem;
+      font-size: 0.72rem;
+      color: var(--text-muted);
+      flex: 1;
+    }
+
+    .frame-angles input[type="number"] {
+      width: 4.5rem;
+      padding: 0.2rem 0.3rem;
+      font-size: 0.72rem;
+      border: 1px solid rgba(148, 163, 184, 0.3);
+      border-radius: 0.25rem;
+      background: rgba(255,255,255,0.8);
+    }
+
     .rule-item {
       border: 1px solid rgba(148, 163, 184, 0.2);
       border-radius: 0.5rem;
@@ -914,10 +940,25 @@
     .animator-controls, .animator-actions {
       display: flex;
       gap: 0.5rem;
+      flex-direction: column;
     }
 
     .animator-actions button {
       flex: 1;
+    }
+
+    .animator-actions .checkbox-label {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      cursor: pointer;
+      padding: 0.1rem 0;
+    }
+
+    .checkbox-label input[type="checkbox"] {
+      cursor: pointer;
     }
 
     /* Animator Preview Tabs */
@@ -1212,6 +1253,12 @@
                 </select>
               </div>
               <div class="field-group">
+                <label class="checkbox-label">
+                  <input type="checkbox" id="fillPatternLoop" name="fill_pattern_loop">
+                  Loop (forward ↔ reverse)
+                </label>
+              </div>
+              <div class="field-group">
                 <label for="fillSpacing">Line spacing (mm)</label>
                 <input
                   id="fillSpacing"
@@ -1482,6 +1529,10 @@
               </div>
 
               <div class="animator-actions">
+                <label class="checkbox-label">
+                  <input type="checkbox" id="animatorLoopMode">
+                  Loop (forward ↔ reverse)
+                </label>
                 <button type="button" id="loadAnimationBtn">Load Animation</button>
               </div>
             </aside>

@@ -1,4 +1,4 @@
-import { renderSpiral, normaliseParams, buildPatternAnimationContext, buildContinuousPathsFromArcs } from './doyle_spiral_engine.js';
+import { renderSpiral, normaliseParams, buildPatternAnimationContext, buildContinuousPathsFromArcs, generatePresetAnimationFrames } from './doyle_spiral_engine.js';
 import { createThreeViewer } from './three_viewer.js';
 import { generateDXF, generateSingleGroupDXF } from './dxf_export.js';
 import { generateSTEP, generateSingleGroupSTEP } from './step_export.js';
@@ -34,6 +34,8 @@ const animatorTabs = document.querySelectorAll('.animator-tab');
 const addFrameBtn = document.getElementById('addFrameBtn');
 const clearFramesBtn = document.getElementById('clearFramesBtn');
 const loadAnimationBtn = document.getElementById('loadAnimationBtn');
+const animatorLoopCheckbox = document.getElementById('animatorLoopMode');
+const fillPatternLoopCheckbox = document.getElementById('fillPatternLoop');
 const seedCountEl = document.getElementById('seedCount');
 const threeStatus = document.getElementById('threeStatus');
 const threeSettingsToggle = document.getElementById('threeSettingsToggle');
@@ -70,6 +72,7 @@ const DEFAULTS = {
   fill_pattern_type: 'lines',
   fill_pattern_rect_width: 2,
   fill_pattern_animation: 'radial_bloom',
+  fill_pattern_loop: false,
   highlight_rim_width: 1.2,
   group_outline_width: 0.6,
   pattern_stroke_width: 0.5,
@@ -504,6 +507,7 @@ function collectParams() {
   raw.draw_group_outline = outlineToggle.checked;
   raw.red_outline = redToggle.checked;
   raw.use_symmetric = symmetricToggle?.checked ?? true;
+  raw.fill_pattern_loop = fillPatternLoopCheckbox?.checked ?? false;
   if (breakdownModeCheckbox?.checked) {
     raw.red_outline = true;
     if (lastRender?.engine?.arcGroups && lastRender?.scaleFactor != null) {
@@ -1017,6 +1021,10 @@ function createFrameElement(index) {
       </div>
     </div>
     <div class="frame-rules"></div>
+    <div class="frame-angles">
+      <label title="Forward-pass line angle (0–180°)">Fwd° <input type="number" class="frame-angle1" min="0" max="180" step="1" placeholder="auto"></label>
+      <label title="Reverse-pass line angle (0–180°)">Rev° <input type="number" class="frame-angle2" min="0" max="180" step="1" placeholder="auto"></label>
+    </div>
   `;
   // Add one rule by default
   const rulesContainer = div.querySelector('.frame-rules');
@@ -1127,7 +1135,13 @@ function collectFramesAndRules() {
       rules.push({ input, output });
     });
     if (rules.length > 0) {
-      frames.push({ rules });
+      const a1 = parseFloat(frameEl.querySelector('.frame-angle1')?.value);
+      const a2 = parseFloat(frameEl.querySelector('.frame-angle2')?.value);
+      frames.push({
+        rules,
+        angle1: Number.isFinite(a1) ? a1 : null,
+        angle2: Number.isFinite(a2) ? a2 : null,
+      });
     }
   });
   return frames;
@@ -1143,7 +1157,7 @@ function matchesRule(currentState, ruleInput) {
   return true;
 }
 
-function runCellularAnimation(context, frames, seedIds) {
+function runCellularAnimation(context, frames, seedIds, loopMode = false) {
   // Map: groupId -> boolean (is cell ON)
   let currentState = new Map();
   let nextState = new Map();
@@ -1214,12 +1228,22 @@ function runCellularAnimation(context, frames, seedIds) {
           // Apply output pattern
           if (rule.output.center) {
             nextState.set(meta.id, true);
-            // Add angle if newly lit or need more angles
             const angles = activationAngles.get(meta.id);
             if (angles.length < 4) {
-              const newAngle = (iteration * 22.5 + angles.length * 45) % 180;
-              if (!angles.some(a => Math.abs(a - newAngle) < 10)) {
-                angles.push(newAngle);
+              let newAngles;
+              if (frame.angle1 != null) {
+                // Use explicit angles from frame definition
+                newAngles = [frame.angle1];
+                if (frame.angle2 != null) newAngles.push(frame.angle2);
+              } else {
+                // Auto-compute: angle-split for loop mode (fwd = half, rev = full)
+                const a = (iteration * 22.5 + angles.length * 45) % 180;
+                newAngles = loopMode ? [a / 2, a] : [a];
+              }
+              for (const na of newAngles) {
+                if (angles.length < 4 && !angles.some(a => Math.abs(a - na) < 10)) {
+                  angles.push(na);
+                }
               }
             }
           }
@@ -1232,9 +1256,18 @@ function runCellularAnimation(context, frames, seedIds) {
               // Add angle to neighbor
               const nAngles = activationAngles.get(neighborId);
               if (nAngles.length < 4) {
-                const newAngle = (iteration * 15 + nIdx * 30) % 180;
-                if (!nAngles.some(a => Math.abs(a - newAngle) < 10)) {
-                  nAngles.push(newAngle);
+                let newAngles;
+                if (frame.angle1 != null) {
+                  newAngles = [frame.angle1];
+                  if (frame.angle2 != null) newAngles.push(frame.angle2);
+                } else {
+                  const a = (iteration * 15 + nIdx * 30) % 180;
+                  newAngles = loopMode ? [a / 2, a] : [a];
+                }
+                for (const na of newAngles) {
+                  if (nAngles.length < 4 && !nAngles.some(a => Math.abs(a - na) < 10)) {
+                    nAngles.push(na);
+                  }
                 }
               }
             }
@@ -1301,22 +1334,54 @@ function loadAnimation() {
   }
 
   // Build context and run CA with user-selected seeds
+  const loopMode = animatorLoopCheckbox?.checked ?? false;
   const context = buildPatternAnimationContext(result.engine.arcGroups);
-  const activations = runCellularAnimation(context, frames, selectedSeeds);
 
-  // Apply activations to arc groups - empty array means OFF (no pattern)
-  for (const [groupId, angles] of activations) {
-    const meta = context.metaList.find(m => m.id === groupId);
-    if (meta && meta.group) {
-      if (angles.length > 0) {
-        meta.group.patternAngles = angles;
-        meta.group.primaryPatternAngle = angles[0];
+  let activations;
+  if (loopMode) {
+    // For loop mode, find the midpoint snapshot (peak activation) and use its angles
+    const snapshots = simulateCAIterations(context, frames, selectedSeeds, 100);
+    // Midpoint is the frame with the most activated cells (peak of forward pass)
+    let peakIdx = 0;
+    let peakCount = 0;
+    snapshots.forEach((stateMap, idx) => {
+      let count = 0;
+      for (const isOn of stateMap.values()) { if (isOn) count++; }
+      if (count > peakCount) { peakCount = count; peakIdx = idx; }
+    });
+    const peakState = snapshots[peakIdx] || snapshots[snapshots.length - 1];
+    // Build activations from peak state, applying angle-split (fwd = auto/2, rev = auto)
+    activations = new Map();
+    context.metaList.forEach(meta => {
+      const isOn = peakState.get(meta.id);
+      if (isOn) {
+        const frame = frames[(peakIdx > 0 ? peakIdx - 1 : 0) % frames.length];
+        let fwdAngle, revAngle;
+        if (frame.angle1 != null) {
+          fwdAngle = frame.angle1;
+          revAngle = frame.angle2 != null ? frame.angle2 : frame.angle1;
+        } else {
+          const a = (peakIdx * 22.5) % 180;
+          fwdAngle = a / 2;
+          revAngle = a;
+        }
+        const angles = Math.abs(fwdAngle - revAngle) < 5 ? [fwdAngle] : [fwdAngle, revAngle];
+        activations.set(meta.id, angles);
       } else {
-        // Cell is OFF - no pattern
-        meta.group.patternAngles = [];
-        meta.group.primaryPatternAngle = null;
+        activations.set(meta.id, []);
       }
-    }
+    });
+  } else {
+    activations = runCellularAnimation(context, frames, selectedSeeds, false);
+  }
+
+  // Build an angle-overrides map keyed by group.name (stable across renders, e.g. "circle_2")
+  // Map from context numeric id → stable group name for lookup
+  const idToName = new Map(context.metaList.map(m => [m.id, m.group.name]));
+  const arcGroupAngleOverrides = new Map();
+  for (const [groupId, angles] of activations) {
+    const name = idToName.get(groupId);
+    if (name) arcGroupAngleOverrides.set(name, angles);
   }
 
   // Ensure pattern fill is enabled
@@ -1325,7 +1390,7 @@ function loadAnimation() {
     toggleFillSettings();
   }
 
-  // Re-render with updated angles - the engine already has them set
+  // Re-render with CA angle overrides passed directly into the render pipeline
   const svgResult = result.engine.render('arram_boyle', {
     size: params.size,
     debugGroups: false,
@@ -1333,6 +1398,7 @@ function loadAnimation() {
     fillPatternSpacing: params.fill_pattern_spacing,
     fillPatternAngle: params.fill_pattern_angle,
     fillPatternAnimation: params.fill_pattern_animation,
+    arcGroupAngleOverrides,
     redOutline: params.red_outline,
     drawGroupOutline: params.draw_group_outline,
     fillPatternOffset: params.fill_pattern_offset,
@@ -1968,17 +2034,75 @@ function renderFramePreviews() {
   scrollContainer.innerHTML = '';
 
   const frames = collectFramesAndRules();
-  if (!frames.length) {
-    scrollContainer.innerHTML = '<div class="empty-state" style="padding: 2rem; color: var(--text-muted);">Add frames to see preview</div>';
-    return;
-  }
-
+  const loopMode = animatorLoopCheckbox?.checked ?? false;
   const params = collectParams();
 
   // Render a reference spiral to get the context
   const result = renderSpiral(params);
   if (!result || !result.engine || !result.engine.arcGroups) {
     scrollContainer.innerHTML = '<div class="empty-state" style="padding: 2rem; color: var(--text-muted);">Failed to generate geometry</div>';
+    return;
+  }
+
+  // --- Preset loop preview mode: no CA frames, show phase-sweep animation ---
+  if (!frames.length && params.add_fill_pattern) {
+    const presetFrames = generatePresetAnimationFrames(
+      result.engine.arcGroups,
+      { animationId: params.fill_pattern_animation, baseAngle: params.fill_pattern_angle },
+      20
+    );
+    if (!presetFrames.length) {
+      scrollContainer.innerHTML = '<div class="empty-state" style="padding: 2rem; color: var(--text-muted);">Add frames or enable fill pattern to see preview</div>';
+      return;
+    }
+    presetFrames.forEach((frameMap, idx) => {
+      const totalFwd = 20;
+      const isReverse = idx >= totalFwd;
+      const label = isReverse ? `Rev ${idx - totalFwd + 2}` : `Fwd ${idx + 1}`;
+      const item = document.createElement('div');
+      item.className = 'frame-preview-item';
+      item.innerHTML = `
+        <div class="frame-preview-header">${label}</div>
+        <div class="frame-preview-svg"></div>
+        <div class="frame-preview-info">Preset: ${params.fill_pattern_animation}</div>
+      `;
+      // Render this preset frame by applying assignments to arc groups then rendering
+      for (const group of result.engine.arcGroups.values()) {
+        const assignment = frameMap.get(group.id);
+        if (assignment) {
+          group.patternAngles = assignment.angles.slice(0, 2);
+          group.primaryPatternAngle = assignment.primaryAngle;
+        }
+      }
+      const fSvg = result.engine.render('arram_boyle', {
+        size: params.size,
+        addFillPattern: true,
+        fillPatternSpacing: params.fill_pattern_spacing,
+        fillPatternAngle: params.fill_pattern_angle,
+        fillPatternOffset: params.fill_pattern_offset,
+        fillPatternType: params.fill_pattern_type,
+        fillPatternRectWidth: params.fill_pattern_rect_width,
+        patternStrokeWidth: params.pattern_stroke_width,
+        drawGroupOutline: params.draw_group_outline,
+        highlightRimWidth: params.highlight_rim_width,
+        groupOutlineWidth: params.group_outline_width,
+        boundingBoxWidth: params.bounding_box_width_mm,
+        boundingBoxHeight: params.bounding_box_height_mm,
+        lengthUnits: 'mm',
+        useSymmetric: params.use_symmetric,
+      });
+      if (fSvg?.svg) {
+        const clone = fSvg.svg.cloneNode(true);
+        clone.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+        item.querySelector('.frame-preview-svg').appendChild(clone);
+      }
+      scrollContainer.appendChild(item);
+    });
+    return;
+  }
+
+  if (!frames.length) {
+    scrollContainer.innerHTML = '<div class="empty-state" style="padding: 2rem; color: var(--text-muted);">Add frames to see preview</div>';
     return;
   }
 
@@ -2007,27 +2131,21 @@ function renderFramePreviews() {
       .forEach(m => seedsForSimulation.add(m.id));
   }
 
-  // Run CA simulation and get snapshots at each iteration
-  console.log(`[Frame Preview] Starting CA simulation with ${frames.length} rule frames, ${seedsForSimulation.size} seeds`);
-  frames.forEach((f, i) => {
-    console.log(`[Frame Preview] Frame ${i}: ${f.rules.length} rules`);
-    f.rules.forEach((r, j) => {
-      console.log(`  Rule ${j}: input.center=${r.input.center}, input.neighbors=${r.input.neighbors}, output.center=${r.output.center}, output.neighbors=${r.output.neighbors}`);
-    });
-  });
+  const forwardSnapshots = simulateCAIterations(context, frames, seedsForSimulation, 100);
 
-  const snapshots = simulateCAIterations(context, frames, seedsForSimulation, 100);
-  console.log(`[Frame Preview] Generated ${snapshots.length} iteration snapshots from ${frames.length} rule frames`);
+  // Build full sequence: forward + reversed (for loop mode)
+  let allSnapshots;
+  if (loopMode && forwardSnapshots.length > 2) {
+    const reverseSnapshots = forwardSnapshots.slice(1, -1).reverse();
+    allSnapshots = [...forwardSnapshots, ...reverseSnapshots];
+  } else {
+    allSnapshots = forwardSnapshots;
+  }
 
-  // Show frame count in the UI for testing
-  const countDisplay = document.createElement('div');
-  countDisplay.style.cssText = 'position:fixed;top:10px;right:10px;background:black;color:lime;padding:10px;z-index:9999;font-family:monospace;';
-  countDisplay.textContent = `Frames: ${snapshots.length}`;
-  document.body.appendChild(countDisplay);
-  setTimeout(() => countDisplay.remove(), 5000);
+  const fwdLen = forwardSnapshots.length;
 
   // Render each iteration as a frame preview
-  snapshots.forEach((stateMap, iterationIndex) => {
+  allSnapshots.forEach((stateMap, iterationIndex) => {
     const frameItem = document.createElement('div');
     frameItem.className = 'frame-preview-item';
 
@@ -2039,9 +2157,11 @@ function renderFramePreviews() {
 
     const frameSvg = renderFramePreviewSvg(activatedIds, params);
 
-    // Show which rule frame is being applied at this iteration
+    const isReverse = loopMode && iterationIndex >= fwdLen;
+    const displayIdx = isReverse ? (allSnapshots.length - iterationIndex) : iterationIndex;
+    const direction = isReverse ? '↩' : '';
     const ruleFrameIndex = iterationIndex > 0 ? ((iterationIndex - 1) % frames.length) + 1 : 0;
-    const label = iterationIndex === 0 ? 'Initial' : `Iter ${iterationIndex}`;
+    const label = iterationIndex === 0 ? 'Initial' : `${direction}Iter ${displayIdx}`;
     const ruleInfo = iterationIndex === 0 ? 'Seeds' : `Rule ${ruleFrameIndex}`;
 
     frameItem.innerHTML = `

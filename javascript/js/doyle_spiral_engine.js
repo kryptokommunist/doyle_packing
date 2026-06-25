@@ -458,10 +458,11 @@ function computeBreadthFirstSteps(context) {
 function patternAnimationRingCycle(context, opts = {}) {
   const assignments = new Map();
   const baseAngle = Number.isFinite(opts.baseAngle) ? opts.baseAngle : 0;
+  const phaseShift = Number.isFinite(opts.phaseOffset) ? opts.phaseOffset * 360 : 0;
   for (const ring of context.sortedRings) {
     const metas = context.ringMap.get(ring) || [];
     metas.forEach((meta, index) => {
-      const angle = ring * baseAngle + index * 8;
+      const angle = ring * baseAngle + index * 8 + phaseShift;
       assignments.set(meta.id, { primaryAngle: angle, angles: [angle] });
     });
   }
@@ -471,6 +472,7 @@ function patternAnimationRingCycle(context, opts = {}) {
 function patternAnimationRingPingPong(context, opts = {}) {
   const assignments = new Map();
   const baseAngle = Number.isFinite(opts.baseAngle) ? opts.baseAngle : 0;
+  const phaseShift = Number.isFinite(opts.phaseOffset) ? opts.phaseOffset * 360 : 0;
   for (const ring of context.sortedRings) {
     const metas = (context.ringMap.get(ring) || []).slice();
     const direction = ring % 2 === 0 ? 1 : -1;
@@ -478,7 +480,7 @@ function patternAnimationRingPingPong(context, opts = {}) {
       metas.reverse();
     }
     metas.forEach((meta, index) => {
-      const angle = ring * baseAngle + index * 10 + (direction < 0 ? 5 : 0);
+      const angle = ring * baseAngle + index * 10 + (direction < 0 ? 5 : 0) + phaseShift;
       assignments.set(meta.id, { primaryAngle: angle, angles: [angle] });
     });
   }
@@ -488,11 +490,12 @@ function patternAnimationRingPingPong(context, opts = {}) {
 function patternAnimationRadialBloom(context, opts = {}) {
   const assignments = new Map();
   const baseAngle = Number.isFinite(opts.baseAngle) ? opts.baseAngle : 0;
+  const phaseShift = Number.isFinite(opts.phaseOffset) ? opts.phaseOffset * 360 : 0;
   const maxRadius = context.metaList.reduce((acc, meta) => Math.max(acc, meta.radius), 0) || 1;
   context.metaList.forEach(meta => {
     const radiusRatio = meta.radius / maxRadius;
     const wobble = Math.sin(normaliseAngleRad(meta.theta) * 3) * 5;
-    const angle = meta.ringIndex * baseAngle + radiusRatio * 90 + wobble;
+    const angle = meta.ringIndex * baseAngle + radiusRatio * 90 + wobble + phaseShift;
     assignments.set(meta.id, { primaryAngle: angle, angles: [angle] });
   });
   return assignments;
@@ -501,12 +504,13 @@ function patternAnimationRadialBloom(context, opts = {}) {
 function patternAnimationCAWavefront(context, opts = {}) {
   const assignments = new Map();
   const baseAngle = Number.isFinite(opts.baseAngle) ? opts.baseAngle : 0;
+  const phaseShift = Number.isFinite(opts.phaseOffset) ? opts.phaseOffset * 360 : 0;
   const { steps } = computeBreadthFirstSteps(context);
   const stepGap = 12;
   context.metaList.forEach(meta => {
     const step = steps.get(meta.id) ?? 0;
     const jitter = (meta.neighbors.size % 3) * 2;
-    const angle = meta.ringIndex * baseAngle + step * stepGap + jitter;
+    const angle = meta.ringIndex * baseAngle + step * stepGap + jitter + phaseShift;
     assignments.set(meta.id, { primaryAngle: angle, angles: [angle] });
   });
   return assignments;
@@ -519,12 +523,13 @@ function patternAnimationCAWavefront(context, opts = {}) {
 function patternAnimationSpiralVortex(context, opts = {}) {
   const assignments = new Map();
   const baseAngle = Number.isFinite(opts.baseAngle) ? opts.baseAngle : 0;
+  const phaseShift = Number.isFinite(opts.phaseOffset) ? opts.phaseOffset * 360 : 0;
   context.metaList.forEach(meta => {
     // Convert theta to degrees and use it directly for angle
     const thetaDeg = normaliseAngle360(meta.theta * (180 / Math.PI));
     // Add ring-based offset for depth effect
     const ringOffset = meta.ringIndex * 3;
-    const angle = thetaDeg + ringOffset + meta.ringIndex * baseAngle;
+    const angle = thetaDeg + ringOffset + meta.ringIndex * baseAngle + phaseShift;
     assignments.set(meta.id, { primaryAngle: angle, angles: [angle] });
   });
   return assignments;
@@ -537,6 +542,7 @@ function patternAnimationSpiralVortex(context, opts = {}) {
 function patternAnimationDiamondPulse(context, opts = {}) {
   const assignments = new Map();
   const baseAngle = Number.isFinite(opts.baseAngle) ? opts.baseAngle : 0;
+  const phaseShift = Number.isFinite(opts.phaseOffset) ? opts.phaseOffset * 360 : 0;
   for (const ring of context.sortedRings) {
     const metas = context.ringMap.get(ring) || [];
     metas.forEach((meta, index) => {
@@ -544,7 +550,7 @@ function patternAnimationDiamondPulse(context, opts = {}) {
       const parity = (ring + index) % 2;
       const phase = parity * 45; // 45-degree offset between alternating cells
       const radialPulse = meta.radius * 15; // Pulse outward based on distance
-      const angle = phase + radialPulse + meta.ringIndex * baseAngle;
+      const angle = phase + radialPulse + meta.ringIndex * baseAngle + phaseShift;
       assignments.set(meta.id, { primaryAngle: angle, angles: [angle] });
     });
   }
@@ -558,6 +564,7 @@ function patternAnimationDiamondPulse(context, opts = {}) {
 function patternAnimationFibonacciSpiral(context, opts = {}) {
   const assignments = new Map();
   const baseAngle = Number.isFinite(opts.baseAngle) ? opts.baseAngle : 0;
+  const phaseShift = Number.isFinite(opts.phaseOffset) ? opts.phaseOffset * 360 : 0;
   const goldenAngle = 137.507764; // Golden angle in degrees
 
   // Sort by distance from center for consistent ordering
@@ -568,7 +575,7 @@ function patternAnimationFibonacciSpiral(context, opts = {}) {
     const fibAngle = (index * goldenAngle) % 360;
     // Add subtle ring-based variation
     const ringVar = Math.sin(meta.ringIndex * 0.5) * 10;
-    const angle = fibAngle + ringVar + meta.ringIndex * baseAngle;
+    const angle = fibAngle + ringVar + meta.ringIndex * baseAngle + phaseShift;
     assignments.set(meta.id, { primaryAngle: angle, angles: [angle] });
   });
   return assignments;
@@ -594,7 +601,7 @@ function normalisePatternAnimationId(value) {
   return PATTERN_ANIMATION_DEFINITIONS[key] ? key : DEFAULT_PATTERN_ANIMATION;
 }
 
-function applyPatternAnimationToGroups(arcGroups, { animationId, baseAngle } = {}) {
+function applyPatternAnimationToGroups(arcGroups, { animationId, baseAngle, loopMode = false, phaseOffset = 0 } = {}) {
   if (!arcGroups || typeof arcGroups.values !== 'function') {
     return new Map();
   }
@@ -603,28 +610,74 @@ function applyPatternAnimationToGroups(arcGroups, { animationId, baseAngle } = {
   const baseAngleValue = Number.isFinite(baseAngle) ? baseAngle : 0;
   const generator = PATTERN_ANIMATION_DEFINITIONS[resolvedId]?.generator
     || PATTERN_ANIMATION_DEFINITIONS[DEFAULT_PATTERN_ANIMATION].generator;
-  const rawAssignments = generator(context, {
-    baseAngle: baseAngleValue,
-  }) || new Map();
+
+  const rawFwd = generator(context, { baseAngle: baseAngleValue, phaseOffset }) || new Map();
+  // In loop mode, also compute the reverse-leg assignments at phase + 0.5
+  const rawRev = loopMode
+    ? generator(context, { baseAngle: baseAngleValue, phaseOffset: phaseOffset + 0.5 }) || new Map()
+    : null;
+
   const assignments = new Map();
   for (const meta of context.metaList) {
     const fallback = (meta.ringIndex ?? 0) * baseAngleValue;
-    const entry = rawAssignments.get(meta.id) || { primaryAngle: fallback, angles: [fallback] };
-    let angleList = Array.isArray(entry.angles) ? entry.angles.slice() : [];
-    if (!angleList.length && Number.isFinite(entry.primaryAngle)) {
-      angleList.push(entry.primaryAngle);
+    const entryFwd = rawFwd.get(meta.id) || { primaryAngle: fallback, angles: [fallback] };
+    let angleList = Array.isArray(entryFwd.angles) ? entryFwd.angles.slice() : [];
+    if (!angleList.length && Number.isFinite(entryFwd.primaryAngle)) {
+      angleList.push(entryFwd.primaryAngle);
     }
     if (!angleList.length) {
       angleList.push(fallback);
     }
-    const deduped = dedupeAngles(angleList, 3);
-    const primary = Number.isFinite(entry.primaryAngle) ? entry.primaryAngle : deduped[0];
+    // Merge the reverse-leg angle as a second line pattern
+    if (rawRev) {
+      const entryRev = rawRev.get(meta.id);
+      const revAngle = entryRev?.primaryAngle ?? entryRev?.angles?.[0];
+      if (Number.isFinite(revAngle)) {
+        angleList.push(revAngle);
+      }
+    }
+    const deduped = dedupeAngles(angleList, loopMode ? 2 : 3);
+    const primary = Number.isFinite(entryFwd.primaryAngle) ? entryFwd.primaryAngle : deduped[0];
     assignments.set(meta.id, {
       primaryAngle: Number.isFinite(primary) ? primary : fallback,
       angles: deduped.length ? deduped : [fallback],
     });
   }
   return assignments;
+}
+
+/**
+ * Generates a sequence of per-group angle assignment maps for animating a preset
+ * through a full forward + reverse (ping-pong) loop.
+ * Returns Array<Map<id, {primaryAngle, angles}>> with 2*numFrames-2 entries.
+ */
+function generatePresetAnimationFrames(arcGroups, { animationId, baseAngle } = {}, numFrames = 20) {
+  if (!arcGroups || typeof arcGroups.values !== 'function') return [];
+  const resolvedId = normalisePatternAnimationId(animationId);
+  const context = buildPatternAnimationContext(arcGroups);
+  const baseAngleValue = Number.isFinite(baseAngle) ? baseAngle : 0;
+  const generator = PATTERN_ANIMATION_DEFINITIONS[resolvedId]?.generator
+    || PATTERN_ANIMATION_DEFINITIONS[DEFAULT_PATTERN_ANIMATION].generator;
+
+  const frames = [];
+  // Forward pass: phaseOffset 0 → 1 (exclusive of 1 to avoid duplicate at wrap-around)
+  for (let i = 0; i < numFrames; i++) {
+    const phaseOffset = i / numFrames;
+    const raw = generator(context, { baseAngle: baseAngleValue, phaseOffset }) || new Map();
+    const frame = new Map();
+    for (const meta of context.metaList) {
+      const fallback = (meta.ringIndex ?? 0) * baseAngleValue;
+      const entry = raw.get(meta.id) || { primaryAngle: fallback, angles: [fallback] };
+      const primary = Number.isFinite(entry.primaryAngle) ? entry.primaryAngle : fallback;
+      frame.set(meta.id, { primaryAngle: primary, angles: entry.angles?.length ? entry.angles.slice(0, 1) : [primary] });
+    }
+    frames.push(frame);
+  }
+  // Reverse pass: phaseOffset back from (numFrames-1)/numFrames → 1/numFrames (skip first and last to avoid duplicates)
+  for (let i = numFrames - 2; i >= 1; i--) {
+    frames.push(frames[i]);
+  }
+  return frames;
 }
 
 function inwardNormal(direction, orientationSign) {
@@ -1858,6 +1911,9 @@ class DrawingContext {
     this.units = typeof units === 'string' ? units : '';
     this.scaleFactor = 1;
     this.hasDOM = typeof document !== 'undefined' && !!document.createElementNS;
+    this._layers = null;        // Array of <g> elements when layering is enabled (DOM mode)
+    this._virtualLayers = null; // Array of string arrays when layering is enabled (virtual mode)
+    this._activeLayerIdx = -1;  // -1 means no active layer (use mainGroup / _virtualMain)
     if (this.hasDOM) {
       this.svg = document.createElementNS(SVG_NS, 'svg');
       this.svg.setAttribute('xmlns', SVG_NS);
@@ -1875,6 +1931,41 @@ class DrawingContext {
       this._virtualDefs = [];
       this._virtualMain = [];
     }
+  }
+
+  enableLayers(count) {
+    const n = Math.max(1, Math.floor(count));
+    if (this.hasDOM) {
+      this._layers = [];
+      for (let i = 0; i < n; i++) {
+        const g = document.createElementNS(SVG_NS, 'g');
+        g.setAttribute('id', `layer_${i + 1}`);
+        g.setAttribute('inkscape:label', `Layer ${i + 1}`);
+        g.setAttribute('inkscape:groupmode', 'layer');
+        this._appendTarget.appendChild(g);
+        this._layers.push(g);
+      }
+    } else {
+      this._virtualLayers = Array.from({ length: n }, () => []);
+    }
+  }
+
+  setActiveLayer(idx) {
+    this._activeLayerIdx = idx;
+  }
+
+  get _appendTarget() {
+    if (this._layers && this._activeLayerIdx >= 0 && this._activeLayerIdx < this._layers.length) {
+      return this._layers[this._activeLayerIdx];
+    }
+    return this.mainGroup;
+  }
+
+  get _virtualAppendTarget() {
+    if (this._virtualLayers && this._activeLayerIdx >= 0 && this._activeLayerIdx < this._virtualLayers.length) {
+      return this._virtualLayers[this._activeLayerIdx];
+    }
+    return this._virtualMain;
   }
 
   /**
@@ -1966,7 +2057,7 @@ class DrawingContext {
     return `${-this.width / 2} ${-this.height / 2} ${this.width} ${this.height}`;
   }
 
-  _pushVirtual(tag, attributes, target = this._virtualMain) {
+  _pushVirtual(tag, attributes, target = this._virtualAppendTarget) {
     if (!target) {
       return;
     }
@@ -1999,7 +2090,7 @@ class DrawingContext {
     element.setAttribute('r', radius.toFixed(4));
     element.setAttribute('fill', color);
     element.setAttribute('fill-opacity', opacity.toString());
-    this.mainGroup.appendChild(element);
+    this._appendTarget.appendChild(element);
   }
 
   drawScaledArc(arc, { color = DEFAULT_OUTLINE_COLOR, width = 1.2 } = {}) {
@@ -2034,7 +2125,7 @@ class DrawingContext {
     path.setAttribute('stroke-width', width.toString());
     path.setAttribute('stroke-linecap', 'round');
     path.setAttribute('stroke-linejoin', 'round');
-    this.mainGroup.appendChild(path);
+    this._appendTarget.appendChild(path);
   }
 
   drawScaled(shape, options = {}) {
@@ -2104,7 +2195,7 @@ class DrawingContext {
     for (const [key, value] of Object.entries(attributes)) {
       path.setAttribute(key, value);
     }
-    this.mainGroup.appendChild(path);
+    this._appendTarget.appendChild(path);
   }
 
   drawGroupOutline(points, {
@@ -2211,7 +2302,7 @@ class DrawingContext {
         line.setAttribute('stroke', strokeColor);
         line.setAttribute('stroke-width', outlineStrokeWidthStr);
         line.setAttribute('stroke-linecap', 'round');
-        this.mainGroup.appendChild(line);
+        this._appendTarget.appendChild(line);
       }
     };
 
@@ -2284,7 +2375,7 @@ class DrawingContext {
                 for (const [key, value] of Object.entries(rectAttributes)) {
                   path.setAttribute(key, value);
                 }
-                this.mainGroup.appendChild(path);
+                this._appendTarget.appendChild(path);
               }
             }
           }
@@ -2310,7 +2401,7 @@ class DrawingContext {
                 line.setAttribute('stroke', lineColor);
                 line.setAttribute('stroke-width', patternStrokeStr);
                 line.setAttribute('stroke-linecap', 'round');
-                this.mainGroup.appendChild(line);
+                this._appendTarget.appendChild(line);
               }
             }
           }
@@ -2335,7 +2426,7 @@ class DrawingContext {
         path.setAttribute('fill', fill);
         path.setAttribute('fill-opacity', fillOpacity.toString());
         path.setAttribute('stroke', 'none');
-        this.mainGroup.appendChild(path);
+        this._appendTarget.appendChild(path);
       }
     }
 
@@ -2352,9 +2443,17 @@ class DrawingContext {
     const defsContent = this._virtualDefs && this._virtualDefs.length
       ? `<defs>${this._virtualDefs.join('')}</defs>`
       : '';
-    const mainContent = this._virtualMain && this._virtualMain.length
-      ? `<g>${this._virtualMain.join('')}</g>`
-      : '<g></g>';
+    let mainContent;
+    if (this._virtualLayers) {
+      const layerGroups = this._virtualLayers.map((items, i) =>
+        `<g id="layer_${i + 1}" inkscape:label="Layer ${i + 1}" inkscape:groupmode="layer">${items.join('')}</g>`
+      ).join('');
+      mainContent = `<g>${layerGroups}</g>`;
+    } else if (this._virtualMain && this._virtualMain.length) {
+      mainContent = `<g>${this._virtualMain.join('')}</g>`;
+    } else {
+      mainContent = '<g></g>';
+    }
     const widthAttr = this._formatLength(this.width);
     const heightAttr = this._formatLength(this.height);
     return `<svg xmlns="${SVG_NS}" viewBox="${viewBox}" width="${widthAttr}" height="${heightAttr}">${defsContent}${mainContent}</svg>`;
@@ -3328,6 +3427,8 @@ class DoyleSpiralEngine {
     fillPatternSpacing = 5.0,
     fillPatternAngle = 0.0,
     fillPatternAnimation = DEFAULT_PATTERN_ANIMATION,
+    fillPatternLoop = false,
+    arcGroupAngleOverrides = null, // Map<groupId, angles[]> — overrides preset animation per group
     redOutline = false,
     redOutlineMinRing = null,
     drawGroupOutline = true,
@@ -3338,6 +3439,8 @@ class DoyleSpiralEngine {
     groupOutlineWidth = 0.6,
     patternStrokeWidth = 0.5,
     useSymmetric = true,
+    svgLayers = false,
+    svgLayerCount = 30,
   } = {}) {
     this.generateOuterCircles();
     this.computeAllIntersections();
@@ -3402,6 +3505,7 @@ class DoyleSpiralEngine {
     const patternAssignments = applyPatternAnimationToGroups(this.arcGroups, {
       animationId: this.fillPatternAnimationId,
       baseAngle: fillPatternAngle,
+      loopMode: fillPatternLoop,
     });
 
     for (const group of this.arcGroups.values()) {
@@ -3414,6 +3518,19 @@ class DoyleSpiralEngine {
       } else {
         group.primaryPatternAngle = defaultAngle;
         group.patternAngles = [defaultAngle];
+      }
+    }
+
+    // Apply CA / external angle overrides after preset animation (overrides win)
+    // arcGroupAngleOverrides is keyed by group.name (stable across renders, e.g. "circle_2")
+    if (arcGroupAngleOverrides instanceof Map) {
+      for (const group of this.arcGroups.values()) {
+        const key = group.name;
+        if (arcGroupAngleOverrides.has(key)) {
+          const overrideAngles = arcGroupAngleOverrides.get(key);
+          group.patternAngles = overrideAngles;
+          group.primaryPatternAngle = overrideAngles.length > 0 ? overrideAngles[0] : null;
+        }
       }
     }
 
@@ -3430,12 +3547,25 @@ class DoyleSpiralEngine {
       .filter(group => group.ringIndex !== null && group.ringIndex !== undefined)
       .map(group => group.ringIndex);
     const maxIndex = ringIndices.length ? Math.max(...ringIndices) : null;
+    const minIndex = ringIndices.length ? Math.min(...ringIndices) : 0;
+
+    const numLayers = Math.max(1, Math.floor(svgLayerCount));
+    if (svgLayers) {
+      context.enableLayers(numLayers);
+    }
+
+    const getRingLayerIndex = (ringIdx) => {
+      if (!svgLayers || maxIndex === null || maxIndex <= minIndex) return -1;
+      const span = maxIndex - minIndex;
+      return Math.min(numLayers - 1, Math.floor((ringIdx - minIndex) / span * numLayers));
+    };
 
     if (debugGroups) {
       for (const [key, group] of this.arcGroups.entries()) {
         if (key.startsWith('outer_')) {
           continue;
         }
+        context.setActiveLayer(getRingLayerIndex(group.ringIndex ?? 0));
         group.toSVGFill(context, {
           debug: true,
           fillOpacity: 0.25,
@@ -3450,6 +3580,7 @@ class DoyleSpiralEngine {
         const ringIdx = group.ringIndex ?? 0;
         const angle = Number.isFinite(group.primaryPatternAngle)
           ? group.primaryPatternAngle : ringIdx * fillPatternAngle;
+        context.setActiveLayer(getRingLayerIndex(ringIdx));
         group.toSVGFill(context, {
           debug: false, patternFill: true, lineSettings: [spacingInternal, angle],
           drawOutline: drawGroupOutline, lineOffset: offsetInternal,
@@ -3460,7 +3591,20 @@ class DoyleSpiralEngine {
       }
     }
 
+    if (!addFillPattern && !debugGroups && drawGroupOutline) {
+      for (const [key, group] of this.arcGroups.entries()) {
+        if (key.startsWith('outer_')) continue;
+        const ringIdx = group.ringIndex ?? 0;
+        context.setActiveLayer(getRingLayerIndex(ringIdx));
+        group.toSVGFill(context, {
+          debug: false, patternFill: false, drawOutline: true,
+          outlineStrokeWidth,
+        });
+      }
+    }
+
     if (redOutline && maxIndex !== null) {
+      context.setActiveLayer(getRingLayerIndex(maxIndex));
       for (const [key, group] of this.arcGroups.entries()) {
         if (!key.startsWith('circle_')) {
           continue;
@@ -3486,6 +3630,7 @@ class DoyleSpiralEngine {
       for (const [key, group] of this.arcGroups.entries()) {
         if (!key.startsWith('circle_')) continue;
         if (!Number.isFinite(group.ringIndex) || group.ringIndex < redOutlineMinRing) continue;
+        context.setActiveLayer(getRingLayerIndex(group.ringIndex));
         const outline = group.getClosedOutline();
         if (!outline || outline.length < 2) continue;
         context.drawPolyline(outline, { color: '#ff0000', width: highlightStrokeWidth });
@@ -3507,6 +3652,8 @@ class DoyleSpiralEngine {
     fillPatternSpacing = 5.0,
     fillPatternAngle = 0.0,
     fillPatternAnimation = DEFAULT_PATTERN_ANIMATION,
+    fillPatternLoop = false,
+    arcGroupAngleOverrides = null,
     redOutline = false,
     redOutlineMinRing = null,
     drawGroupOutline = true,
@@ -3545,6 +3692,8 @@ class DoyleSpiralEngine {
         fillPatternSpacing,
         fillPatternAngle,
         fillPatternAnimation,
+        fillPatternLoop,
+        arcGroupAngleOverrides,
         redOutline,
         redOutlineMinRing,
         drawGroupOutline,
@@ -3672,6 +3821,7 @@ function normaliseParams(params = {}) {
     fill_pattern_type: fillPatternType,
     fill_pattern_rect_width: rectWidthMm,
     fill_pattern_animation: normalisePatternAnimationId(params.fill_pattern_animation),
+    fill_pattern_loop: Boolean(params.fill_pattern_loop ?? false),
     highlight_rim_width: highlightRimWidth,
     group_outline_width: groupOutlineWidth,
     pattern_stroke_width: patternStrokeWidth,
@@ -3723,6 +3873,7 @@ function renderSpiral(params = {}, overrideMode = null) {
     fillPatternType: opts.fill_pattern_type,
     fillPatternRectWidth: opts.fill_pattern_rect_width,
     fillPatternAnimation: opts.fill_pattern_animation,
+    fillPatternLoop: opts.fill_pattern_loop,
     highlightRimWidth: opts.highlight_rim_width,
     groupOutlineWidth: opts.group_outline_width,
     patternStrokeWidth: opts.pattern_stroke_width,
@@ -3757,4 +3908,5 @@ export {
   normaliseParams,
   buildPatternAnimationContext,
   buildContinuousPathsFromArcs,
+  generatePresetAnimationFrames,
 };
