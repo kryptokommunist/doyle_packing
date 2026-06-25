@@ -12,6 +12,7 @@ const statsBlock = document.getElementById('stats');
 const statArcGroups = document.getElementById('statArcGroups');
 const statPolygons = document.getElementById('statPolygons');
 const statMode = document.getElementById('statMode');
+const statAnimFrames = document.getElementById('statAnimFrames');
 const tRange = document.getElementById('inputT');
 const tValue = document.getElementById('tValue');
 const renderTimeoutInput = document.getElementById('renderTimeoutSeconds');
@@ -637,6 +638,15 @@ function updateStats(geometry) {
     const polygons = geometry.arcgroups.reduce((sum, group) => sum + (group.arc_count || 0), 0);
     statArcGroups.textContent = arcGroups;
     statPolygons.textContent = polygons;
+    if (statAnimFrames) {
+      const params = collectParams();
+      const spacing = params.fill_pattern_spacing;
+      const fwd = Number.isFinite(spacing) && spacing > 0
+        ? Math.max(4, Math.min(360, Math.round(180 / spacing)))
+        : 20;
+      const total = fwd * 2 - 2;
+      statAnimFrames.textContent = params.add_fill_pattern ? `${fwd} / ${total}` : '—';
+    }
     statsBlock.hidden = false;
   } else {
     statsBlock.hidden = true;
@@ -857,6 +867,16 @@ form.addEventListener('input', event => {
   }
   if (event.target === fillToggle) {
     toggleFillSettings();
+  }
+  if (event.target === fillPatternLoopCheckbox && fillPatternLoopCheckbox.checked) {
+    const spacingInput = document.getElementById('fillSpacing');
+    const angleInput = document.getElementById('fillAngle');
+    if (spacingInput && angleInput) {
+      const spacing = parseFloat(spacingInput.value);
+      if (Number.isFinite(spacing) && spacing > 0) {
+        angleInput.value = spacing;
+      }
+    }
   }
   if (event.target === fillPatternTypeSelect) {
     updatePatternTypeVisibility();
@@ -1240,9 +1260,14 @@ function runCellularAnimation(context, frames, seedIds, loopMode = false) {
                 newAngles = [frame.angle1];
                 if (frame.angle2 != null) newAngles.push(frame.angle2);
               } else {
-                // Auto-compute: angle-split for loop mode (fwd = half, rev = full)
+                // Auto-compute: angle-split for loop mode using fwd=norm/2, bwd=(180-norm)/2+90
                 const a = (iteration * 22.5 + angles.length * 45) % 180;
-                newAngles = loopMode ? [a / 2, a] : [a];
+                if (loopMode) {
+                  const norm = ((a % 180) + 180) % 180;
+                  newAngles = [norm / 2, (180 - norm) / 2 + 90];
+                } else {
+                  newAngles = [a];
+                }
               }
               for (const na of newAngles) {
                 if (angles.length < 4 && !angles.some(a => Math.abs(a - na) < 10)) {
@@ -1266,7 +1291,12 @@ function runCellularAnimation(context, frames, seedIds, loopMode = false) {
                   if (frame.angle2 != null) newAngles.push(frame.angle2);
                 } else {
                   const a = (iteration * 15 + nIdx * 30) % 180;
-                  newAngles = loopMode ? [a / 2, a] : [a];
+                  if (loopMode) {
+                    const norm = ((a % 180) + 180) % 180;
+                    newAngles = [norm / 2, (180 - norm) / 2 + 90];
+                  } else {
+                    newAngles = [a];
+                  }
                 }
                 for (const na of newAngles) {
                   if (nAngles.length < 4 && !nAngles.some(a => Math.abs(a - na) < 10)) {
@@ -1366,8 +1396,9 @@ function loadAnimation() {
           revAngle = frame.angle2 != null ? frame.angle2 : frame.angle1;
         } else {
           const a = (peakIdx * 22.5) % 180;
-          fwdAngle = a / 2;
-          revAngle = a;
+          const norm = ((a % 180) + 180) % 180;
+          fwdAngle = norm / 2;
+          revAngle = (180 - norm) / 2 + 90;
         }
         const angles = Math.abs(fwdAngle - revAngle) < 5 ? [fwdAngle] : [fwdAngle, revAngle];
         activations.set(meta.id, angles);
@@ -2050,17 +2081,21 @@ function renderFramePreviews() {
 
   // --- Preset loop preview mode: no CA frames, show phase-sweep animation ---
   if (!frames.length && params.add_fill_pattern) {
+    const rawSpacing = params.fill_pattern_spacing;
+    const numFrames = Number.isFinite(rawSpacing) && rawSpacing > 0
+      ? Math.max(4, Math.min(360, Math.round(180 / rawSpacing)))
+      : 20;
     const presetFrames = generatePresetAnimationFrames(
       result.engine.arcGroups,
       { animationId: params.fill_pattern_animation, baseAngle: params.fill_pattern_angle },
-      20
+      numFrames
     );
     if (!presetFrames.length) {
       scrollContainer.innerHTML = '<div class="empty-state" style="padding: 2rem; color: var(--text-muted);">Add frames or enable fill pattern to see preview</div>';
       return;
     }
     presetFrames.forEach((frameMap, idx) => {
-      const totalFwd = 20;
+      const totalFwd = numFrames;
       const isReverse = idx >= totalFwd;
       const label = isReverse ? `Rev ${idx - totalFwd + 2}` : `Fwd ${idx + 1}`;
       const item = document.createElement('div');
@@ -2070,13 +2105,11 @@ function renderFramePreviews() {
         <div class="frame-preview-svg"></div>
         <div class="frame-preview-info">Preset: ${params.fill_pattern_animation}</div>
       `;
-      // Render this preset frame by applying assignments to arc groups then rendering
+      // Build name-keyed overrides so they survive the internal applyPatternAnimationToGroups call.
+      const frameOverrides = new Map();
       for (const group of result.engine.arcGroups.values()) {
         const assignment = frameMap.get(group.id);
-        if (assignment) {
-          group.patternAngles = assignment.angles.slice(0, 2);
-          group.primaryPatternAngle = assignment.primaryAngle;
-        }
+        if (assignment) frameOverrides.set(group.name, assignment.angles.slice(0, 2));
       }
       const fSvg = result.engine.render('arram_boyle', {
         size: params.size,
@@ -2094,6 +2127,7 @@ function renderFramePreviews() {
         boundingBoxHeight: params.bounding_box_height_mm,
         lengthUnits: 'mm',
         useSymmetric: params.use_symmetric,
+        arcGroupAngleOverrides: frameOverrides,
       });
       if (fSvg?.svg) {
         const clone = fSvg.svg.cloneNode(true);
