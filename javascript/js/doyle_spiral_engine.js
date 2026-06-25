@@ -458,7 +458,7 @@ function computeBreadthFirstSteps(context) {
 function patternAnimationRingCycle(context, opts = {}) {
   const assignments = new Map();
   const baseAngle = Number.isFinite(opts.baseAngle) ? opts.baseAngle : 0;
-  const phaseShift = Number.isFinite(opts.phaseOffset) ? opts.phaseOffset * 360 : 0;
+  const phaseShift = Number.isFinite(opts.phaseOffset) ? opts.phaseOffset * 180 : 0;
   for (const ring of context.sortedRings) {
     const metas = context.ringMap.get(ring) || [];
     metas.forEach((meta, index) => {
@@ -472,7 +472,7 @@ function patternAnimationRingCycle(context, opts = {}) {
 function patternAnimationRingPingPong(context, opts = {}) {
   const assignments = new Map();
   const baseAngle = Number.isFinite(opts.baseAngle) ? opts.baseAngle : 0;
-  const phaseShift = Number.isFinite(opts.phaseOffset) ? opts.phaseOffset * 360 : 0;
+  const phaseShift = Number.isFinite(opts.phaseOffset) ? opts.phaseOffset * 180 : 0;
   for (const ring of context.sortedRings) {
     const metas = (context.ringMap.get(ring) || []).slice();
     const direction = ring % 2 === 0 ? 1 : -1;
@@ -490,7 +490,7 @@ function patternAnimationRingPingPong(context, opts = {}) {
 function patternAnimationRadialBloom(context, opts = {}) {
   const assignments = new Map();
   const baseAngle = Number.isFinite(opts.baseAngle) ? opts.baseAngle : 0;
-  const phaseShift = Number.isFinite(opts.phaseOffset) ? opts.phaseOffset * 360 : 0;
+  const phaseShift = Number.isFinite(opts.phaseOffset) ? opts.phaseOffset * 180 : 0;
   const maxRadius = context.metaList.reduce((acc, meta) => Math.max(acc, meta.radius), 0) || 1;
   context.metaList.forEach(meta => {
     const radiusRatio = meta.radius / maxRadius;
@@ -504,7 +504,7 @@ function patternAnimationRadialBloom(context, opts = {}) {
 function patternAnimationCAWavefront(context, opts = {}) {
   const assignments = new Map();
   const baseAngle = Number.isFinite(opts.baseAngle) ? opts.baseAngle : 0;
-  const phaseShift = Number.isFinite(opts.phaseOffset) ? opts.phaseOffset * 360 : 0;
+  const phaseShift = Number.isFinite(opts.phaseOffset) ? opts.phaseOffset * 180 : 0;
   const { steps } = computeBreadthFirstSteps(context);
   const stepGap = 12;
   context.metaList.forEach(meta => {
@@ -523,7 +523,7 @@ function patternAnimationCAWavefront(context, opts = {}) {
 function patternAnimationSpiralVortex(context, opts = {}) {
   const assignments = new Map();
   const baseAngle = Number.isFinite(opts.baseAngle) ? opts.baseAngle : 0;
-  const phaseShift = Number.isFinite(opts.phaseOffset) ? opts.phaseOffset * 360 : 0;
+  const phaseShift = Number.isFinite(opts.phaseOffset) ? opts.phaseOffset * 180 : 0;
   context.metaList.forEach(meta => {
     // Convert theta to degrees and use it directly for angle
     const thetaDeg = normaliseAngle360(meta.theta * (180 / Math.PI));
@@ -542,7 +542,7 @@ function patternAnimationSpiralVortex(context, opts = {}) {
 function patternAnimationDiamondPulse(context, opts = {}) {
   const assignments = new Map();
   const baseAngle = Number.isFinite(opts.baseAngle) ? opts.baseAngle : 0;
-  const phaseShift = Number.isFinite(opts.phaseOffset) ? opts.phaseOffset * 360 : 0;
+  const phaseShift = Number.isFinite(opts.phaseOffset) ? opts.phaseOffset * 180 : 0;
   for (const ring of context.sortedRings) {
     const metas = context.ringMap.get(ring) || [];
     metas.forEach((meta, index) => {
@@ -564,7 +564,7 @@ function patternAnimationDiamondPulse(context, opts = {}) {
 function patternAnimationFibonacciSpiral(context, opts = {}) {
   const assignments = new Map();
   const baseAngle = Number.isFinite(opts.baseAngle) ? opts.baseAngle : 0;
-  const phaseShift = Number.isFinite(opts.phaseOffset) ? opts.phaseOffset * 360 : 0;
+  const phaseShift = Number.isFinite(opts.phaseOffset) ? opts.phaseOffset * 180 : 0;
   const goldenAngle = 137.507764; // Golden angle in degrees
 
   // Sort by distance from center for consistent ordering
@@ -612,7 +612,7 @@ function applyPatternAnimationToGroups(arcGroups, { animationId, baseAngle, loop
     || PATTERN_ANIMATION_DEFINITIONS[DEFAULT_PATTERN_ANIMATION].generator;
 
   const rawFwd = generator(context, { baseAngle: baseAngleValue, phaseOffset }) || new Map();
-  // In loop mode, also compute the reverse-leg assignments at phase + 0.5
+  // In loop mode, compute the reverse-leg at phase + 0.5 (= +90° in 0-180° space)
   const rawRev = loopMode
     ? generator(context, { baseAngle: baseAngleValue, phaseOffset: phaseOffset + 0.5 }) || new Map()
     : null;
@@ -633,7 +633,13 @@ function applyPatternAnimationToGroups(arcGroups, { animationId, baseAngle, loop
       const entryRev = rawRev.get(meta.id);
       const revAngle = entryRev?.primaryAngle ?? entryRev?.angles?.[0];
       if (Number.isFinite(revAngle)) {
-        angleList.push(revAngle);
+        // Normalize to 0-180° (line periodicity) before comparing to avoid visual duplicates
+        const norm180 = a => ((a % 180) + 180) % 180;
+        const fwdNorm = norm180(angleList[0]);
+        const revNorm = norm180(revAngle);
+        if (Math.abs(fwdNorm - revNorm) > 5) {
+          angleList.push(revAngle);
+        }
       }
     }
     const deduped = dedupeAngles(angleList, loopMode ? 2 : 3);

@@ -2112,6 +2112,9 @@ function renderFramePreviews() {
 
   const context = buildPatternAnimationContext(result.engine.arcGroups);
 
+  // Map context numeric IDs → stable group.name for renderFramePreviewSvg lookup
+  const idToGroupName = new Map(context.metaList.map(m => [m.id, m.group.name]));
+
   // Build a set of valid IDs from this context
   const validIds = new Set(context.metaList.map(m => m.id));
 
@@ -2153,10 +2156,13 @@ function renderFramePreviews() {
     const frameItem = document.createElement('div');
     frameItem.className = 'frame-preview-item';
 
-    // Convert Map to Set of activated IDs
+    // Convert Map to Set of activated group names (for renderFramePreviewSvg key lookup)
     const activatedIds = new Set();
     for (const [id, isOn] of stateMap) {
-      if (isOn) activatedIds.add(id);
+      if (isOn) {
+        const name = idToGroupName.get(id);
+        if (name) activatedIds.add(name);
+      }
     }
 
     const frameSvg = renderFramePreviewSvg(activatedIds, params);
