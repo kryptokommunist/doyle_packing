@@ -3309,17 +3309,11 @@ class DoyleSpiralEngine {
         }
         this.arcGroups.get(key).addArc(arc);
       }
-      if (arcsForCircle.length && (redOutline || (!addFillPattern && drawGroupOutline))) {
+      if (arcsForCircle.length && !addFillPattern && drawGroupOutline) {
         const paths = buildContinuousPathsFromArcs(arcsForCircle);
-        const shouldDrawBaseOutline = !addFillPattern && drawGroupOutline && outlineStrokeWidth > 0;
-        if (shouldDrawBaseOutline) {
+        if (outlineStrokeWidth > 0) {
           for (const path of paths) {
             context.drawPolyline(path, { color: DEFAULT_OUTLINE_COLOR, width: outlineStrokeWidth });
-          }
-        }
-        if (redOutline && highlightStrokeWidth > 0) {
-          for (const path of paths) {
-            context.drawPolyline(path, { color: '#ff0000', width: highlightStrokeWidth });
           }
         }
       }
