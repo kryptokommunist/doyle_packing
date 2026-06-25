@@ -603,27 +603,22 @@ function patternAnimationSpiralArmSweep(context, opts = {}) {
 }
 
 /**
- * Zigzag snake: n/2 parallel snakes (n = p = groups per full ring) that all advance
- * in lockstep, one ring per frame step.
- *
- * Step 0  – activate every 2nd group on the first full ring (n/2 seeds simultaneously).
- * Step 1  – all snakes advance to their top-RIGHT outer neighbour.
- * Step 2  – all snakes advance to their top-LEFT outer neighbour.
- * Steps 3… – alternate right/left until the outermost ring is reached.
- * Return  – one step per ring back inward, activating the skipped (odd-index) groups
- *            that were not seeds, working from outermost down to the seed ring.
- *
- * phaseOffset sweeps the active frame across all steps.
+ * Zigzag sweep: one ring is active per frame step.
+ * On each ring, every 2nd group is lit; the offset shifts by 1 each ring so
+ * even rings light indices 0,2,4… and odd rings light indices 1,3,5…
+ * Outward pass covers the first full ring → outermost ring.
+ * Return pass covers the same rings back inward but with the opposite offset,
+ * lighting the groups that were skipped on the way up.
+ * All groups outside the active ring are OFF.
  */
 function patternAnimationZigzagSnake(context, opts = {}) {
   const assignments = new Map();
   const baseAngle = Number.isFinite(opts.baseAngle) ? opts.baseAngle : 0;
-  const phaseShift = Number.isFinite(opts.phaseOffset) ? opts.phaseOffset * 180 : 0;
 
   const { sortedRings, ringMap } = context;
   if (!sortedRings.length) return assignments;
 
-  // Derive n = p: the most-common ring size across all rings.
+  // First ring with the modal (= p) group count — skip smaller inner rings.
   const sizeCounts = new Map();
   for (const ri of sortedRings) {
     const cnt = (ringMap.get(ri) || []).length;
@@ -633,100 +628,34 @@ function patternAnimationZigzagSnake(context, opts = {}) {
   for (const [cnt, freq] of sizeCounts) {
     if (freq > bestFreq || (freq === bestFreq && cnt > n)) { bestFreq = freq; n = cnt; }
   }
+  const seedRingPos = sortedRings.findIndex(ri => (ringMap.get(ri) || []).length === n);
+  const workingRings = sortedRings.slice(seedRingPos < 0 ? 0 : seedRingPos);
 
-  // First ring that has exactly n groups.
-  const seedRingIndex = sortedRings.find(ri => (ringMap.get(ri) || []).length === n) ?? sortedRings[0];
-  const seedRingPos = sortedRings.indexOf(seedRingIndex);
-
-  // Seed layer: every 2nd group sorted by theta (indices 0, 2, 4 …).
-  const seedMetas = (ringMap.get(seedRingIndex) || []).slice().sort((a, b) => a.theta - b.theta);
-  const seeds = seedMetas.filter((_, i) => i % 2 === 0);
-  // Skipped seeds (odd indices) – used for the return pass.
-  const skipped = seedMetas.filter((_, i) => i % 2 !== 0);
-
-  // Build frame-steps: each step is an array of groups activated simultaneously.
-  // Steps are indexed 0 … totalSteps-1.
-  const frameSteps = [];           // Array<Meta[]>
-  const visitedIds = new Set();
-
-  // Step 0: all seeds at once.
-  frameSteps.push(seeds.slice());
-  seeds.forEach(m => visitedIds.add(m.id));
-
-  // Outward pass: alternate right (CW) / left (CCW) with each ring step.
-  // "current layer" = the n/2 groups activated in the previous step.
-  let currentLayer = seeds.slice();
-  let pickRight = true;  // step 1 → right, step 2 → left, …
-
-  for (let ri = seedRingPos + 1; ri < sortedRings.length; ri++) {
-    const outerRing = sortedRings[ri];
-    const outerMetas = ringMap.get(outerRing) || [];
-    if (!outerMetas.length) break;
-
-    const nextLayer = [];
-    for (const cur of currentLayer) {
-      // Outer-ring neighbours of this group.
-      const outerNeighbors = [...cur.neighbors].filter(n => n.ringIndex === outerRing);
-
-      let chosen;
-      if (!outerNeighbors.length) {
-        // Fallback: closest in outer ring by angular distance.
-        const closest = outerMetas
-          .slice()
-          .sort((a, b) => angularDistanceRad(cur.theta, a.theta) - angularDistanceRad(cur.theta, b.theta));
-        chosen = closest[0] ?? null;
-      } else if (outerNeighbors.length === 1) {
-        chosen = outerNeighbors[0];
-      } else {
-        // Sort by theta; right = higher theta (CW), left = lower theta (CCW).
-        outerNeighbors.sort((a, b) => a.theta - b.theta);
-        chosen = pickRight
-          ? outerNeighbors[outerNeighbors.length - 1]
-          : outerNeighbors[0];
-      }
-
-      if (chosen && !visitedIds.has(chosen.id)) {
-        visitedIds.add(chosen.id);
-        nextLayer.push(chosen);
-      }
-    }
-
-    if (nextLayer.length) {
-      frameSteps.push(nextLayer);
-      currentLayer = nextLayer;
-    }
-    pickRight = !pickRight;
+  // Build frame steps: outward pass then inward return pass.
+  // Each step: { ringIndex, offset } — light every 2nd group starting at offset.
+  const frameSteps = [];
+  for (let i = 0; i < workingRings.length; i++) {
+    frameSteps.push({ ringIndex: workingRings[i], offset: i % 2 });
+  }
+  // Return pass: same rings in reverse, opposite offset, skipping the outermost (already done).
+  for (let i = workingRings.length - 2; i >= 0; i--) {
+    frameSteps.push({ ringIndex: workingRings[i], offset: (i + 1) % 2 });
   }
 
-  // Return pass: work back from outermost ring to seed ring, one step per ring,
-  // activating the skipped groups ring by ring (those not yet visited).
-  for (let ri = sortedRings.length - 1; ri >= seedRingPos; ri--) {
-    const metas = (ringMap.get(sortedRings[ri]) || []).slice().sort((a, b) => a.theta - b.theta);
-    const unvisited = metas.filter(m => !visitedIds.has(m.id));
-    if (unvisited.length) {
-      unvisited.forEach(m => visitedIds.add(m.id));
-      frameSteps.push(unvisited);
-    }
-  }
-
-  // Assign each group a step index; phaseOffset selects the active step.
-  const stepOf = new Map();
-  frameSteps.forEach((layer, stepIdx) => {
-    layer.forEach(meta => stepOf.set(meta.id, stepIdx));
-  });
-
-  const totalSteps = frameSteps.length || 1;
-  // phaseOffset 0→1 selects which step is the active "wave front".
+  const totalSteps = frameSteps.length;
   const activeStep = Math.min(Math.floor(opts.phaseOffset * totalSteps), totalSteps - 1);
+  const { ringIndex: activeRing, offset: activeOffset } = frameSteps[activeStep];
 
+  const activeMetas = (ringMap.get(activeRing) || []).slice().sort((a, b) => a.theta - b.theta);
+  const activeIds = new Set(
+    activeMetas.filter((_, i) => i % 2 === activeOffset).map(m => m.id)
+  );
+
+  const angle = activeRing * 12 + activeStep * baseAngle;
   context.metaList.forEach(meta => {
-    const step = stepOf.get(meta.id) ?? -1;
-    if (step === activeStep) {
-      // This group is in the active wave front — render with a hatch angle.
-      const angle = step * 12 + meta.ringIndex * baseAngle + phaseShift;
+    if (activeIds.has(meta.id)) {
       assignments.set(meta.id, { primaryAngle: angle, angles: [angle] });
     } else {
-      // All other groups are OFF (deactivated).
       assignments.set(meta.id, { primaryAngle: 0, angles: [] });
     }
   });
