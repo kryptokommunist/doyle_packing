@@ -780,7 +780,10 @@ function applyPatternAnimationToGroups(arcGroups, { animationId, baseAngle, loop
       const bwdAngle = (180 - norm) / 2 + 90;
       angleList = Math.abs(fwdAngle - bwdAngle) > 5 ? [fwdAngle, bwdAngle] : [fwdAngle];
     } else {
-      angleList = Array.isArray(entryFwd.angles) && entryFwd.angles.length ? entryFwd.angles.slice() : [primary];
+      // Preserve empty arrays (cell OFF) — do not substitute a fallback angle.
+      angleList = Array.isArray(entryFwd.angles)
+        ? (entryFwd.angles.length ? entryFwd.angles.slice() : [])
+        : [primary];
     }
     assignments.set(meta.id, {
       primaryAngle: primary,
@@ -813,7 +816,8 @@ function generatePresetAnimationFrames(arcGroups, { animationId, baseAngle } = {
       const fallback = (meta.ringIndex ?? 0) * baseAngleValue;
       const entry = raw.get(meta.id) || { primaryAngle: fallback, angles: [fallback] };
       const primary = Number.isFinite(entry.primaryAngle) ? entry.primaryAngle : fallback;
-      frame.set(meta.id, { primaryAngle: primary, angles: entry.angles?.length ? entry.angles.slice(0, 1) : [primary] });
+      // Preserve empty arrays (cell OFF) — do not substitute a fallback angle.
+      frame.set(meta.id, { primaryAngle: primary, angles: Array.isArray(entry.angles) ? entry.angles.slice(0, 1) : [primary] });
     }
     frames.push(frame);
   }
