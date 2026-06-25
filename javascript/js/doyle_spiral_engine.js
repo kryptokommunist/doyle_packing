@@ -603,10 +603,11 @@ function patternAnimationSpiralArmSweep(context, opts = {}) {
 }
 
 /**
- * Zigzag snake: starts at every 2nd group in the innermost ring, then alternately
- * expands top-right / top-left to the next outer ring, snaking outward to the rim
- * and then back inward through unvisited groups — each group is visited exactly once.
- * phaseOffset animates the active "band" sweeping along the snake path.
+ * Zigzag snake: runs n/2 parallel snakes where n = p (the number of arc groups per
+ * full ring). Starts from every 2nd group on the first full-sized ring, each snake
+ * traces outward ring by ring with alternating right/left turns, reaches the rim,
+ * then the remaining unvisited groups are filled back inward.
+ * phaseOffset sweeps the active band along the combined snake path.
  */
 function patternAnimationZigzagSnake(context, opts = {}) {
   const assignments = new Map();
@@ -616,38 +617,52 @@ function patternAnimationZigzagSnake(context, opts = {}) {
   const { sortedRings, ringMap } = context;
   if (!sortedRings.length) return assignments;
 
-  // Build the visit order: snake path through all groups
+  // Derive n = p: the most common ring size (full rings all have exactly p groups).
+  const sizeCounts = new Map();
+  for (const ri of sortedRings) {
+    const cnt = (ringMap.get(ri) || []).length;
+    sizeCounts.set(cnt, (sizeCounts.get(cnt) || 0) + 1);
+  }
+  let n = 2;
+  let bestFreq = 0;
+  for (const [cnt, freq] of sizeCounts) {
+    if (freq > bestFreq || (freq === bestFreq && cnt > n)) {
+      bestFreq = freq;
+      n = cnt;
+    }
+  }
+
+  // Find the first ring with exactly n groups — that is our seed ring.
+  const seedRingIndex = sortedRings.find(ri => (ringMap.get(ri) || []).length === n) ?? sortedRings[0];
+  const seedRingPos = sortedRings.indexOf(seedRingIndex);
+
+  // Build the visit order: n/2 parallel snakes, each starting at every 2nd group.
   const visitOrder = [];
   const visitedIds = new Set();
 
-  // Step 1: innermost ring — every 2nd group (by theta-sorted index)
-  const innerMetas = (ringMap.get(sortedRings[0]) || []).slice().sort((a, b) => a.theta - b.theta);
-  const seeds = innerMetas.filter((_, i) => i % 2 === 0);
+  const seedMetas = (ringMap.get(seedRingIndex) || []).slice().sort((a, b) => a.theta - b.theta);
+  const seeds = seedMetas.filter((_, i) => i % 2 === 0);
 
-  // For each seed, build an outward chain that alternates cw/ccw expansion per ring
-  // then collect remaining unvisited groups after the outward pass
   for (let s = 0; s < seeds.length; s++) {
     let current = seeds[s];
     if (visitedIds.has(current.id)) continue;
     visitedIds.add(current.id);
     visitOrder.push(current);
 
-    // Outward pass: ring by ring, pick the outer neighbor that alternates direction
-    // Even seed index → start clockwise (right), odd seed → start counter-clockwise (left)
+    // Outward pass from seed ring to outermost ring.
+    // Even seed → start CW (right), odd seed → start CCW (left).
     let cwBias = s % 2 === 0;
 
-    for (let ri = 1; ri < sortedRings.length; ri++) {
+    for (let ri = seedRingPos + 1; ri < sortedRings.length; ri++) {
       const outerRing = sortedRings[ri];
       const outerMetas = ringMap.get(outerRing) || [];
       if (!outerMetas.length) break;
 
-      // Find outer-ring neighbors of current that are in this ring, unvisited
       const outerNeighbors = [...current.neighbors].filter(
         n => n.ringIndex === outerRing && !visitedIds.has(n.id)
       );
 
       if (!outerNeighbors.length) {
-        // No direct neighbor — pick closest unvisited in this ring by angle
         const closest = outerMetas
           .filter(m => !visitedIds.has(m.id))
           .sort((a, b) => angularDistanceRad(current.theta, a.theta) - angularDistanceRad(current.theta, b.theta));
@@ -656,33 +671,28 @@ function patternAnimationZigzagSnake(context, opts = {}) {
       } else if (outerNeighbors.length === 1) {
         current = outerNeighbors[0];
       } else {
-        // Sort by theta relative to current and pick cw or ccw
         outerNeighbors.sort((a, b) => a.theta - b.theta);
-        // cw bias = pick the one with larger theta (rightward / clockwise)
         current = cwBias ? outerNeighbors[outerNeighbors.length - 1] : outerNeighbors[0];
       }
 
       visitedIds.add(current.id);
       visitOrder.push(current);
-      // Alternate direction on every ring step
       cwBias = !cwBias;
     }
   }
 
-  // Step 2: sweep back inward through all unvisited groups, outermost ring first
-  const remaining = [];
+  // Sweep back: fill remaining unvisited groups from outermost inward.
   for (let ri = sortedRings.length - 1; ri >= 0; ri--) {
     const metas = (ringMap.get(sortedRings[ri]) || []).slice().sort((a, b) => a.theta - b.theta);
     for (const m of metas) {
       if (!visitedIds.has(m.id)) {
         visitedIds.add(m.id);
-        remaining.push(m);
+        visitOrder.push(m);
       }
     }
   }
-  visitOrder.push(...remaining);
 
-  // Assign step indices along the visit order
+  // Assign a hatch angle to each group based on its position in the visit order.
   const total = visitOrder.length || 1;
   const stepGap = 15;
   visitOrder.forEach((meta, i) => {
