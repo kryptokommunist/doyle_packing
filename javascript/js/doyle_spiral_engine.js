@@ -612,41 +612,24 @@ function applyPatternAnimationToGroups(arcGroups, { animationId, baseAngle, loop
     || PATTERN_ANIMATION_DEFINITIONS[DEFAULT_PATTERN_ANIMATION].generator;
 
   const rawFwd = generator(context, { baseAngle: baseAngleValue, phaseOffset }) || new Map();
-  // In loop mode, compute the reverse-leg at phase + 0.5 (= +90° in 0-180° space)
-  const rawRev = loopMode
-    ? generator(context, { baseAngle: baseAngleValue, phaseOffset: phaseOffset + 0.5 }) || new Map()
-    : null;
 
   const assignments = new Map();
   for (const meta of context.metaList) {
     const fallback = (meta.ringIndex ?? 0) * baseAngleValue;
     const entryFwd = rawFwd.get(meta.id) || { primaryAngle: fallback, angles: [fallback] };
-    let angleList = Array.isArray(entryFwd.angles) ? entryFwd.angles.slice() : [];
-    if (!angleList.length && Number.isFinite(entryFwd.primaryAngle)) {
-      angleList.push(entryFwd.primaryAngle);
+    const primary = Number.isFinite(entryFwd.primaryAngle) ? entryFwd.primaryAngle : fallback;
+    let angleList;
+    if (loopMode) {
+      const norm = ((primary % 180) + 180) % 180;
+      const fwdAngle = norm / 2;
+      const bwdAngle = (180 - norm) / 2 + 90;
+      angleList = Math.abs(fwdAngle - bwdAngle) > 5 ? [fwdAngle, bwdAngle] : [fwdAngle];
+    } else {
+      angleList = Array.isArray(entryFwd.angles) && entryFwd.angles.length ? entryFwd.angles.slice() : [primary];
     }
-    if (!angleList.length) {
-      angleList.push(fallback);
-    }
-    // Merge the reverse-leg angle as a second line pattern
-    if (rawRev) {
-      const entryRev = rawRev.get(meta.id);
-      const revAngle = entryRev?.primaryAngle ?? entryRev?.angles?.[0];
-      if (Number.isFinite(revAngle)) {
-        // Normalize to 0-180° (line periodicity) before comparing to avoid visual duplicates
-        const norm180 = a => ((a % 180) + 180) % 180;
-        const fwdNorm = norm180(angleList[0]);
-        const revNorm = norm180(revAngle);
-        if (Math.abs(fwdNorm - revNorm) > 5) {
-          angleList.push(revAngle);
-        }
-      }
-    }
-    const deduped = dedupeAngles(angleList, loopMode ? 2 : 3);
-    const primary = Number.isFinite(entryFwd.primaryAngle) ? entryFwd.primaryAngle : deduped[0];
     assignments.set(meta.id, {
-      primaryAngle: Number.isFinite(primary) ? primary : fallback,
-      angles: deduped.length ? deduped : [fallback],
+      primaryAngle: primary,
+      angles: angleList,
     });
   }
   return assignments;
@@ -1942,6 +1925,7 @@ class DrawingContext {
   enableLayers(count) {
     const n = Math.max(1, Math.floor(count));
     if (this.hasDOM) {
+      this.svg.setAttribute('xmlns:inkscape', 'http://www.inkscape.org/namespaces/inkscape');
       this._layers = [];
       for (let i = 0; i < n; i++) {
         const g = document.createElementNS(SVG_NS, 'g');
@@ -2462,7 +2446,8 @@ class DrawingContext {
     }
     const widthAttr = this._formatLength(this.width);
     const heightAttr = this._formatLength(this.height);
-    return `<svg xmlns="${SVG_NS}" viewBox="${viewBox}" width="${widthAttr}" height="${heightAttr}">${defsContent}${mainContent}</svg>`;
+    const inkscapeNs = this._virtualLayers ? ' xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"' : '';
+    return `<svg xmlns="${SVG_NS}"${inkscapeNs} viewBox="${viewBox}" width="${widthAttr}" height="${heightAttr}">${defsContent}${mainContent}</svg>`;
   }
 
   toElement() {
