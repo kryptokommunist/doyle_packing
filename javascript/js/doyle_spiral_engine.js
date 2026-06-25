@@ -611,47 +611,65 @@ function patternAnimationSpiralArmSweep(context, opts = {}) {
  * lighting the groups that were skipped on the way up.
  * All groups outside the active ring are OFF.
  */
+function _zigzagDetectP(sortedByRadius) {
+  if (sortedByRadius.length < 4) return 2;
+  const angDist = (a, b) => { const d = Math.abs(a - b); return Math.min(d, 2 * Math.PI - d); };
+  const testCount = Math.min(10, Math.floor(sortedByRadius.length / 20));
+  const startOffset = Math.floor(sortedByRadius.length * 0.1);
+  let bestP = 2, bestScore = Infinity;
+  for (let p = 2; p <= 20; p++) {
+    if (startOffset + p * testCount >= sortedByRadius.length) break;
+    let total = 0;
+    for (let t = 0; t < testCount; t++) {
+      const i = startOffset + t * 3;
+      total += angDist(sortedByRadius[i].theta, sortedByRadius[i + p].theta);
+    }
+    if (total < bestScore) { bestScore = total; bestP = p; }
+  }
+  return bestP;
+}
+
+function _zigzagBuildBands(context) {
+  const metas = context.metaList.filter(m => m.ringIndex >= 0);
+  if (!metas.length) return { bands: [], p: 2 };
+  const sorted = metas.slice().sort((a, b) => a.radius - b.radius);
+  const p = _zigzagDetectP(sorted);
+  const bands = [];
+  for (let i = 0; i < sorted.length; i += p) {
+    const band = sorted.slice(i, i + p);
+    // Sort within band by angle for consistent every-2nd selection
+    band.sort((a, b) => a.theta - b.theta);
+    bands.push(band);
+  }
+  return { bands, p };
+}
+
 function patternAnimationZigzagSnake(context, opts = {}) {
   const assignments = new Map();
   const baseAngle = Number.isFinite(opts.baseAngle) ? opts.baseAngle : 0;
 
-  const { sortedRings, ringMap } = context;
-  if (!sortedRings.length) return assignments;
-
-  // First ring with the modal (= p) group count — skip smaller inner rings.
-  const sizeCounts = new Map();
-  for (const ri of sortedRings) {
-    const cnt = (ringMap.get(ri) || []).length;
-    sizeCounts.set(cnt, (sizeCounts.get(cnt) || 0) + 1);
-  }
-  let n = 2, bestFreq = 0;
-  for (const [cnt, freq] of sizeCounts) {
-    if (freq > bestFreq || (freq === bestFreq && cnt > n)) { bestFreq = freq; n = cnt; }
-  }
-  const seedRingPos = sortedRings.findIndex(ri => (ringMap.get(ri) || []).length === n);
-  const workingRings = sortedRings.slice(seedRingPos < 0 ? 0 : seedRingPos);
+  const { bands } = _zigzagBuildBands(context);
+  if (!bands.length) return assignments;
 
   // Build frame steps: outward pass then inward return pass.
-  // Each step: { ringIndex, offset } — light every 2nd group starting at offset.
+  // Each step activates every 2nd group in the band, alternating offset each layer.
   const frameSteps = [];
-  for (let i = 0; i < workingRings.length; i++) {
-    frameSteps.push({ ringIndex: workingRings[i], offset: i % 2 });
+  for (let i = 0; i < bands.length; i++) {
+    frameSteps.push({ band: bands[i], offset: i % 2 });
   }
-  // Return pass: same rings in reverse, opposite offset, skipping the outermost (already done).
-  for (let i = workingRings.length - 2; i >= 0; i--) {
-    frameSteps.push({ ringIndex: workingRings[i], offset: (i + 1) % 2 });
+  for (let i = bands.length - 2; i >= 0; i--) {
+    frameSteps.push({ band: bands[i], offset: (i + 1) % 2 });
   }
 
   const totalSteps = frameSteps.length;
   const activeStep = Math.min(Math.floor(opts.phaseOffset * totalSteps), totalSteps - 1);
-  const { ringIndex: activeRing, offset: activeOffset } = frameSteps[activeStep];
+  const { band: activeBand, offset: activeOffset } = frameSteps[activeStep];
 
-  const activeMetas = (ringMap.get(activeRing) || []).slice().sort((a, b) => a.theta - b.theta);
   const activeIds = new Set(
-    activeMetas.filter((_, i) => i % 2 === activeOffset).map(m => m.id)
+    activeBand.filter((_, i) => i % 2 === activeOffset).map(m => m.id)
   );
 
-  const angle = activeRing * 12 + activeStep * baseAngle;
+  const angle = activeStep * 12 + baseAngle;
   context.metaList.forEach(meta => {
     if (activeIds.has(meta.id)) {
       assignments.set(meta.id, { primaryAngle: angle, angles: [angle] });
@@ -664,21 +682,8 @@ function patternAnimationZigzagSnake(context, opts = {}) {
 }
 
 function zigzagSnakeStepCount(context) {
-  const { sortedRings, ringMap } = context;
-  if (!sortedRings.length) return null;
-  const sizeCounts = new Map();
-  for (const ri of sortedRings) {
-    const cnt = (ringMap.get(ri) || []).length;
-    sizeCounts.set(cnt, (sizeCounts.get(cnt) || 0) + 1);
-  }
-  let n = 2, bestFreq = 0;
-  for (const [cnt, freq] of sizeCounts) {
-    if (freq > bestFreq || (freq === bestFreq && cnt > n)) { bestFreq = freq; n = cnt; }
-  }
-  const seedRingPos = sortedRings.findIndex(ri => (ringMap.get(ri) || []).length === n);
-  const workingRings = sortedRings.slice(seedRingPos < 0 ? 0 : seedRingPos);
-  // outward pass + inward return (outermost ring not duplicated)
-  return workingRings.length > 0 ? workingRings.length * 2 - 1 : 1;
+  const { bands } = _zigzagBuildBands(context);
+  return bands.length > 0 ? bands.length * 2 - 1 : 1;
 }
 
 const PATTERN_ANIMATION_DEFINITIONS = {
