@@ -648,28 +648,33 @@ function patternAnimationZigzagSnake(context, opts = {}) {
   const assignments = new Map();
   const baseAngle = Number.isFinite(opts.baseAngle) ? opts.baseAngle : 0;
 
-  const { bands } = _zigzagBuildBands(context);
+  const { bands, p } = _zigzagBuildBands(context);
   if (!bands.length) return assignments;
 
-  // Build frame steps: outward pass then inward return pass.
-  // Each step activates every 2nd group in the band, alternating offset each layer.
-  const frameSteps = [];
-  for (let i = 0; i < bands.length; i++) {
-    frameSteps.push({ band: bands[i], offset: i % 2 });
-  }
-  for (let i = bands.length - 2; i >= 0; i--) {
-    frameSteps.push({ band: bands[i], offset: (i + 1) % 2 });
-  }
-
-  const totalSteps = frameSteps.length;
+  // Window width: show p consecutive bands at once so the snake is visually prominent.
+  // Within each band, activate every 2nd group (alternating offset per band).
+  const window = Math.max(1, p);
+  const totalSteps = bands.length;
   const activeStep = Math.min(Math.floor(opts.phaseOffset * totalSteps), totalSteps - 1);
-  const { band: activeBand, offset: activeOffset } = frameSteps[activeStep];
 
-  const activeIds = new Set(
-    activeBand.filter((_, i) => i % 2 === activeOffset).map(m => m.id)
-  );
+  // Forward pass outward, return pass inward — ping-pong over band positions.
+  // activeStep maps to a "lead band" index; show window bands behind the lead.
+  const isReturn = opts.phaseOffset >= 0.5;
+  const leadIdx = isReturn ? totalSteps - 1 - Math.floor((opts.phaseOffset - 0.5) * 2 * totalSteps) : activeStep;
+  const clampedLead = Math.max(0, Math.min(totalSteps - 1, leadIdx));
 
-  const angle = activeStep * 12 + baseAngle;
+  const activeIds = new Set();
+  for (let w = 0; w < window; w++) {
+    const bandIdx = clampedLead - w;
+    if (bandIdx < 0) break;
+    const band = bands[bandIdx];
+    const offset = bandIdx % 2;
+    for (let i = 0; i < band.length; i++) {
+      if (i % 2 === offset) activeIds.add(band[i].id);
+    }
+  }
+
+  const angle = baseAngle + clampedLead * 3;
   context.metaList.forEach(meta => {
     if (activeIds.has(meta.id)) {
       assignments.set(meta.id, { primaryAngle: angle, angles: [angle] });
@@ -683,7 +688,7 @@ function patternAnimationZigzagSnake(context, opts = {}) {
 
 function zigzagSnakeStepCount(context) {
   const { bands } = _zigzagBuildBands(context);
-  return bands.length > 0 ? bands.length * 2 - 1 : 1;
+  return bands.length > 0 ? bands.length : 1;
 }
 
 const PATTERN_ANIMATION_DEFINITIONS = {
@@ -1661,9 +1666,14 @@ class ArcGroup {
   }
 
   _getPatternSegments(spacing, angleDeg, offset) {
-    // Symmetric optimization: if this is a clone, rotate master's pattern segments
+    // Symmetric optimization: if this is a clone, rotate master's pattern segments.
+    // We want the clone's lines to be at absolute angle `angleDeg` in world space.
+    // The clone rotation will add `_rotationCache.angle` (radians) to the master's
+    // world-space result, so ask the master for `angleDeg - deltaDeg` so the
+    // rotation brings it back to `angleDeg`.
     if (this.cloneOf && this._rotationCache) {
-      const masterSegments = this.cloneOf._getPatternSegments(spacing, angleDeg, offset);
+      const deltaDeg = this._rotationCache.angle * (180 / Math.PI);
+      const masterSegments = this.cloneOf._getPatternSegments(spacing, angleDeg - deltaDeg, offset);
       if (masterSegments && masterSegments.length > 0) {
         const { cos, sin } = this._rotationCache;
         const rotated = [];
