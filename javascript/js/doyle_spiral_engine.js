@@ -716,15 +716,19 @@ function patternAnimationZigzagSnake(context, opts = {}) {
   });
 
   const totalSteps = frameSteps.length || 1;
-  const activeStep = Math.floor(opts.phaseOffset * totalSteps);
+  // phaseOffset 0→1 selects which step is the active "wave front".
+  const activeStep = Math.min(Math.floor(opts.phaseOffset * totalSteps), totalSteps - 1);
 
   context.metaList.forEach(meta => {
-    const step = stepOf.get(meta.id) ?? 0;
-    // Distance from active step (wrap-safe).
-    const dist = Math.abs(step - activeStep);
-    // Angle encodes visit order; active step gets a distinctive offset via phaseShift.
-    const angle = step * 12 + meta.ringIndex * baseAngle + phaseShift;
-    assignments.set(meta.id, { primaryAngle: angle, angles: [angle] });
+    const step = stepOf.get(meta.id) ?? -1;
+    if (step === activeStep) {
+      // This group is in the active wave front — render with a hatch angle.
+      const angle = step * 12 + meta.ringIndex * baseAngle + phaseShift;
+      assignments.set(meta.id, { primaryAngle: angle, angles: [angle] });
+    } else {
+      // All other groups are OFF (deactivated).
+      assignments.set(meta.id, { primaryAngle: 0, angles: [] });
+    }
   });
 
   return assignments;
