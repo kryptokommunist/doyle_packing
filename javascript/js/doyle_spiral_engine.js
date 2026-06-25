@@ -1364,6 +1364,7 @@ class ArcGroup {
     this.primaryPatternAngle = 0;
     this.cloneOf = null; // Reference to master group for symmetric optimization
     this._rotationCache = null; // Cache for rotation parameters (cos, sin, angle)
+    this.outerArc = null; // Arc from the invisible outer circle that closes the outer edge
   }
 
   addArc(arc) {
@@ -3273,7 +3274,7 @@ class DoyleSpiralEngine {
       distances.sort((a, b) => a.dist - b.dist);
 
       // The innermost arc (distances[0]) is the outer boundary of the adjacent visible
-      // circle group. Add it to that group so getClosedOutline() includes it.
+      // circle group. Store it on that group so the outline can include it.
       if (distances.length > 0) {
         const { i: innerI, j: innerJ } = distances[0];
         // Find the visible circle that shares both intersection endpoints of this arc.
@@ -3285,7 +3286,7 @@ class DoyleSpiralEngine {
           const ownerGroup = this.arcGroups.get(ownerKey);
           if (ownerGroup) {
             const steps = estimateArcSteps(circle, pts[innerI], pts[innerJ]);
-            ownerGroup.addArc(new ArcElement(circle, pts[innerI], pts[innerJ], steps, true));
+            ownerGroup.outerArc = new ArcElement(circle, pts[innerI], pts[innerJ], steps, true);
           }
         }
       }
@@ -3647,9 +3648,12 @@ class DoyleSpiralEngine {
         if (group.ringIndex !== maxIndex) {
           continue;
         }
-        const outline = group.getClosedOutline();
-        if (outline && outline.length >= 2) {
-          context.drawPolyline(outline, { color: '#ff0000', width: highlightStrokeWidth, close: true });
+        // Own arcs (indices 0-3) plus the outer arc from the invisible outer circle
+        const highlightArcs = group.arcs.slice(0, 4);
+        if (group.outerArc) highlightArcs.push(group.outerArc);
+        const paths = buildContinuousPathsFromArcs(highlightArcs);
+        for (const path of paths) {
+          context.drawPolyline(path, { color: '#ff0000', width: highlightStrokeWidth });
         }
       }
     }
