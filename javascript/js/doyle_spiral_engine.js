@@ -3309,11 +3309,17 @@ class DoyleSpiralEngine {
         }
         this.arcGroups.get(key).addArc(arc);
       }
-      if (arcsForCircle.length && !addFillPattern && drawGroupOutline) {
+      if (arcsForCircle.length && (redOutline || (!addFillPattern && drawGroupOutline))) {
         const paths = buildContinuousPathsFromArcs(arcsForCircle);
-        if (outlineStrokeWidth > 0) {
+        const shouldDrawBaseOutline = !addFillPattern && drawGroupOutline && outlineStrokeWidth > 0;
+        if (shouldDrawBaseOutline) {
           for (const path of paths) {
             context.drawPolyline(path, { color: DEFAULT_OUTLINE_COLOR, width: outlineStrokeWidth });
+          }
+        }
+        if (redOutline && highlightStrokeWidth > 0) {
+          for (const path of paths) {
+            context.drawPolyline(path, { color: '#ff0000', width: highlightStrokeWidth });
           }
         }
       }
@@ -3476,6 +3482,7 @@ class DoyleSpiralEngine {
     context.setNormalizationScaleFromOuterCircles(this.outerCircles);
     this.fillPatternAngle = fillPatternAngle;
     this.fillPatternAnimationId = normalisePatternAnimationId(fillPatternAnimation);
+    this.fillPatternSpacing = fillPatternSpacing;
     this.arcGroups.clear();
     this._ringTemplates = new Map();
 
@@ -3642,8 +3649,12 @@ class DoyleSpiralEngine {
         if (group.ringIndex !== maxIndex) {
           continue;
         }
-        const highlightArcs = [group.arcs[2], group.arcs[3]].filter(Boolean);
-        if (group.outerArc) highlightArcs.push(group.outerArc);
+        const highlightArcs = [];
+        for (let i = 0; i < group.arcs.length; i += 1) {
+          if (i === 3 || i === 2) {
+            highlightArcs.push(group.arcs[i]);
+          }
+        }
         const paths = buildContinuousPathsFromArcs(highlightArcs);
         for (const path of paths) {
           context.drawPolyline(path, { color: '#ff0000', width: highlightStrokeWidth });
@@ -3760,6 +3771,7 @@ class DoyleSpiralEngine {
       },
       arcgroups: [],
       pattern_animation: this.fillPatternAnimationId || DEFAULT_PATTERN_ANIMATION,
+      fill_pattern_spacing: this.fillPatternSpacing ?? 9,
     };
     for (const [key, group] of this.arcGroups.entries()) {
       if (key.startsWith('outer_')) {
