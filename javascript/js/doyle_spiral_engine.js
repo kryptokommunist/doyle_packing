@@ -3635,6 +3635,13 @@ class DoyleSpiralEngine {
 
     if (redOutline && maxIndex !== null) {
       context.setActiveLayer(getRingLayerIndex(maxIndex));
+      // Build a set of circle IDs that belong to the outermost ring, for filtering neighbour arcs
+      const outermostCircleIds = new Set();
+      for (const [key, group] of this.arcGroups.entries()) {
+        if (key.startsWith('circle_') && group.ringIndex === maxIndex && group.baseCircle) {
+          outermostCircleIds.add(group.baseCircle.id);
+        }
+      }
       for (const [key, group] of this.arcGroups.entries()) {
         if (!key.startsWith('circle_')) {
           continue;
@@ -3642,8 +3649,15 @@ class DoyleSpiralEngine {
         if (group.ringIndex !== maxIndex) {
           continue;
         }
-        // Own arcs (indices 0-3) plus the outer arc from the invisible outer circle
-        const highlightArcs = group.arcs.slice(0, 4);
+        // arcs[2] and arcs[3]: the cell's own outer-facing arcs
+        // neighbour arcs (indices 4+) from inner-ring circles (not outermost)
+        // outerArc: arc from the invisible outer circle closing the outer edge
+        const highlightArcs = [group.arcs[2], group.arcs[3]].filter(Boolean);
+        for (let i = 4; i < group.arcs.length; i++) {
+          if (!outermostCircleIds.has(group.arcs[i].circle?.id)) {
+            highlightArcs.push(group.arcs[i]);
+          }
+        }
         if (group.outerArc) highlightArcs.push(group.outerArc);
         const paths = buildContinuousPathsFromArcs(highlightArcs);
         for (const path of paths) {
