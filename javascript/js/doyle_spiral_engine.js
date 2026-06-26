@@ -641,6 +641,8 @@ function _zigzagBuildBands(context) {
     band.sort((a, b) => a.theta - b.theta);
     bands.push(band);
   }
+  // Outermost bands first so the animation starts at the visible (large-radius) end
+  bands.reverse();
   return { bands, p };
 }
 
