@@ -102,6 +102,7 @@ let lastRender = null;
 let animationFrames = []; // Array of frame definitions for cellular automaton
 let selectedSeeds = new Set(); // Set of group IDs selected as initial seeds
 let animatorContext = null; // Cached pattern animation context for animator
+let animatorEngine = null;  // Engine used to build the animator preview (reused for manual renders)
 let animatorMode = 'ca'; // 'ca' | 'manual'
 let manualFrames = [{ activeIds: new Set(), angle: null }]; // Manual animator frames
 let activeManualFrameIndex = 0; // Currently edited manual frame
@@ -1359,49 +1360,24 @@ function loadManualAnimation() {
     return;
   }
 
-  // Ensure animatorContext is available (built by makeAnimatorSvgInteractive)
-  if (!animatorContext) {
+  // Ensure the interactive preview has been built (provides animatorContext + animatorEngine)
+  if (!animatorContext || !animatorEngine) {
     makeAnimatorSvgInteractive();
   }
-  if (!animatorContext) {
+  if (!animatorContext || !animatorEngine) {
     setStatus('Preview not loaded — click Refresh Preview first', 'error');
     return;
   }
 
   const params = collectParams();
-  params.add_fill_pattern = true;
 
-  // Re-render fresh to get fill-pattern geometry, using same params
-  const result = renderSpiral(params);
-  if (!result || !result.engine || !result.engine.arcGroups) {
-    setStatus('Failed to generate geometry for animation', 'error');
-    return;
-  }
-
-  // Map: animatorContext group names → fresh render group names by matching ring topology.
-  // Both renders use the same spiral params so ring topology is identical. The group names
-  // differ only because CIRCLE_ID keeps counting up between renders. We match by position:
-  // sort both metaLists by (ringIndex, theta) and pair them up.
-  const freshContext = buildPatternAnimationContext(result.engine.arcGroups);
-  const sortKey = m => `${String(m.ringIndex).padStart(6,'0')}_${m.theta.toFixed(8)}`;
-  const sortedOld = [...animatorContext.metaList].sort((a, b) => sortKey(a) < sortKey(b) ? -1 : 1);
-  const sortedNew = [...freshContext.metaList].sort((a, b) => sortKey(a) < sortKey(b) ? -1 : 1);
-
-  // Build: old group name → new group name
-  const oldToNew = new Map();
-  const len = Math.min(sortedOld.length, sortedNew.length);
-  for (let i = 0; i < len; i++) {
-    oldToNew.set(sortedOld[i].group.name, sortedNew[i].group.name);
-  }
-
+  // Build overrides directly from animatorContext group names — no re-render needed,
+  // we reuse the same engine so group names are exactly consistent with what the user clicked.
   const angle = frame.angle != null ? frame.angle : 45;
   const arcGroupAngleOverrides = new Map();
-  for (const meta of freshContext.metaList) {
-    arcGroupAngleOverrides.set(meta.group.name, []);
-  }
-  for (const oldName of frame.activeIds) {
-    const newName = oldToNew.get(oldName);
-    if (newName) arcGroupAngleOverrides.set(newName, [angle]);
+  for (const meta of animatorContext.metaList) {
+    const name = meta.group.name;
+    arcGroupAngleOverrides.set(name, frame.activeIds.has(name) ? [angle] : []);
   }
 
   if (!fillToggle.checked) {
@@ -1409,7 +1385,7 @@ function loadManualAnimation() {
     toggleFillSettings();
   }
 
-  const svgResult = result.engine.render('arram_boyle', {
+  const svgResult = animatorEngine.render('arram_boyle', {
     size: params.size,
     debugGroups: false,
     addFillPattern: true,
@@ -1439,18 +1415,16 @@ function loadManualAnimation() {
     if (animatorSvgPreview) {
       animatorSvgPreview.replaceChildren(svgClone);
       animatorSvgPreview.classList.remove('empty-state');
-      // Remap all frame activeIds from old names to new names so future clicks are consistent
-      for (const mf of manualFrames) {
-        const remapped = new Set();
-        for (const oldName of mf.activeIds) {
-          const newName = oldToNew.get(oldName);
-          if (newName) remapped.add(newName);
-        }
-        mf.activeIds = remapped;
+      // Re-add overlay in result-mode: selected cells shown as transparent tint over fill lines
+      const scaleFactor = svgResult.scaleFactor || 1;
+      const overlay = createCellOverlay(animatorContext, svgClone, scaleFactor);
+      if (overlay) {
+        const overlayContainer = document.createElement('div');
+        overlayContainer.className = 'cell-overlay result-mode';
+        overlayContainer.appendChild(overlay);
+        animatorSvgPreview.appendChild(overlayContainer);
+        updateManualSvgHighlights();
       }
-      animatorContext = freshContext;
-      // Don't re-add the cell overlay — show the clean rendered result.
-      // User can click "Refresh Preview" to return to painting mode.
     }
     showSVG(svgResult.svg);
     lastRender = {
@@ -1458,7 +1432,7 @@ function loadManualAnimation() {
       geometry: svgResult.geometry,
       mode: 'arram_boyle',
       svgString: svgResult.svgString,
-      engine: result.engine,
+      engine: animatorEngine,
     };
     updateStats(svgResult.geometry);
     statMode.textContent = 'Manual';
@@ -1847,8 +1821,9 @@ function makeAnimatorSvgInteractive() {
     return;
   }
 
-  // Cache the context for later use
+  // Cache the context and engine for later use
   animatorContext = buildPatternAnimationContext(result.engine.arcGroups);
+  animatorEngine = result.engine;
 
   // Clear existing content
   animatorSvgPreview.innerHTML = '';
@@ -1931,6 +1906,7 @@ function refreshAnimatorPreview() {
     if (existingSvg) existingSvg.remove();
   }
   animatorContext = null;
+  animatorEngine = null;
   makeAnimatorSvgInteractive();
 }
 

@@ -568,6 +568,28 @@
       fill: white;
     }
 
+    /* Result mode: overlay stays on top of fill pattern — unselected cells are invisible */
+    .cell-overlay.result-mode .cell-marker circle {
+      fill: none;
+      stroke: none;
+    }
+
+    .cell-overlay.result-mode .cell-marker text {
+      fill: none;
+    }
+
+    .cell-overlay.result-mode .cell-marker.selected circle {
+      fill: rgba(37, 99, 235, 0.18);
+      stroke: var(--accent);
+      stroke-width: 1.5;
+    }
+
+    .cell-overlay.result-mode .cell-marker:hover circle {
+      fill: rgba(37, 99, 235, 0.25);
+      stroke: var(--accent);
+      stroke-width: 2;
+    }
+
     .animator-settings {
       background: rgba(248, 250, 252, 0.88);
       border-radius: 1.25rem;
@@ -1666,6 +1688,6 @@
 
   <input type="file" id="threeFileInput" accept="application/json" hidden />
 
-  <script type="module" src="./js/app.js?v=3"></script>
+  <script type="module" src="./js/app.js?v=4"></script>
 </body>
 </html>
