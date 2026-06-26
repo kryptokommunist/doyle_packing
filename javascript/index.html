@@ -589,6 +589,91 @@
       font-size: 0.85rem;
     }
 
+    .animator-mode-toggle {
+      display: flex;
+      gap: 0.25rem;
+      margin-top: 0.6rem;
+      background: rgba(148, 163, 184, 0.12);
+      border-radius: 0.6rem;
+      padding: 0.2rem;
+    }
+
+    .animator-mode-btn {
+      flex: 1;
+      padding: 0.35rem 0.6rem;
+      font-size: 0.78rem;
+      font-weight: 600;
+      background: transparent;
+      color: var(--text-muted);
+      border: none;
+      border-radius: 0.45rem;
+      cursor: pointer;
+      box-shadow: none;
+      transition: background 0.15s, color 0.15s;
+    }
+
+    .animator-mode-btn.active {
+      background: white;
+      color: var(--accent);
+      box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+    }
+
+    .manual-frame-nav {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.82rem;
+      font-weight: 600;
+      color: var(--text-strong);
+    }
+
+    .manual-frame-nav span {
+      flex: 1;
+      text-align: center;
+    }
+
+    #manualFrameList {
+      display: flex;
+      flex-direction: column;
+      gap: 0.3rem;
+      max-height: 140px;
+      overflow-y: auto;
+    }
+
+    .manual-frame-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.35rem 0.6rem;
+      border-radius: 0.5rem;
+      border: 1px solid var(--panel-border);
+      background: rgba(255,255,255,0.5);
+      font-size: 0.8rem;
+      cursor: pointer;
+      transition: background 0.12s;
+    }
+
+    .manual-frame-item.active {
+      background: var(--accent-soft);
+      border-color: var(--accent);
+      color: var(--accent);
+      font-weight: 600;
+    }
+
+    .manual-frame-item .frame-cell-count {
+      font-size: 0.72rem;
+      color: var(--text-muted);
+    }
+
+    .manual-frame-item.active .frame-cell-count {
+      color: var(--accent);
+    }
+
+    .manual-frame-angle {
+      display: flex;
+      align-items: center;
+    }
+
     .animator-section {
       display: flex;
       flex-direction: column;
@@ -1500,11 +1585,16 @@
             </div>
             <aside class="animator-settings">
               <div class="animator-header">
-                <h2>Cellular Animator</h2>
-                <p>Define rules for how cells activate their neighbors</p>
+                <h2>Animator</h2>
+                <p>Define cell activations for fill-pattern rendering</p>
+                <div class="animator-mode-toggle">
+                  <button type="button" class="animator-mode-btn active" data-animator-mode="ca">Cellular</button>
+                  <button type="button" class="animator-mode-btn" data-animator-mode="manual">Manual</button>
+                </div>
               </div>
 
-              <div class="animator-section">
+              <!-- CA mode: seed selection -->
+              <div class="animator-section" id="caSeedSection">
                 <div class="animator-section-header">
                   <h3>Initial Seeds</h3>
                   <span class="seed-count" id="seedCount">0 selected</span>
@@ -1519,21 +1609,49 @@
                 <button type="button" class="secondary" id="refreshAnimatorBtn" style="margin-top: 0.5rem; padding: 0.5rem 0.8rem; font-size: 0.8rem;">Refresh Preview</button>
               </div>
 
-              <div class="animator-section">
+              <!-- CA mode: frames & rules -->
+              <div class="animator-section" id="caFramesSection">
                 <h3>Frames &amp; Rules</h3>
                 <p class="animator-hint">Each frame runs its rules in sequence. Drag rules to reorder.</p>
                 <div class="animator-frames" id="animatorFrames">
                   <!-- Frame entries added dynamically -->
                 </div>
-
                 <div class="animator-controls">
                   <button type="button" id="addFrameBtn">+ Add Frame</button>
                   <button type="button" id="clearFramesBtn" class="secondary">Clear All</button>
                 </div>
               </div>
 
+              <!-- Manual mode: frame list -->
+              <div class="animator-section" id="manualFramesSection" hidden>
+                <div class="animator-section-header">
+                  <h3>Manual Frames</h3>
+                  <span class="seed-count" id="manualFrameCount">0 frames</span>
+                </div>
+                <p class="animator-hint">Click cells in the preview to toggle activations for the selected frame.</p>
+                <div class="manual-frame-nav">
+                  <button type="button" class="preset-btn" id="manualPrevFrameBtn">◀</button>
+                  <span id="manualFrameLabel">Frame 1 of 1</span>
+                  <button type="button" class="preset-btn" id="manualNextFrameBtn">▶</button>
+                </div>
+                <div id="manualFrameList">
+                  <!-- Manual frame entries added dynamically -->
+                </div>
+                <div class="animator-controls">
+                  <button type="button" id="addManualFrameBtn">+ Add Frame</button>
+                  <button type="button" id="removeManualFrameBtn" class="secondary">Remove Frame</button>
+                </div>
+                <div class="manual-frame-angle" style="margin-top: 0.5rem;">
+                  <label style="display:flex; align-items:center; gap:0.5rem; font-size:0.8rem;">
+                    Angle°
+                    <input type="number" id="manualFrameAngle" min="0" max="180" step="1" placeholder="auto" style="width:70px; padding:0.3rem 0.5rem; font-size:0.85rem;">
+                  </label>
+                </div>
+                <button type="button" class="secondary" id="refreshManualPreviewBtn" style="margin-top: 0.5rem; padding: 0.5rem 0.8rem; font-size: 0.8rem;">Refresh Preview</button>
+              </div>
+
               <div class="animator-actions">
-                <label class="checkbox-label">
+                <label class="checkbox-label" id="caLoopLabel">
                   <input type="checkbox" id="animatorLoopMode">
                   Loop (forward ↔ reverse)
                 </label>

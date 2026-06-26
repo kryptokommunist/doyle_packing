@@ -38,6 +38,21 @@ const loadAnimationBtn = document.getElementById('loadAnimationBtn');
 const animatorLoopCheckbox = document.getElementById('animatorLoopMode');
 const fillPatternLoopCheckbox = document.getElementById('fillPatternLoop');
 const seedCountEl = document.getElementById('seedCount');
+// Manual animator DOM refs
+const caSeedSection = document.getElementById('caSeedSection');
+const caFramesSection = document.getElementById('caFramesSection');
+const manualFramesSection = document.getElementById('manualFramesSection');
+const manualFrameList = document.getElementById('manualFrameList');
+const manualFrameLabel = document.getElementById('manualFrameLabel');
+const manualFrameCount = document.getElementById('manualFrameCount');
+const manualPrevFrameBtn = document.getElementById('manualPrevFrameBtn');
+const manualNextFrameBtn = document.getElementById('manualNextFrameBtn');
+const addManualFrameBtn = document.getElementById('addManualFrameBtn');
+const removeManualFrameBtn = document.getElementById('removeManualFrameBtn');
+const manualFrameAngle = document.getElementById('manualFrameAngle');
+const refreshManualPreviewBtn = document.getElementById('refreshManualPreviewBtn');
+const caLoopLabel = document.getElementById('caLoopLabel');
+const animatorModeBtns = document.querySelectorAll('.animator-mode-btn');
 const threeStatus = document.getElementById('threeStatus');
 const threeSettingsToggle = document.getElementById('threeSettingsToggle');
 const threeStage = document.getElementById('threeStage');
@@ -87,6 +102,9 @@ let lastRender = null;
 let animationFrames = []; // Array of frame definitions for cellular automaton
 let selectedSeeds = new Set(); // Set of group IDs selected as initial seeds
 let animatorContext = null; // Cached pattern animation context for animator
+let animatorMode = 'ca'; // 'ca' | 'manual'
+let manualFrames = [{ activeIds: new Set(), angle: null }]; // Manual animator frames
+let activeManualFrameIndex = 0; // Currently edited manual frame
 let threeApp = null;
 const workerSupported = typeof Worker !== 'undefined';
 const renderWorkerURL = workerSupported ? new URL('./render_worker.js', import.meta.url) : null;
@@ -1334,7 +1352,131 @@ function runCellularAnimation(context, frames, seedIds, loopMode = false) {
   return activations;
 }
 
+function loadManualAnimation() {
+  const frame = manualFrames[activeManualFrameIndex];
+  if (!frame) {
+    setStatus('No manual frame selected', 'error');
+    return;
+  }
+
+  // Ensure animatorContext is available (built by makeAnimatorSvgInteractive)
+  if (!animatorContext) {
+    makeAnimatorSvgInteractive();
+  }
+  if (!animatorContext) {
+    setStatus('Preview not loaded — click Refresh Preview first', 'error');
+    return;
+  }
+
+  const params = collectParams();
+  params.add_fill_pattern = true;
+
+  // Re-render fresh to get fill-pattern geometry, using same params
+  const result = renderSpiral(params);
+  if (!result || !result.engine || !result.engine.arcGroups) {
+    setStatus('Failed to generate geometry for animation', 'error');
+    return;
+  }
+
+  // Map: animatorContext group names → fresh render group names by matching ring topology.
+  // Both renders use the same spiral params so ring topology is identical. The group names
+  // differ only because CIRCLE_ID keeps counting up between renders. We match by position:
+  // sort both metaLists by (ringIndex, theta) and pair them up.
+  const freshContext = buildPatternAnimationContext(result.engine.arcGroups);
+  const sortKey = m => `${String(m.ringIndex).padStart(6,'0')}_${m.theta.toFixed(8)}`;
+  const sortedOld = [...animatorContext.metaList].sort((a, b) => sortKey(a) < sortKey(b) ? -1 : 1);
+  const sortedNew = [...freshContext.metaList].sort((a, b) => sortKey(a) < sortKey(b) ? -1 : 1);
+
+  // Build: old group name → new group name
+  const oldToNew = new Map();
+  const len = Math.min(sortedOld.length, sortedNew.length);
+  for (let i = 0; i < len; i++) {
+    oldToNew.set(sortedOld[i].group.name, sortedNew[i].group.name);
+  }
+
+  const angle = frame.angle != null ? frame.angle : 45;
+  const arcGroupAngleOverrides = new Map();
+  for (const meta of freshContext.metaList) {
+    arcGroupAngleOverrides.set(meta.group.name, []);
+  }
+  for (const oldName of frame.activeIds) {
+    const newName = oldToNew.get(oldName);
+    if (newName) arcGroupAngleOverrides.set(newName, [angle]);
+  }
+
+  if (!fillToggle.checked) {
+    fillToggle.checked = true;
+    toggleFillSettings();
+  }
+
+  const svgResult = result.engine.render('arram_boyle', {
+    size: params.size,
+    debugGroups: false,
+    addFillPattern: true,
+    fillPatternSpacing: params.fill_pattern_spacing,
+    fillPatternAngle: params.fill_pattern_angle,
+    fillPatternAnimation: params.fill_pattern_animation,
+    arcGroupAngleOverrides,
+    redOutline: params.red_outline,
+    drawGroupOutline: params.draw_group_outline,
+    fillPatternOffset: params.fill_pattern_offset,
+    fillPatternType: params.fill_pattern_type,
+    fillPatternRectWidth: params.fill_pattern_rect_width,
+    highlightRimWidth: params.highlight_rim_width,
+    groupOutlineWidth: params.group_outline_width,
+    patternStrokeWidth: params.pattern_stroke_width,
+    boundingBoxWidth: params.bounding_box_width_mm,
+    boundingBoxHeight: params.bounding_box_height_mm,
+    lengthUnits: 'mm',
+    useSymmetric: params.use_symmetric,
+  });
+
+  if (svgResult && svgResult.svg) {
+    const svgClone = svgResult.svg.cloneNode(true);
+    svgClone.setAttribute('width', '100%');
+    svgClone.setAttribute('height', '100%');
+    svgClone.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+    if (animatorSvgPreview) {
+      animatorSvgPreview.replaceChildren(svgClone);
+      animatorSvgPreview.classList.remove('empty-state');
+      // Remap all frame activeIds from old names to new names so future clicks are consistent
+      for (const mf of manualFrames) {
+        const remapped = new Set();
+        for (const oldName of mf.activeIds) {
+          const newName = oldToNew.get(oldName);
+          if (newName) remapped.add(newName);
+        }
+        mf.activeIds = remapped;
+      }
+      animatorContext = freshContext;
+      // Don't re-add the cell overlay — show the clean rendered result.
+      // User can click "Refresh Preview" to return to painting mode.
+    }
+    showSVG(svgResult.svg);
+    lastRender = {
+      params,
+      geometry: svgResult.geometry,
+      mode: 'arram_boyle',
+      svgString: svgResult.svgString,
+      engine: result.engine,
+    };
+    updateStats(svgResult.geometry);
+    statMode.textContent = 'Manual';
+    setStatus(`Manual frame ${activeManualFrameIndex + 1} loaded — ${frame.activeIds.size} cells active.`);
+    updateExportAvailability(true);
+    if (threeApp && svgResult.geometry) {
+      threeApp.useGeometryFromPayload(params, svgResult.geometry);
+    }
+  }
+}
+
+
 function loadAnimation() {
+  if (animatorMode === 'manual') {
+    loadManualAnimation();
+    return;
+  }
+
   const frames = collectFramesAndRules();
 
   if (!frames.length) {
@@ -1671,6 +1813,7 @@ function createCellOverlay(context, svgEl, scaleFactor) {
     const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
     g.classList.add('cell-marker');
     g.dataset.groupId = meta.id;
+    g.dataset.groupName = meta.group.name;
 
     const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
     circle.setAttribute('cx', cx);
@@ -1746,7 +1889,11 @@ function makeAnimatorSvgInteractive() {
     }
   }
 
-  updateSvgSeedHighlights();
+  if (animatorMode === 'manual') {
+    updateManualSvgHighlights();
+  } else {
+    updateSvgSeedHighlights();
+  }
 }
 
 function selectSeedsByPreset(preset) {
@@ -1787,12 +1934,18 @@ function refreshAnimatorPreview() {
   makeAnimatorSvgInteractive();
 }
 
-// Handle clicks on animator SVG for seed selection
+// Handle clicks on animator SVG for seed selection (CA) or cell toggle (Manual)
 if (animatorSvgPreview) {
   animatorSvgPreview.addEventListener('click', event => {
     const marker = event.target.closest('.cell-marker');
-    if (marker && marker.dataset.groupId) {
-      toggleSeedSelection(marker.dataset.groupId);
+    if (marker) {
+      if (animatorMode === 'manual') {
+        const name = marker.dataset.groupName;
+        if (name) toggleManualCell(name);
+      } else {
+        const groupId = marker.dataset.groupId;
+        if (groupId) toggleSeedSelection(groupId);
+      }
     }
   });
 }
@@ -1810,6 +1963,133 @@ const refreshAnimatorBtn = document.getElementById('refreshAnimatorBtn');
 if (refreshAnimatorBtn) {
   refreshAnimatorBtn.addEventListener('click', refreshAnimatorPreview);
 }
+
+// ============================================================
+// Manual Animator
+// ============================================================
+
+function switchAnimatorMode(mode) {
+  animatorMode = mode;
+  animatorModeBtns.forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.animatorMode === mode);
+  });
+  const isManual = mode === 'manual';
+  if (caSeedSection) caSeedSection.hidden = isManual;
+  if (caFramesSection) caFramesSection.hidden = isManual;
+  if (manualFramesSection) manualFramesSection.hidden = !isManual;
+  if (caLoopLabel) caLoopLabel.hidden = isManual;
+  // Refresh the SVG preview so clicking cells targets the right handler
+  refreshAnimatorPreview();
+}
+
+animatorModeBtns.forEach(btn => {
+  btn.addEventListener('click', () => switchAnimatorMode(btn.dataset.animatorMode));
+});
+
+function renderManualFrameList() {
+  if (!manualFrameList) return;
+  manualFrameList.innerHTML = '';
+  manualFrames.forEach((frame, idx) => {
+    const item = document.createElement('div');
+    item.className = 'manual-frame-item' + (idx === activeManualFrameIndex ? ' active' : '');
+    item.dataset.frameIdx = idx;
+    item.innerHTML = `<span>Frame ${idx + 1}</span><span class="frame-cell-count">${frame.activeIds.size} cells</span>`;
+    item.addEventListener('click', () => selectManualFrame(idx));
+    manualFrameList.appendChild(item);
+  });
+  if (manualFrameLabel) {
+    manualFrameLabel.textContent = `Frame ${activeManualFrameIndex + 1} of ${manualFrames.length}`;
+  }
+  if (manualFrameCount) {
+    manualFrameCount.textContent = `${manualFrames.length} frame${manualFrames.length !== 1 ? 's' : ''}`;
+  }
+  // Sync angle input
+  const currentFrame = manualFrames[activeManualFrameIndex];
+  if (manualFrameAngle) {
+    manualFrameAngle.value = currentFrame?.angle != null ? currentFrame.angle : '';
+  }
+}
+
+function selectManualFrame(idx) {
+  if (idx < 0 || idx >= manualFrames.length) return;
+  activeManualFrameIndex = idx;
+  renderManualFrameList();
+  updateManualSvgHighlights();
+}
+
+function updateManualSvgHighlights() {
+  if (!animatorSvgPreview) return;
+  const frame = manualFrames[activeManualFrameIndex];
+  if (!frame) return;
+  const markers = animatorSvgPreview.querySelectorAll('.cell-marker');
+  markers.forEach(marker => {
+    const name = marker.dataset.groupName;
+    if (name) {
+      marker.classList.toggle('selected', frame.activeIds.has(name));
+    }
+  });
+}
+
+function toggleManualCell(groupId) {
+  const frame = manualFrames[activeManualFrameIndex];
+  if (!frame) return;
+  if (frame.activeIds.has(groupId)) {
+    frame.activeIds.delete(groupId);
+  } else {
+    frame.activeIds.add(groupId);
+  }
+  renderManualFrameList();
+  updateManualSvgHighlights();
+}
+
+if (addManualFrameBtn) {
+  addManualFrameBtn.addEventListener('click', () => {
+    manualFrames.push({ activeIds: new Set(), angle: null });
+    activeManualFrameIndex = manualFrames.length - 1;
+    renderManualFrameList();
+    updateManualSvgHighlights();
+  });
+}
+
+if (removeManualFrameBtn) {
+  removeManualFrameBtn.addEventListener('click', () => {
+    if (manualFrames.length <= 1) return;
+    manualFrames.splice(activeManualFrameIndex, 1);
+    activeManualFrameIndex = Math.min(activeManualFrameIndex, manualFrames.length - 1);
+    renderManualFrameList();
+    updateManualSvgHighlights();
+  });
+}
+
+if (manualPrevFrameBtn) {
+  manualPrevFrameBtn.addEventListener('click', () => {
+    selectManualFrame((activeManualFrameIndex - 1 + manualFrames.length) % manualFrames.length);
+  });
+}
+
+if (manualNextFrameBtn) {
+  manualNextFrameBtn.addEventListener('click', () => {
+    selectManualFrame((activeManualFrameIndex + 1) % manualFrames.length);
+  });
+}
+
+if (manualFrameAngle) {
+  manualFrameAngle.addEventListener('input', () => {
+    const frame = manualFrames[activeManualFrameIndex];
+    if (!frame) return;
+    const val = manualFrameAngle.value.trim();
+    frame.angle = val === '' ? null : Number(val);
+  });
+}
+
+if (refreshManualPreviewBtn) {
+  refreshManualPreviewBtn.addEventListener('click', () => {
+    refreshAnimatorPreview();
+  });
+}
+
+// Initialize manual frame list
+renderManualFrameList();
 
 // Initialize animator SVG when switching to animator view
 let animatorInitialized = false;
